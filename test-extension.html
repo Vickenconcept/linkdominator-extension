@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LinkDominator Extension Test</title>
+    <link rel="stylesheet" href="css/library/bootstrap.css">
+    <link rel="stylesheet" href="css/library/font-awesome.css">
+    <link rel="stylesheet" href="css/app.css">
+    <style>
+        body {
+            padding: 20px;
+            background-color: #f8f9fa;
+        }
+        .test-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.1);
+        }
+        .test-section {
+            margin-bottom: 30px;
+            padding: 20px;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+        }
+        .test-section h3 {
+            color: #007bff;
+            margin-bottom: 15px;
+        }
+        .debug-info {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 12px;
+            margin: 10px 0;
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        .status-success { background-color: #28a745; }
+        .status-error { background-color: #dc3545; }
+        .status-warning { background-color: #ffc107; }
+        .status-info { background-color: #17a2b8; }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1 class="text-center mb-4">
+            <i class="fas fa-bug"></i> LinkDominator Extension Test
+        </h1>
+        
+        <div class="test-section">
+            <h3><i class="fas fa-cog"></i> Configuration Test</h3>
+            <div id="config-status"></div>
+            <div class="debug-info" id="config-debug"></div>
+        </div>
+
+        <div class="test-section">
+            <h3><i class="fas fa-network-wired"></i> API Connection Test</h3>
+            <button class="btn btn-primary" onclick="testApiConnection()">
+                <i class="fas fa-play"></i> Test API Connection
+            </button>
+            <div id="api-status"></div>
+            <div class="debug-info" id="api-debug"></div>
+        </div>
+
+        <div class="test-section">
+            <h3><i class="fas fa-users"></i> Audience Management Test</h3>
+            <button class="btn btn-success" onclick="testAudienceList()">
+                <i class="fas fa-list"></i> Test Audience List
+            </button>
+            <button class="btn btn-info" onclick="testAudienceCreation()">
+                <i class="fas fa-plus"></i> Test Audience Creation
+            </button>
+            <div id="audience-status"></div>
+            <div class="debug-info" id="audience-debug"></div>
+        </div>
+
+        <div class="test-section">
+            <h3><i class="fas fa-terminal"></i> Console Logs</h3>
+            <button class="btn btn-secondary" onclick="clearLogs()">
+                <i class="fas fa-trash"></i> Clear Logs
+            </button>
+            <div class="debug-info" id="console-logs" style="max-height: 300px; overflow-y: auto;"></div>
+        </div>
+    </div>
+
+    <!-- Load extension scripts -->
+    <script src="js/library/jquery.js"></script>
+    <script src="js/library/bootstrap.js"></script>
+    <script src="js/library/fontawesome5.js"></script>
+    <script src="env.js"></script>
+    <script src="js/appConfig.js"></script>
+    <script src="js/helper.js"></script>
+    <script src="js/forms/audienceManageForm.js"></script>
+    <script src="js/actions/audienceCreationAction.js"></script>
+
+    <script>
+        // Override console.log to capture logs
+        const originalLog = console.log;
+        const originalError = console.error;
+        const logs = [];
+
+        console.log = function(...args) {
+            logs.push({ type: 'log', message: args.join(' '), timestamp: new Date() });
+            updateLogDisplay();
+            originalLog.apply(console, args);
+        };
+
+        console.error = function(...args) {
+            logs.push({ type: 'error', message: args.join(' '), timestamp: new Date() });
+            updateLogDisplay();
+            originalError.apply(console, args);
+        };
+
+        function updateLogDisplay() {
+            const logContainer = document.getElementById('console-logs');
+            logContainer.innerHTML = logs.map(log => 
+                `<div style="color: ${log.type === 'error' ? '#dc3545' : '#007bff'}">
+                    [${log.timestamp.toLocaleTimeString()}] ${log.message}
+                </div>`
+            ).join('');
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+
+        function clearLogs() {
+            logs.length = 0;
+            updateLogDisplay();
+        }
+
+        // Test configuration
+        function testConfiguration() {
+            const configStatus = document.getElementById('config-status');
+            const configDebug = document.getElementById('config-debug');
+            
+            let status = '<div class="status-indicator status-success"></div>Configuration loaded successfully';
+            let debug = '';
+
+            try {
+                debug += `PLATFROM_URL: ${typeof PLATFROM_URL !== 'undefined' ? PLATFROM_URL : 'UNDEFINED'}\n`;
+                debug += `LINKEDIN_URL: ${typeof LINKEDIN_URL !== 'undefined' ? LINKEDIN_URL : 'UNDEFINED'}\n`;
+                debug += `filterApi: ${typeof filterApi !== 'undefined' ? filterApi : 'UNDEFINED'}\n`;
+                debug += `voyagerApi: ${typeof voyagerApi !== 'undefined' ? voyagerApi : 'UNDEFINED'}\n`;
+
+                if (typeof PLATFROM_URL === 'undefined' || typeof filterApi === 'undefined') {
+                    status = '<div class="status-indicator status-error"></div>Configuration missing';
+                }
+            } catch (error) {
+                status = '<div class="status-indicator status-error"></div>Configuration error: ' + error.message;
+            }
+
+            configStatus.innerHTML = status;
+            configDebug.textContent = debug;
+        }
+
+        // Test API connection
+        async function testApiConnection() {
+            const apiStatus = document.getElementById('api-status');
+            const apiDebug = document.getElementById('api-debug');
+            
+            apiStatus.innerHTML = '<div class="status-indicator status-info"></div>Testing API connection...';
+            apiDebug.textContent = '';
+
+            try {
+                const response = await fetch(`${filterApi}/accessCheck`, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const data = await response.json();
+                
+                if (response.ok) {
+                    apiStatus.innerHTML = '<div class="status-indicator status-success"></div>API connection successful';
+                    apiDebug.textContent = `Status: ${response.status}\nResponse: ${JSON.stringify(data, null, 2)}`;
+                } else {
+                    apiStatus.innerHTML = '<div class="status-indicator status-error"></div>API connection failed';
+                    apiDebug.textContent = `Status: ${response.status}\nError: ${JSON.stringify(data, null, 2)}`;
+                }
+            } catch (error) {
+                apiStatus.innerHTML = '<div class="status-indicator status-error"></div>API connection error';
+                apiDebug.textContent = `Error: ${error.message}\n\nThis could be due to:\n- Backend server is down\n- CORS issues\n- Network connectivity problems\n- Invalid API endpoint`;
+            }
+        }
+
+        // Test audience list
+        async function testAudienceList() {
+            const audienceStatus = document.getElementById('audience-status');
+            const audienceDebug = document.getElementById('audience-debug');
+            
+            audienceStatus.innerHTML = '<div class="status-indicator status-info"></div>Testing audience list...';
+            audienceDebug.textContent = '';
+
+            try {
+                // Mock LinkedIn ID for testing
+                const mockLinkedInId = 'test-user-123';
+                
+                const response = await fetch(`${filterApi}/audience?linkedinId=${mockLinkedInId}`, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const data = await response.json();
+                
+                if (response.ok) {
+                    audienceStatus.innerHTML = '<div class="status-indicator status-success"></div>Audience list API working';
+                    audienceDebug.textContent = `Status: ${response.status}\nResponse: ${JSON.stringify(data, null, 2)}`;
+                } else {
+                    audienceStatus.innerHTML = '<div class="status-indicator status-error"></div>Audience list API failed';
+                    audienceDebug.textContent = `Status: ${response.status}\nError: ${JSON.stringify(data, null, 2)}`;
+                }
+            } catch (error) {
+                audienceStatus.innerHTML = '<div class="status-indicator status-error"></div>Audience list error';
+                audienceDebug.textContent = `Error: ${error.message}`;
+            }
+        }
+
+        // Test audience creation
+        async function testAudienceCreation() {
+            const audienceStatus = document.getElementById('audience-status');
+            const audienceDebug = document.getElementById('audience-debug');
+            
+            audienceStatus.innerHTML = '<div class="status-indicator status-info"></div>Testing audience creation...';
+            audienceDebug.textContent = '';
+
+            try {
+                const testData = {
+                    audienceName: "Test Audience",
+                    audienceId: "test-audience-123",
+                    linkedInId: "test-user-123",
+                    audienceType: "test"
+                };
+
+                const response = await fetch(`${filterApi}/audience`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(testData)
+                });
+
+                const data = await response.json();
+                
+                if (response.ok) {
+                    audienceStatus.innerHTML = '<div class="status-indicator status-success"></div>Audience creation API working';
+                    audienceDebug.textContent = `Status: ${response.status}\nResponse: ${JSON.stringify(data, null, 2)}`;
+                } else {
+                    audienceStatus.innerHTML = '<div class="status-indicator status-error"></div>Audience creation API failed';
+                    audienceDebug.textContent = `Status: ${response.status}\nError: ${JSON.stringify(data, null, 2)}`;
+                }
+            } catch (error) {
+                audienceStatus.innerHTML = '<div class="status-indicator status-error"></div>Audience creation error';
+                audienceDebug.textContent = `Error: ${error.message}`;
+            }
+        }
+
+        // Initialize tests on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            testConfiguration();
+            console.log('🧪 Extension test page loaded');
+            console.log('🔧 Testing configuration...');
+        });
+    </script>
+</body>
+</html> 

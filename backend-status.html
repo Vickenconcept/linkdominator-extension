@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LinkDominator Backend Status Checker</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .status-item {
+            margin: 15px 0;
+            padding: 15px;
+            border-radius: 5px;
+            border-left: 4px solid #ccc;
+        }
+        .status-success {
+            background-color: #d4edda;
+            border-left-color: #28a745;
+        }
+        .status-error {
+            background-color: #f8d7da;
+            border-left-color: #dc3545;
+        }
+        .status-warning {
+            background-color: #fff3cd;
+            border-left-color: #ffc107;
+        }
+        .status-info {
+            background-color: #d1ecf1;
+            border-left-color: #17a2b8;
+        }
+        .endpoint {
+            font-family: monospace;
+            background: #f8f9fa;
+            padding: 5px;
+            border-radius: 3px;
+            margin: 5px 0;
+        }
+        .response {
+            font-family: monospace;
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            white-space: pre-wrap;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .loading {
+            color: #6c757d;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 LinkDominator Backend Status Checker</h1>
+        <p>This page tests the backend API endpoints to identify server issues.</p>
+        
+        <button onclick="runAllTests()">🚀 Run All Tests</button>
+        <button onclick="clearResults()">🗑️ Clear Results</button>
+        
+        <div id="results"></div>
+    </div>
+
+    <script>
+        const BACKEND_URL = 'https://app.linkdominator.com/api';
+        
+        const endpoints = [
+            { name: 'Access Check', url: `${BACKEND_URL}/accessCheck`, method: 'GET' },
+            { name: 'Audience List (Test)', url: `${BACKEND_URL}/audience?linkedinId=test-user`, method: 'GET' },
+            { name: 'Root API', url: `${BACKEND_URL}/`, method: 'GET' },
+            { name: 'Audience Creation (Test)', url: `${BACKEND_URL}/audience`, method: 'POST', body: JSON.stringify({
+                audienceName: "Test Audience",
+                audienceId: "test-" + Date.now(),
+                linkedInId: "test-user",
+                audienceType: "test"
+            })}
+        ];
+
+        async function testEndpoint(endpoint) {
+            const resultDiv = document.createElement('div');
+            resultDiv.className = 'status-item status-info';
+            resultDiv.innerHTML = `
+                <h3>🔍 Testing ${endpoint.name}</h3>
+                <div class="endpoint">${endpoint.method} ${endpoint.url}</div>
+                <div class="loading">Testing...</div>
+            `;
+            
+            document.getElementById('results').appendChild(resultDiv);
+
+            try {
+                const options = {
+                    method: endpoint.method,
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                };
+
+                if (endpoint.body) {
+                    options.body = endpoint.body;
+                }
+
+                const response = await fetch(endpoint.url, options);
+                const responseText = await response.text();
+                
+                let responseData;
+                try {
+                    responseData = JSON.parse(responseText);
+                } catch (e) {
+                    responseData = responseText;
+                }
+
+                if (response.ok) {
+                    resultDiv.className = 'status-item status-success';
+                    resultDiv.innerHTML = `
+                        <h3>✅ ${endpoint.name} - SUCCESS</h3>
+                        <div class="endpoint">${endpoint.method} ${endpoint.url}</div>
+                        <div><strong>Status:</strong> ${response.status} ${response.statusText}</div>
+                        <div><strong>Response:</strong></div>
+                        <div class="response">${JSON.stringify(responseData, null, 2)}</div>
+                    `;
+                } else {
+                    resultDiv.className = 'status-item status-error';
+                    resultDiv.innerHTML = `
+                        <h3>❌ ${endpoint.name} - ERROR</h3>
+                        <div class="endpoint">${endpoint.method} ${endpoint.url}</div>
+                        <div><strong>Status:</strong> ${response.status} ${response.statusText}</div>
+                        <div><strong>Response:</strong></div>
+                        <div class="response">${JSON.stringify(responseData, null, 2)}</div>
+                    `;
+                }
+
+            } catch (error) {
+                resultDiv.className = 'status-item status-error';
+                resultDiv.innerHTML = `
+                    <h3>❌ ${endpoint.name} - NETWORK ERROR</h3>
+                    <div class="endpoint">${endpoint.method} ${endpoint.url}</div>
+                    <div><strong>Error:</strong> ${error.message}</div>
+                    <div class="response">This could be due to:
+• Backend server is down
+• Network connectivity issues
+• CORS policy blocking the request
+• DNS resolution problems</div>
+                `;
+            }
+        }
+
+        async function runAllTests() {
+            document.getElementById('results').innerHTML = '';
+            
+            for (const endpoint of endpoints) {
+                await testEndpoint(endpoint);
+                // Small delay between requests
+                await new Promise(resolve => setTimeout(resolve, 500));
+            }
+        }
+
+        function clearResults() {
+            document.getElementById('results').innerHTML = '';
+        }
+
+        // Auto-run tests when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('🔧 Backend Status Checker loaded');
+            console.log('🌐 Backend URL:', BACKEND_URL);
+        });
+    </script>
+</body>
+</html> 
