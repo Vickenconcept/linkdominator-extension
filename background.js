@@ -31,8 +31,32 @@ chrome.runtime.onMessage.addListener(
             });
             return true;
         }else if(request.campaign){
-            sendResponse({message: 'setting up alarm...'});
-            setCampaignAlarm(request.campaign)
+            console.log('Campaign received:', request.campaign);
+            console.log('Current LinkedIn ID:', linkedinId);
+            
+            // Check if LinkedIn ID is available
+            if (!linkedinId) {
+                console.log('LinkedIn ID not available, waiting for authentication...');
+                sendResponse({message: 'Waiting for LinkedIn authentication...'});
+                
+                // Try to get user profile first
+                getUserProfile();
+                
+                // Wait for LinkedIn authentication to complete
+                const checkLinkedInId = () => {
+                    if (linkedinId) {
+                        console.log('LinkedIn ID now available:', linkedinId);
+                        setCampaignAlarm(request.campaign);
+                    } else {
+                        console.log('Still waiting for LinkedIn ID...');
+                        setTimeout(checkLinkedInId, 2000); // Check every 2 seconds
+                    }
+                };
+                checkLinkedInId();
+            } else {
+                sendResponse({message: 'setting up alarm...'});
+                setCampaignAlarm(request.campaign);
+            }
             return true;
         }else if(request.stopCampaign){
             let alarmName = request.stopCampaign.sequenceType.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase()
@@ -217,9 +241,15 @@ const setCampaignAlarm = async (campaign) => {
         currentNodeKey, 
         statusLastId;
 
+    console.log('Setting up campaign alarm for:', campaign.name, 'Type:', campaign.sequenceType);
+    
     await getCampaignSequence(campaign.id)
     alarmName = campaign.sequenceType.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
     nodeModelArr = campaignSequence.nodeModel
+    
+    console.log('Campaign sequence loaded:', nodeModelArr ? 'Yes' : 'No');
+    console.log('Alarm name:', alarmName);
+    console.log('Node model array length:', nodeModelArr ? nodeModelArr.length : 0);
 
     if(campaign.sequenceType == 'Endorse'){
         if(nodeModelArr[0].runStatus == false){
@@ -747,6 +777,8 @@ const getUserProfile = () => {
             plainId = res.plainId
             firstName = res.miniProfile.firstName
             lastName = res.miniProfile.lastName
+            console.log('LinkedIn ID set to:', linkedinId);
+            console.log('User profile loaded:', firstName, lastName);
             // console.log(await _getProfileNetworkInfo({connectionId: 'ACoAACroOZgBnyT-0ijaCpXNkyFP2CnhGyjSnsM'}))
             _updateCampaignLeadsNetwork()
         })

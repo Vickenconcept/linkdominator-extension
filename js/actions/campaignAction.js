@@ -71,18 +71,33 @@ const getCampaignLeads = async (campaignId, callback) => {
  * @param {integer} campaignId
  */
 const getCampaignSequence = async (campaignId) => {
-    await fetch(`${PLATFROM_URL}/api/campaign/${campaignId}/sequence`, {
-        method: 'get',
-        headers: {
-            'lk-id': linkedinId
-        }
-    })
-    .then(res => res.json())
-    .then(res => {
+    console.log('Fetching campaign sequence for ID:', campaignId);
+    console.log('API URL:', `${PLATFROM_URL}/api/campaign/${campaignId}/sequence`);
+    console.log('LinkedIn ID:', linkedinId);
+    
+    try {
+        const response = await fetch(`${PLATFROM_URL}/api/campaign/${campaignId}/sequence`, {
+            method: 'get',
+            headers: {
+                'lk-id': linkedinId
+            }
+        });
+        
+        console.log('Response status:', response.status);
+        console.log('Response headers:', response.headers);
+        
+        const res = await response.json();
+        console.log('API Response:', res);
+        
         if(res.status == 200){
-            campaignSequence = res.data
+            campaignSequence = res.data;
+            console.log('Campaign sequence set:', campaignSequence);
+        } else {
+            console.log('API returned non-200 status:', res.status);
         }
-    })
+    } catch (error) {
+        console.log('Error fetching campaign sequence:', error);
+    }
 }
 
 /**
