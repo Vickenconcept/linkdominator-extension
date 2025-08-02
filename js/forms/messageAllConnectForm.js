@@ -169,24 +169,76 @@ var messageAllConnectForm = `
 
 $('body').append(messageAllConnectForm)
 $('body').on('click','#message-connect-menu-click',function(){
-    implementPermission('messageConnectsAction')
-    let fieldId = 'mac-selectAudience';
-    getAudienceList(fieldId)
+    console.log('🔍 Opening Message All Connections modal...');
+    
+    // Initialize storage if not exists
+    if (!localStorage.getItem('lkm-mac')) {
+        console.log('📦 Initializing message storage...');
+        localStorage.setItem('lkm-mac', JSON.stringify({
+            position: 0,
+            delay: 30,
+            total: 10,
+            uploads: []
+        }));
+    }
 
-    // append AI content to dropdown
-    helper.setAIContentToDropdown('mac-aicontent')
+    // Check permissions
+    implementPermission('messageConnectsAction');
+
+    // Load audiences with loading state
+    let fieldId = 'mac-selectAudience';
+    $('#' + fieldId).empty().append(
+        $('<option/>', {
+            value: '',
+            html: '⏳ Loading audiences...'
+        })
+    );
+    
+    getAudienceList(fieldId).catch(error => {
+        console.error('❌ Failed to load audiences:', error);
+        $('#' + fieldId).empty().append(
+            $('<option/>', {
+                value: '',
+                html: '❌ Failed to load audiences'
+            })
+        );
+    });
+
+    // Load message templates with loading state
+    $('#mac-aicontent').empty().append(
+        $('<option/>', {
+            value: '',
+            html: '⏳ Loading templates...'
+        })
+    );
+    
+    helper.setAIContentToDropdown('mac-aicontent');
 
     // Mount file list if exists
-    setFilesUploadedToList('lkm-mac')
+    try {
+        setFilesUploadedToList('lkm-mac');
+    } catch (error) {
+        console.error('❌ Error loading uploaded files:', error);
+    }
 
-    // setParamsToFormFields
-    setParamsToFormFields('lkm-mac', {
-        position: '#mac-startPosition',
-        delay: '#mac-delayFollowTime',
-        total: '#mac-totalMessage'
-    })
+    // Set form fields from storage
+    try {
+        const storedData = JSON.parse(localStorage.getItem('lkm-mac'));
+        if (storedData) {
+            $('#mac-startPosition').val(storedData.position || 0);
+            $('#mac-delayFollowTime').val(storedData.delay || 30);
+            $('#mac-totalMessage').val(storedData.total || 10);
+        }
+    } catch (error) {
+        console.error('❌ Error loading stored values:', error);
+    }
 
-    $('#messageAllConnectForm').modal({backdrop:'static', keyboard:false, show:true});
+    // Show modal
+    $('#messageAllConnectForm').modal({
+        backdrop: 'static', 
+        keyboard: false, 
+        show: true
+    });
 })
 
 $('body').on('click','.mac-pm-btn',function(){
@@ -205,54 +257,156 @@ $('#mac-aicontent').change(function(){
     } 
 })
 
-/**
- * Handle file uploads
- */
-$('body').on('change','#mac-image', async function(ev) {
-    let fileData = $("#mac-image")[0].files[0];
-
+// Handle image uploads
+$('body').on('change', '#mac-image', async function(ev) {
+    console.log('🖼️ Processing image upload...');
+    
     try {
-        let file = await helper.handleFileUpload(ev, '#mac-image', 'image')
-        let fileInfo = {
+        // Show loading state
+        $('.message-connects-notice').show();
+        $('#displayMessageConnectsStatus').html(`
+            <div class="alert alert-info">
+                <i class="fas fa-spinner fa-spin"></i> Uploading image...
+            </div>
+        `);
+
+        const fileData = $("#mac-image")[0].files[0];
+        
+        // Validate file size (max 5MB)
+        if (fileData.size > 5 * 1024 * 1024) {
+            throw new Error('Image size must be less than 5MB');
+        }
+
+        // Process file
+        const file = await helper.handleFileUpload(ev, '#mac-image', 'image');
+        
+        // Prepare file info
+        const fileInfo = {
             name: file[0].name,
             size: file[0].size,
             type: file[0].type,
             fileData: fileData,
             blobURL: URL.createObjectURL(fileData),
             module: 'lkm-mac'
-        }
-        // upload file
-        uploadFile(fileInfo,'.message-connects-notice','#displayMessageConnectsStatus')
+        };
+
+        console.log('📤 Uploading image:', fileInfo.name);
+        
+        // Upload file
+        await uploadFile(fileInfo, '.message-connects-notice', '#displayMessageConnectsStatus');
+        
+        // Show success
+        $('#displayMessageConnectsStatus').html(`
+            <div class="alert alert-success">
+                <i class="fas fa-check-circle"></i> Image uploaded successfully: ${fileInfo.name}
+            </div>
+        `);
+
     } catch (error) {
-        $('.message-connects-notice').show()
-        $('#displayMessageConnectsStatus').html(error)
-    }    
+        console.error('❌ Image upload error:', error);
+        $('.message-connects-notice').show();
+        $('#displayMessageConnectsStatus').html(`
+            <div class="alert alert-danger">
+                <i class="fas fa-exclamation-circle"></i> Failed to upload image:<br>
+                ${error.message}
+            </div>
+        `);
+        // Clear the file input
+        $(this).val('');
+    }
 });
 
-$('body').on('change','#mac-file', async function(ev) {
-    let fileData = $("#mac-file")[0].files[0];
+// Handle file uploads
+$('body').on('change', '#mac-file', async function(ev) {
+    console.log('📄 Processing file upload...');
+    
     try {
-        let file = await helper.handleFileUpload(ev, '#mac-file', 'file')
-        let fileInfo = {
+        // Show loading state
+        $('.message-connects-notice').show();
+        $('#displayMessageConnectsStatus').html(`
+            <div class="alert alert-info">
+                <i class="fas fa-spinner fa-spin"></i> Uploading file...
+            </div>
+        `);
+
+        const fileData = $("#mac-file")[0].files[0];
+        
+        // Validate file size (max 10MB)
+        if (fileData.size > 10 * 1024 * 1024) {
+            throw new Error('File size must be less than 10MB');
+        }
+
+        // Process file
+        const file = await helper.handleFileUpload(ev, '#mac-file', 'file');
+        
+        // Prepare file info
+        const fileInfo = {
             name: file[0].name,
             size: file[0].size,
             type: file[0].type,
             fileData: fileData,
             blobURL: URL.createObjectURL(fileData),
             module: 'lkm-mac'
-        }
-        // upload file
-        uploadFile(fileInfo,'.message-connects-notice','#displayMessageConnectsStatus')        
+        };
+
+        console.log('📤 Uploading file:', fileInfo.name);
+        
+        // Upload file
+        await uploadFile(fileInfo, '.message-connects-notice', '#displayMessageConnectsStatus');
+        
+        // Show success
+        $('#displayMessageConnectsStatus').html(`
+            <div class="alert alert-success">
+                <i class="fas fa-check-circle"></i> File uploaded successfully: ${fileInfo.name}
+            </div>
+        `);
+
     } catch (error) {
-        $('.message-connects-notice').show()
-        $('#displayMessageConnectsStatus').html(error)
-    }    
+        console.error('❌ File upload error:', error);
+        $('.message-connects-notice').show();
+        $('#displayMessageConnectsStatus').html(`
+            <div class="alert alert-danger">
+                <i class="fas fa-exclamation-circle"></i> Failed to upload file:<br>
+                ${error.message}
+            </div>
+        `);
+        // Clear the file input
+        $(this).val('');
+    }
 });
 
-$('body').on('click','.lkm-mac-remove-upload',function() {
-    let index = $(this).data('index')
-    let lkmModule = $(this).data('module')
-
-    removeFile(lkmModule, index)
-    setFilesUploadedToList('lkm-mac')
-})
+// Handle file removal
+$('body').on('click', '.lkm-mac-remove-upload', function() {
+    const index = $(this).data('index');
+    const lkmModule = $(this).data('module');
+    
+    try {
+        console.log('🗑️ Removing file at index:', index);
+        removeFile(lkmModule, index);
+        setFilesUploadedToList('lkm-mac');
+        
+        // Show success message
+        $('.message-connects-notice').show();
+        $('#displayMessageConnectsStatus').html(`
+            <div class="alert alert-success">
+                <i class="fas fa-check-circle"></i> File removed successfully
+            </div>
+        `);
+        
+        // Clear message after 3 seconds
+        setTimeout(() => {
+            $('#displayMessageConnectsStatus').empty();
+            $('.message-connects-notice').hide();
+        }, 3000);
+        
+    } catch (error) {
+        console.error('❌ Error removing file:', error);
+        $('.message-connects-notice').show();
+        $('#displayMessageConnectsStatus').html(`
+            <div class="alert alert-danger">
+                <i class="fas fa-exclamation-circle"></i> Failed to remove file:<br>
+                ${error.message}
+            </div>
+        `);
+    }
+});

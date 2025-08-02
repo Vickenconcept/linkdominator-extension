@@ -403,25 +403,76 @@ var messageTargetUserForm = `
 
 $('body').append(messageTargetUserForm)
 $('body').on('click', '#message-target-menu-click', function(){
-    implementPermission('messageTargetUserAction')
-    getAudienceList('mtu-selectAudience');
+    console.log('🔍 Opening Message Targeted Users modal...');
+    
+    // Initialize storage if not exists
+    if (!localStorage.getItem('lkm-mtu')) {
+        console.log('📦 Initializing message storage...');
+        localStorage.setItem('lkm-mtu', JSON.stringify({
+            position: 0,
+            delay: 30,
+            total: 10,
+            uploads: []
+        }));
+    }
 
-    // append AI content to dropdown
-    helper.setAIContentToDropdown('mtu-aicontent')
+    // Check permissions
+    implementPermission('messageTargetUserAction');
+
+    // Load audiences with loading state
+    $('#mtu-selectAudience').empty().append(
+        $('<option/>', {
+            value: '',
+            html: '⏳ Loading audiences...'
+        })
+    );
+    
+    getAudienceList('mtu-selectAudience').catch(error => {
+        console.error('❌ Failed to load audiences:', error);
+        $('#mtu-selectAudience').empty().append(
+            $('<option/>', {
+                value: '',
+                html: '❌ Failed to load audiences'
+            })
+        );
+    });
+
+    // Load message templates with loading state
+    $('#mtu-aicontent').empty().append(
+        $('<option/>', {
+            value: '',
+            html: '⏳ Loading templates...'
+        })
+    );
+    
+    helper.setAIContentToDropdown('mtu-aicontent');
 
     // Mount file list if exists
-    setFilesUploadedToList('lkm-mtu')
+    try {
+        setFilesUploadedToList('lkm-mtu');
+    } catch (error) {
+        console.error('❌ Error loading uploaded files:', error);
+    }
 
-    // setParamsToFormFields
-    setParamsToFormFields('lkm-mtu', {
-        position: '#mtu-startPosition',
-        delay: '#mtu-delayTime',
-        total: '#mtu-totalMessageConnect'
-    })
+    // Set form fields from storage
+    try {
+        const storedData = JSON.parse(localStorage.getItem('lkm-mtu'));
+        if (storedData) {
+            $('#mtu-startPosition').val(storedData.position || 0);
+            $('#mtu-delayTime').val(storedData.delay || 30);
+            $('#mtu-totalMessageConnect').val(storedData.total || 10);
+        }
+    } catch (error) {
+        console.error('❌ Error loading stored values:', error);
+    }
 
-    // Display modal
-    $('#messageTargetUserForm').modal({backdrop:'static', keyboard:false, show:true});
-})
+    // Show modal
+    $('#messageTargetUserForm').modal({
+        backdrop: 'static', 
+        keyboard: false, 
+        show: true
+    });
+});
 $('body').on('click','.mtu-pm-btn',function(){
     let msgField = $('#mtu-personalMessage')
     let cursorPos = msgField.prop("selectionStart")

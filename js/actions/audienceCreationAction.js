@@ -1,3 +1,475 @@
+// Enhanced LinkedIn API configuration
+const LINKEDIN_API_CONFIG = {
+    timeout: 30000, // 30 seconds
+    retryAttempts: 3,
+    retryDelay: 2000,
+    maxDelay: 10000, // 10 seconds between requests
+    rateLimitDelay: 5000 // 5 seconds when rate limited
+};
+
+// Enhanced LinkedIn API request with retry and timeout
+const makeLinkedInApiRequest = async (url, options = {}, retryCount = 0) => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), LINKEDIN_API_CONFIG.timeout);
+    
+    try {
+        const response = await fetch(url, {
+            ...options,
+            signal: controller.signal,
+            headers: {
+                'csrf-token': jsession,
+                'accept': 'application/vnd.linkedin.normalized+json+2.1',
+                'content-type': contentType,
+                'x-li-lang': xLiLang,
+                'x-li-page-instance': 'urn:li:page:d_flagship3_search_srp_people;QazGJ/pNTwuq6OTtMClfPw==',
+                'x-li-track': JSON.stringify({
+                    "clientVersion": "1.10.1335",
+                    "osName": "web",
+                    "timezoneOffset": 1,
+                    "deviceFormFactor": "DESKTOP",
+                    "mpName": "voyager-web"
+                }),
+                'x-restli-protocol-version': xRestliProtocolVersion,
+                ...options.headers
+            }
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+            if (response.status === 429) {
+                // Rate limited - wait and retry
+                console.log('LinkedIn rate limited, waiting before retry...');
+                await new Promise(resolve => setTimeout(resolve, LINKEDIN_API_CONFIG.rateLimitDelay));
+                
+                if (retryCount < LINKEDIN_API_CONFIG.retryAttempts) {
+                    return makeLinkedInApiRequest(url, options, retryCount + 1);
+                }
+            }
+            
+            throw new Error(`LinkedIn API error: ${response.status} ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        return data;
+        
+    } catch (error) {
+        clearTimeout(timeoutId);
+        
+        // Retry logic for network errors
+        if (retryCount < LINKEDIN_API_CONFIG.retryAttempts && 
+            (error.name === 'AbortError' || error.message.includes('Failed to fetch'))) {
+            console.log(`LinkedIn API request failed, retrying... (${retryCount + 1}/${LINKEDIN_API_CONFIG.retryAttempts})`);
+            await new Promise(resolve => setTimeout(resolve, LINKEDIN_API_CONFIG.retryDelay * (retryCount + 1)));
+            return makeLinkedInApiRequest(url, options, retryCount + 1);
+        }
+        
+        throw error;
+    }
+};
+
+// Enhanced error handling for audience creation
+const handleAudienceCreationError = (error, context) => {
+    console.error(`Audience creation error in ${context}:`, error);
+    
+    let userMessage = 'An error occurred while creating the audience.';
+    
+    if (error.message.includes('timeout') || error.message.includes('AbortError')) {
+        userMessage = 'Request timed out. LinkedIn may be slow, please try again.';
+    } else if (error.message.includes('rate limit') || error.message.includes('429')) {
+        userMessage = 'LinkedIn rate limit reached. Please wait a moment and try again.';
+    } else if (error.message.includes('Failed to fetch')) {
+        userMessage = 'Network error. Please check your internet connection.';
+    } else if (error.message.includes('LinkedIn API error')) {
+        userMessage = 'LinkedIn API error. Please refresh the page and try again.';
+    }
+    
+    // Show error to user
+    $('#afc-displayNewAudienceStatus').html(`
+        <div style="color: #dc3545;">
+            <i class="fas fa-exclamation-triangle"></i> ${userMessage}
+        </div>
+        <button onclick="retryAudienceCreation()" class="btn btn-sm btn-primary mt-2">
+            <i class="fas fa-redo"></i> Try Again
+        </button>
+    `);
+    
+    // Re-enable the action button
+    $('.newAudienceAction').attr('disabled', false);
+    
+    // Show notification if available
+    if (typeof NotificationSystem !== 'undefined') {
+        NotificationSystem.show('error', userMessage);
+    }
+};
+
+// Global retry function for audience creation
+window.retryAudienceCreation = function() {
+    console.log('Retrying audience creation...');
+    $('#afc-displayNewAudienceStatus').html('<i class="fas fa-spinner fa-spin"></i> Retrying...');
+    $('.newAudienceAction').attr('disabled', true);
+    
+    // Restart the audience creation process
+    setTimeout(() => {
+        // This will be called by the original audience creation trigger
+        // The exact function depends on which audience type is being created
+        if (typeof startAudienceCreation === 'function') {
+            startAudienceCreation();
+        }
+    }, 1000);
+};
+
+// Global search control variables
+window.searchActive = false;
+window.searchTimeout = null;
+window.maxSearchPosition = 1000; // Maximum position to prevent infinite loops
+window.getConnectionsLooper = null; // Global reference to the looper function
+
+// Stop search function
+window.stopAudienceSearch = function() {
+    console.log('Stopping audience search...');
+    window.searchActive = false;
+    
+    if (window.searchTimeout) {
+        clearTimeout(window.searchTimeout);
+        window.searchTimeout = null;
+    }
+    
+    $('#afc-displayNewAudienceStatus').html(
+        `<i class="fas fa-stop"></i> Search stopped. Found ${audConnectionItems.length} connections.`
+    );
+    $('.newAudienceAction').attr('disabled', false);
+    
+    // Add buttons without inline handlers
+    $('#afc-displayNewAudienceStatus').append(`
+        <br><button id="continueSearchBtn" class="btn btn-sm btn-success mt-2">
+            <i class="fas fa-play"></i> Continue Search
+        </button>
+        <button id="finishResultsBtn" class="btn btn-sm btn-primary mt-2">
+            <i class="fas fa-check"></i> Use Current Results (${audConnectionItems.length})
+        </button>
+    `);
+    
+    // Add event listeners after creating buttons
+    $('#continueSearchBtn').on('click', function() {
+        continueAudienceSearch();
+    });
+    
+    $('#finishResultsBtn').on('click', function() {
+        finishWithCurrentResults();
+    });
+};
+
+// Continue search function
+window.continueAudienceSearch = function() {
+    console.log('Continuing audience search...');
+    window.searchActive = true;
+    $('#afc-displayNewAudienceStatus').html(
+        `<i class="fas fa-spinner fa-spin"></i> Continuing search... Found ${audConnectionItems.length} connections so far.`
+    );
+    $('.newAudienceAction').attr('disabled', true);
+    
+    // Continue from current position
+    setTimeout(() => {
+        if (window.getConnectionsLooper) {
+            window.getConnectionsLooper();
+        } else {
+            console.error('getConnectionsLooper not available, restarting search...');
+            // If looper is not available, restart the search
+            fsGetConnections();
+        }
+    }, 1000);
+};
+
+// Finish with current results
+window.finishWithCurrentResults = function() {
+    console.log('Finishing with current results:', audConnectionItems.length);
+    window.searchActive = false;
+    
+    if (window.searchTimeout) {
+        clearTimeout(window.searchTimeout);
+        window.searchTimeout = null;
+    }
+    
+    if (audConnectionItems.length > 0) {
+        $('#afc-displayNewAudienceStatus').html(
+            `<i class="fas fa-check"></i> Using ${audConnectionItems.length} connections found!`
+        );
+        afcSetConnectionData(0); // Process current results
+    } else {
+        $('#afc-displayNewAudienceStatus').html(
+            '<i class="fas fa-info-circle"></i> No connections found. Try different search criteria.'
+        );
+        $('.newAudienceAction').attr('disabled', false);
+    }
+};
+
+// Enhanced fsGetConnections with better control
+const fsGetConnections = async () => {
+    let totalResultCount = 0;
+    let retryCount = 0;
+    const maxRetries = 3;
+    
+    // Set search as active
+    window.searchActive = true;
+
+    // Define the looper function and make it globally accessible
+    window.getConnectionsLooper = async () => {
+        // Check if search was stopped
+        if (!window.searchActive) {
+            console.log('Search stopped by user');
+            return;
+        }
+        
+        // Check if position is too high
+        if (getConnectParams.startPosition > window.maxSearchPosition) {
+            console.log('Maximum search position reached, stopping search');
+            $('#afc-displayNewAudienceStatus').html(
+                `<i class="fas fa-info-circle"></i> Maximum search depth reached. Found ${audConnectionItems.length} connections.`
+            );
+            $('.newAudienceAction').attr('disabled', false);
+            window.searchActive = false;
+            return;
+        }
+        
+        try {
+            // Add random delay to avoid detection
+            const randomDelay = Math.random() * 2000 + 1000; // 1-3 seconds
+            await new Promise(resolve => setTimeout(resolve, randomDelay));
+            
+            console.log(`Fetching connections from position: ${getConnectParams.startPosition}`);
+            console.log('Search URL:', `${voyagerBlockSearchUrl}&query=${getConnectParams.queryParams}&start=${getConnectParams.startPosition}`);
+            console.log('Query Parameters:', getConnectParams.queryParams);
+            
+            const data = await makeLinkedInApiRequest(
+                `${voyagerBlockSearchUrl}&query=${getConnectParams.queryParams}&start=${getConnectParams.startPosition}`
+            );
+            
+            console.log('LinkedIn API Response:', data);
+            
+            let res = {'data': data};
+            let elements = res['data'].data.elements;
+            let included = res['data'].included;
+
+            console.log('Elements found:', elements ? elements.length : 0);
+            console.log('Included items:', included ? included.length : 0);
+            
+            if (elements && elements.length) {
+                console.log('Element structure:', elements);
+                
+                if (totalResultCount == 0) {
+                    totalResultCount = res['data'].data.metadata.totalResultCount;
+                    console.log('Total result count:', totalResultCount);
+                }
+
+                if ((elements.length > 1 && elements[1].items && elements[1].items.length) || 
+                    (elements.length == 1 && elements[0].items && elements[0].items.length)) {
+                    
+                    console.log('Processing items from elements...');
+                    
+                    for (let item of included) {
+                        // Check if search was stopped during processing
+                        if (!window.searchActive) {
+                            console.log('Search stopped during item processing');
+                            return;
+                        }
+                        
+                        console.log('Processing item:', item);
+                        
+                        // perform checks
+                        if (item.hasOwnProperty('title') && item.hasOwnProperty('primarySubtitle')) {
+                            console.log('Item has title and subtitle:', {
+                                title: item.title.text,
+                                subtitle: item.primarySubtitle.text
+                            });
+                            
+                            if (item.title.text && item.primarySubtitle.text && 
+                                item.title.text.includes('LinkedIn Member') == false) {
+                                
+                                console.log('Item passed LinkedIn Member check');
+                                
+                                if (getConnectParams.positiveKeywords) {
+                                    console.log('Checking positive keywords:', getConnectParams.positiveKeywords);
+                                    let keywordMatched = false;
+                                    for (let text of getConnectParams.positiveKeywords.split(',')) {
+                                        const cleanText = text.trim().toLowerCase();
+                                        const titleText = item.title.text.toLowerCase();
+                                        const subtitleText = item.primarySubtitle.text.toLowerCase();
+                                        
+                                        if (titleText.includes(cleanText) || subtitleText.includes(cleanText)) {
+                                            console.log(`Item matched positive keyword "${cleanText}":`, {
+                                                title: item.title.text,
+                                                subtitle: item.primarySubtitle.text
+                                            });
+                                            keywordMatched = true;
+                                            audConnectionItems.push(item);
+                                            break; // Found a match, no need to check other keywords
+                                        }
+                                    }
+                                    if (!keywordMatched) {
+                                        console.log(`Item filtered out - no positive keyword match:`, {
+                                            title: item.title.text,
+                                            subtitle: item.primarySubtitle.text,
+                                            keywords: getConnectParams.positiveKeywords
+                                        });
+                                    }
+                                } else if (getConnectParams.negativeKeywords) {
+                                    console.log('Checking negative keywords:', getConnectParams.negativeKeywords);
+                                    let shouldExclude = false;
+                                    for (let text of getConnectParams.negativeKeywords.split(',')) {
+                                        const cleanText = text.trim().toLowerCase();
+                                        const titleText = item.title.text.toLowerCase();
+                                        const subtitleText = item.primarySubtitle.text.toLowerCase();
+                                        
+                                        if (titleText.includes(cleanText) || subtitleText.includes(cleanText)) {
+                                            console.log(`Item excluded by negative keyword "${cleanText}":`, {
+                                                title: item.title.text,
+                                                subtitle: item.primarySubtitle.text
+                                            });
+                                            shouldExclude = true;
+                                            break;
+                                        }
+                                    }
+                                    if (!shouldExclude) {
+                                        console.log(`Item passed negative keyword check:`, {
+                                            title: item.title.text,
+                                            subtitle: item.primarySubtitle.text
+                                        });
+                                        audConnectionItems.push(item);
+                                    }
+                                } else {
+                                    console.log('No keywords specified, adding item:', {
+                                        title: item.title.text,
+                                        subtitle: item.primarySubtitle.text
+                                    });
+                                    audConnectionItems.push(item);
+                                }
+                            } else {
+                                console.log('Item failed LinkedIn Member check or missing text');
+                            }
+                        } else {
+                            console.log('Item missing title or subtitle properties');
+                        }
+                    }
+
+                    console.log('Total connections found so far:', audConnectionItems.length);
+                    console.log('Target connections:', parseInt($('#afs-total').val()));
+
+                    if (audConnectionItems.length < parseInt($('#afs-total').val())) {
+                        getConnectParams.startPosition = parseInt(getConnectParams.startPosition) + 11;
+                        $('#afs-startPosition').val(getConnectParams.startPosition);
+                        
+                        // Update status with stop button (CSP-compliant)
+                        $('#afc-displayNewAudienceStatus').html(
+                            `<i class="fas fa-spinner fa-spin"></i> Found ${audConnectionItems.length} connections, continuing search...<br>
+                             <button id="stopSearchBtn" class="btn btn-sm btn-warning mt-2">
+                                 <i class="fas fa-stop"></i> Stop Search
+                             </button>`
+                        );
+                        
+                        // Add event listener for stop button
+                        $('#stopSearchBtn').on('click', function() {
+                            stopAudienceSearch();
+                        });
+                        
+                        console.log('Continuing search from position:', getConnectParams.startPosition);
+                        
+                        // Continue with next batch using timeout
+                        window.searchTimeout = setTimeout(() => {
+                            if (window.searchActive) {
+                                window.getConnectionsLooper();
+                            }
+                        }, LINKEDIN_API_CONFIG.maxDelay);
+                    } else {
+                        // Found enough connections
+                        console.log('Found enough connections, stopping search');
+                        window.searchActive = false;
+                        if (window.searchTimeout) {
+                            clearTimeout(window.searchTimeout);
+                            window.searchTimeout = null;
+                        }
+                        
+                        $('#afc-displayNewAudienceStatus').html(
+                            `<i class="fas fa-check"></i> Found ${audConnectionItems.length} connections!`
+                        );
+                        afcSetConnectionData(totalResultCount);
+                    }
+
+                } else if (((elements.length > 1 && (!elements[1].items || !elements[1].items.length)) || 
+                           (elements.length == 1 && (!elements[0].items || !elements[0].items.length))) && 
+                           !audConnectionItems.length) {
+                    console.log('No items found in elements and no connections collected yet');
+                    window.searchActive = false;
+                    $('#afc-displayNewAudienceStatus').html(
+                        '<i class="fas fa-info-circle"></i> No results found, change your search criteria and try again!'
+                    );
+                    $('.newAudienceAction').attr('disabled', false);
+
+                } else if (((elements.length > 1 && (!elements[1].items || !elements[1].items.length)) || 
+                           (elements.length == 1 && (!elements[0].items || !elements[0].items.length))) && 
+                           audConnectionItems.length) {
+                    console.log('No more items but we have some connections');
+                    window.searchActive = false;
+                    if (window.searchTimeout) {
+                        clearTimeout(window.searchTimeout);
+                        window.searchTimeout = null;
+                    }
+                    $('#afc-displayNewAudienceStatus').html(
+                        `<i class="fas fa-check"></i> Found ${audConnectionItems.length} connections!`
+                    );
+                    afcSetConnectionData(totalResultCount);
+                }
+
+            } else if (audConnectionItems.length) {
+                console.log('No elements but we have connections from previous calls');
+                window.searchActive = false;
+                if (window.searchTimeout) {
+                    clearTimeout(window.searchTimeout);
+                    window.searchTimeout = null;
+                }
+                $('#afc-displayNewAudienceStatus').html(
+                    `<i class="fas fa-check"></i> Found ${audConnectionItems.length} connections!`
+                );
+                afcSetConnectionData(totalResultCount);
+            } else {
+                console.log('No elements found and no connections collected');
+                window.searchActive = false;
+                $('#afc-displayNewAudienceStatus').html(
+                    '<i class="fas fa-info-circle"></i> No results found, change your search criteria and try again!'
+                );
+                $('.newAudienceAction').attr('disabled', false);
+            }
+            
+            // Reset retry count on success
+            retryCount = 0;
+            
+        } catch (error) {
+            console.error('Error in getConnectionsLooper:', error);
+            
+            if (retryCount < maxRetries) {
+                retryCount++;
+                console.log(`Retrying connections fetch (${retryCount}/${maxRetries})...`);
+                
+                $('#afc-displayNewAudienceStatus').html(
+                    `<i class="fas fa-spinner fa-spin"></i> Retrying... (${retryCount}/${maxRetries})`
+                );
+                
+                // Wait longer before retry
+                window.searchTimeout = setTimeout(() => {
+                    if (window.searchActive) {
+                        window.getConnectionsLooper();
+                    }
+                }, LINKEDIN_API_CONFIG.retryDelay * retryCount);
+            } else {
+                window.searchActive = false;
+                handleAudienceCreationError(error, 'fsGetConnections');
+            }
+        }
+    };
+
+    // Start the connection fetching process
+    window.getConnectionsLooper();
+};
 
 $('body').on('click','.nav-link',function(){
     setTimeout(function(){
@@ -1148,184 +1620,142 @@ const afcGetCommentProfiles = (afcPostId,afcTotal,afcStartP,afcDelay,afcAudience
     acpLooper()
 }
 
-const fsGetConnections = () => {
-    let totalResultCount = 0;
-
-    let getConnectionsLooper = () => {
-        setTimeout(async () => {
-            await $.ajax({
-                method: 'get',
-                beforeSend: function(request) {
-                    request.setRequestHeader('csrf-token', jsession);
-                    request.setRequestHeader('accept', 'application/vnd.linkedin.normalized+json+2.1');
-                    request.setRequestHeader('content-type', contentType);
-                    request.setRequestHeader('x-li-lang', xLiLang);
-                    request.setRequestHeader('x-li-page-instance', 'urn:li:page:d_flagship3_search_srp_people;QazGJ/pNTwuq6OTtMClfPw==');
-                    request.setRequestHeader('x-li-track', JSON.stringify({"clientVersion":"1.10.1335","osName":"web","timezoneOffset":1,"deviceFormFactor":"DESKTOP","mpName":"voyager-web"}));
-                    request.setRequestHeader('x-restli-protocol-version', xRestliProtocolVersion);
-                },
-                url: `${voyagerBlockSearchUrl}&query=${getConnectParams.queryParams}&start=${getConnectParams.startPosition}`,
-                success: function(data) {
-                    let res = {'data': data}
-                    let elements = res['data'].data.elements
-                    let included = res['data'].included
-
-                    if(elements.length) {
-                        if(totalResultCount == 0)
-                            totalResultCount = res['data'].data.metadata.totalResultCount
-
-                        if((elements.length > 1 && elements[1].items.length) || (elements.length == 1 && elements[0].items.length)) {
-                            for(let item of included) {
-                                // perform checks
-                                if(item.hasOwnProperty('title') && item.hasOwnProperty('primarySubtitle')) {
-                                    if(item.title.text && item.primarySubtitle.text && item.title.text.includes('LinkedIn Member') == false) {
-                                        if(getConnectParams.positiveKeywords) {
-                                            for(let text of getConnectParams.positiveKeywords.split(',')) {
-                                                if(item.title.text.toLowerCase().includes(text.toLowerCase()) == true || item.primarySubtitle.text.toLowerCase().includes(text.toLowerCase()) == true) {
-                                                    audConnectionItems.push(item)
-                                                }
-                                            }
-                                        }else if(getConnectParams.negativeKeywords) {
-                                            for(let text of getConnectParams.negativeKeywords.split(',')) {
-                                                if(item.title.text.toLowerCase().includes(text.toLowerCase()) == false && item.primarySubtitle.text.toLowerCase().includes(text.toLowerCase()) == false) {
-                                                    audConnectionItems.push(item)
-                                                }
-                                            }
-                                        }else {
-                                            audConnectionItems.push(item)
-                                        }
-                                    }
-                                }
-                            }
-
-                            if(audConnectionItems.length < parseInt($('#afs-total').val())) {
-                                getConnectParams.startPosition = parseInt(getConnectParams.startPosition) + 11
-                                $('#afs-startPosition').val(getConnectParams.startPosition)
-                                getConnectionsLooper(totalResultCount)
-                            }else {
-                                // call next action: cleanConnectionData or memberBadge
-                                afcSetConnectionData(totalResultCount)
-                            }
-
-                        }else if((elements.length > 1 && !elements[1].items.length) || (elements.length == 1 && !elements[0].items.length) && !audConnectionItems.length) {
-                            $('#afc-displayNewAudienceStatus').html('No result found, change your search criteria and try again!')
-                            $('.newAudienceAction').attr('disabled', false)
-
-                        }else if((elements.length > 1 && !elements[1].items.length) || (elements.length == 1 && !elements[0].items.length) && audConnectionItems.length) {
-                            $('#displayNewAudienceStatus').html(`Found ${audConnectionItems.length} audience.`)
-                            // call next action: cleanConnectionData or memberBadge
-                            audConnectionItems
-                            afcSetConnectionData(totalResultCount)
-                        }
-
-                    }else if(audConnectionItems.length) {
-                        $('#displayNewAudienceStatus').html(`Found ${audConnectionItems.length} audience.`)
-                        // call next action: cleanConnectionData or memberBadge
-                        afcSetConnectionData(totalResultCount)
-                    }else {
-                        $('#afc-displayNewAudienceStatus').html('No result found, change your search criteria and try again!')
-                        $('.newAudienceAction').attr('disabled', false)
-                    }
-                },
-                error: function(err) {
-                    console.log(err.responseJSON)
-                    $('#afc-displayNewAudienceStatus').html('Something went wrong while trying to get connections!')
-                    $('.newAudienceAction').attr('disabled', false)
-                }
-            })
-        },5000)
-    }
-    getConnectionsLooper()
-}
-
 const afcEventAttendees = async () => {
     let totalResultCount = 0;
+    let retryCount = 0;
+    const maxRetries = 3;
+    
     voyagerBlockSearchUrl = voyagerBlockSearchUrl.replace('GLOBAL_SEARCH_HEADER','EVENT_PAGE_CANNED_SEARCH')
 
-    let getConnectionsLooper = () => {
-        setTimeout(async () => {
-            await $.ajax({
-                method: 'get',
-                beforeSend: function(request) {
-                    request.setRequestHeader('csrf-token', jsession);
-                    request.setRequestHeader('accept', acceptVnd);
-                    request.setRequestHeader('content-type', contentType);
-                    request.setRequestHeader('x-li-lang', xLiLang);
-                    request.setRequestHeader('x-li-page-instance', 'urn:li:page:d_flagship3_search_srp_people;+DUrmPTDTtOGzG9sI/UzuA==');
-                    request.setRequestHeader('x-li-track', JSON.stringify({"clientVersion":"1.10.2031.2","osName":"web","timezoneOffset":1,"deviceFormFactor":"DESKTOP","mpName":"voyager-web"}));
-                    request.setRequestHeader('x-restli-protocol-version', xRestliProtocolVersion);
-                },
-                url: `${voyagerBlockSearchUrl}&query=${getConnectParams.queryParams}&start=${getConnectParams.startPosition}`,
-                success: function(data){
-                    let res = {'data': data}
-                    let elements = res['data'].data.elements
-                    let included = res['data'].included
+    const getConnectionsLooper = async () => {
+        try {
+            // Add random delay to avoid detection
+            const randomDelay = Math.random() * 2000 + 1000; // 1-3 seconds
+            await new Promise(resolve => setTimeout(resolve, randomDelay));
+            
+            console.log(`Fetching event attendees from position: ${getConnectParams.startPosition}`);
+            
+            const data = await makeLinkedInApiRequest(
+                `${voyagerBlockSearchUrl}&query=${getConnectParams.queryParams}&start=${getConnectParams.startPosition}`,
+                {},
+                0,
+                {
+                    'x-li-page-instance': 'urn:li:page:d_flagship3_search_srp_people;+DUrmPTDTtOGzG9sI/UzuA==',
+                    'x-li-track': JSON.stringify({
+                        "clientVersion": "1.10.2031.2",
+                        "osName": "web",
+                        "timezoneOffset": 1,
+                        "deviceFormFactor": "DESKTOP",
+                        "mpName": "voyager-web"
+                    })
+                }
+            );
+            
+            let res = {'data': data};
+            let elements = res['data'].data.elements;
+            let included = res['data'].included;
 
-                    if(elements.length) {
-                        if(totalResultCount == 0)
-                            totalResultCount = res['data'].data.metadata.totalResultCount
+            if (elements && elements.length) {
+                if (totalResultCount == 0) {
+                    totalResultCount = res['data'].data.metadata.totalResultCount;
+                }
 
-                        if(elements[1].items.length) {
-                            for(let item of included) {
-                                // perform checks
-                                if(item.hasOwnProperty('title') && item.hasOwnProperty('primarySubtitle')) {
-                                    if(item.title.text && item.primarySubtitle.text && item.title.text.includes('LinkedIn Member') == false) {
-                                        if(getConnectParams.positiveKeywords) {
-                                            for(let text of getConnectParams.positiveKeywords.split(',')) {
-                                                if(item.title.text.toLowerCase().includes(text.toLowerCase()) == true || item.primarySubtitle.text.toLowerCase().includes(text.toLowerCase()) == true) {
-                                                    audConnectionItems.push(item)
-                                                }
-                                            }
-                                        }else if(getConnectParams.negativeKeywords) {
-                                            for(let text of getConnectParams.negativeKeywords.split(',')) {
-                                                if(item.title.text.toLowerCase().includes(text.toLowerCase()) == false && item.primarySubtitle.text.toLowerCase().includes(text.toLowerCase()) == false) {
-                                                    audConnectionItems.push(item)
-                                                }
-                                            }
-                                        }else {
-                                            audConnectionItems.push(item)
+                if (elements[1] && elements[1].items && elements[1].items.length) {
+                    for (let item of included) {
+                        // perform checks
+                        if (item.hasOwnProperty('title') && item.hasOwnProperty('primarySubtitle')) {
+                            if (item.title.text && item.primarySubtitle.text && 
+                                item.title.text.includes('LinkedIn Member') == false) {
+                                
+                                if (getConnectParams.positiveKeywords) {
+                                    for (let text of getConnectParams.positiveKeywords.split(',')) {
+                                        if (item.title.text.toLowerCase().includes(text.toLowerCase()) == true || 
+                                            item.primarySubtitle.text.toLowerCase().includes(text.toLowerCase()) == true) {
+                                            audConnectionItems.push(item);
                                         }
                                     }
+                                } else if (getConnectParams.negativeKeywords) {
+                                    for (let text of getConnectParams.negativeKeywords.split(',')) {
+                                        if (item.title.text.toLowerCase().includes(text.toLowerCase()) == false && 
+                                            item.primarySubtitle.text.toLowerCase().includes(text.toLowerCase()) == false) {
+                                            audConnectionItems.push(item);
+                                        }
+                                    }
+                                } else {
+                                    audConnectionItems.push(item);
                                 }
                             }
-
-                            if(audConnectionItems.length < parseInt($('#afs-total').val())) {
-                                getConnectParams.startPosition = parseInt(getConnectParams.startPosition) + 11
-                                $('#afs-startPosition').val(getConnectParams.startPosition)
-                                getConnectionsLooper(totalResultCount)
-                            }else {
-                                // call next action: cleanConnectionData or memberBadge
-                                afcSetConnectionData(totalResultCount)
-                            }
-                        }else if(!elements[1].items.length && !audConnectionItems.length) {
-                            $('#afc-displayNewAudienceStatus').html('No result found, change your search criteria and try again!')
-                            $('.newAudienceAction').attr('disabled', false)
-
-                        }else if(!elements[1].items.length && audConnectionItems.length) {
-                            $('#displayNewAudienceStatus').html(`Found ${audConnectionItems.length} audience.`)
-                            // call next action: cleanConnectionData or memberBadge
-                            afcSetConnectionData(totalResultCount)
                         }
-
-                    }else if(audConnectionItems.length) {
-                        $('#displayNewAudienceStatus').html(`Found ${audConnectionItems.length} audience.`)
-                        // call next action: cleanConnectionData or memberBadge
-                        afcSetConnectionData(totalResultCount)
-                    }else {
-                        $('#afc-displayNewAudienceStatus').html('No result found, change your search criteria and try again!')
-                        $('.newAudienceAction').attr('disabled', false)
                     }
-                },
-                error: function(err) {
-                    console.log(err.responseJSON)
-                    $('#afc-displayNewAudienceStatus').html('Something went wrong while trying to get event attendees!')
-                    $('.newAudienceAction').attr('disabled', false)
+
+                    if (audConnectionItems.length < parseInt($('#afs-total').val())) {
+                        getConnectParams.startPosition = parseInt(getConnectParams.startPosition) + 11;
+                        $('#afs-startPosition').val(getConnectParams.startPosition);
+                        
+                        // Update status
+                        $('#afc-displayNewAudienceStatus').html(
+                            `<i class="fas fa-spinner fa-spin"></i> Found ${audConnectionItems.length} event attendees, continuing search...`
+                        );
+                        
+                        // Continue with next batch
+                        setTimeout(() => getConnectionsLooper(), LINKEDIN_API_CONFIG.maxDelay);
+                    } else {
+                        // Found enough attendees
+                        $('#afc-displayNewAudienceStatus').html(
+                            `<i class="fas fa-check"></i> Found ${audConnectionItems.length} event attendees!`
+                        );
+                        afcSetConnectionData(totalResultCount);
+                    }
+                } else if (!elements[1].items.length && !audConnectionItems.length) {
+                    $('#afc-displayNewAudienceStatus').html(
+                        '<i class="fas fa-info-circle"></i> No event attendees found, change your search criteria and try again!'
+                    );
+                    $('.newAudienceAction').attr('disabled', false);
+
+                } else if (!elements[1].items.length && audConnectionItems.length) {
+                    $('#afc-displayNewAudienceStatus').html(
+                        `<i class="fas fa-check"></i> Found ${audConnectionItems.length} event attendees!`
+                    );
+                    afcSetConnectionData(totalResultCount);
                 }
-            })
-        },10000)
-    }
-    getConnectionsLooper()
-}
+
+            } else if (audConnectionItems.length) {
+                $('#afc-displayNewAudienceStatus').html(
+                    `<i class="fas fa-check"></i> Found ${audConnectionItems.length} event attendees!`
+                );
+                afcSetConnectionData(totalResultCount);
+            } else {
+                $('#afc-displayNewAudienceStatus').html(
+                    '<i class="fas fa-info-circle"></i> No event attendees found, change your search criteria and try again!'
+                );
+                $('.newAudienceAction').attr('disabled', false);
+            }
+            
+            // Reset retry count on success
+            retryCount = 0;
+            
+        } catch (error) {
+            console.error('Error in afcEventAttendees:', error);
+            
+            if (retryCount < maxRetries) {
+                retryCount++;
+                console.log(`Retrying event attendees fetch (${retryCount}/${maxRetries})...`);
+                
+                $('#afc-displayNewAudienceStatus').html(
+                    `<i class="fas fa-spinner fa-spin"></i> Retrying... (${retryCount}/${maxRetries})`
+                );
+                
+                // Wait longer before retry
+                setTimeout(() => getConnectionsLooper(), LINKEDIN_API_CONFIG.retryDelay * retryCount);
+            } else {
+                handleAudienceCreationError(error, 'afcEventAttendees');
+            }
+        }
+    };
+
+    // Start the event attendees fetching process
+    getConnectionsLooper();
+};
 
 const afcGroupMembers = async () => {
     let totalResultCount = 0;
@@ -1754,17 +2184,26 @@ const newAudience = async (con, afcDelay, afcAudienceName, audienceType, memberB
         url: `${filterApi}/audience`,
         data: json_data,
         success: function(data){
-            if(data.length > 0 ){
+            console.log('Audience creation response:', data);
+            
+            // Check if the response has the expected structure
+            if(data && data.status === 200 && data.data && data.data.audience) {
+                console.log('Audience created successfully:', data.data.audience);
+                newAudienceList(data.data.audience, con, memberBadgesData, networkInfoData, positionGroupsData, companyData)
+            } else if(data && data.length > 0 && data[0].audienceName) {
+                // Fallback for old response format
+                console.log('Using fallback response format:', data[0]);
                 newAudienceList(data[0].audienceName, con, memberBadgesData, networkInfoData, positionGroupsData, companyData)
-            }else {
+            } else {
+                console.error('Unexpected response format:', data);
                 $('.newAudience-notice').show()
                 $('#afc-displayNewAudienceStatus').empty()
-                $('#afc-displayNewAudienceStatus').html(data.message)
+                $('#afc-displayNewAudienceStatus').html('Unexpected response format from server')
                 $('.newAudienceAction').attr('disabled', false)
             }
         },
         error: function(error){
-            console.log(error)
+            console.error('Audience creation error:', error)
             $('.newAudienceAction').attr('disabled', false)
             $('.newAudience-notice').show()
             $('#afc-displayNewAudienceStatus').html('Something went wrong. Please try again.')
@@ -1773,10 +2212,27 @@ const newAudience = async (con, afcDelay, afcAudienceName, audienceType, memberB
 
 }
 
-const newAudienceList = async (audienceName, con, memberBadgesData, networkInfoData, positionGroupsData, companyData) => {
+const newAudienceList = async (audienceData, con, memberBadgesData, networkInfoData, positionGroupsData, companyData) => {
     $('.newAudience-notice').show()
     var x=0, s=0;
     var index;
+    
+    // Extract audience_id from the response data
+    let audienceId;
+    if (typeof audienceData === 'object' && audienceData.audience_id) {
+        audienceId = audienceData.audience_id;
+        console.log('Using audience_id from response:', audienceId);
+    } else if (typeof audienceData === 'object' && audienceData.audience_id) {
+        audienceId = audienceData.audience_id;
+        console.log('Using audience_id from fallback:', audienceId);
+    } else {
+        console.error('Could not extract audience_id from:', audienceData);
+        $('#afc-displayNewAudienceStatus').html('Error: Could not get audience ID')
+        $('.newAudienceAction').attr('disabled', false)
+        return;
+    }
+
+    console.log('Starting to save connections. Total connections to save:', con.length);
 
     // loop through to post each connections
     for(var i=0; i<con.length; i++){
@@ -1818,6 +2274,12 @@ const newAudienceList = async (audienceName, con, memberBadgesData, networkInfoD
                     }
                 })
         
+                console.log(`Saving connection ${i+1}/${con.length}:`, {
+                    name: con[i].firstName + ' ' + con[i].lastName,
+                    connectionId: con[i].connectionId,
+                    audienceId: audienceId
+                });
+        
                 await $.ajax({
                     method: 'post',
                     beforeSend: function(request) {
@@ -1826,7 +2288,7 @@ const newAudienceList = async (audienceName, con, memberBadgesData, networkInfoD
                     },
                     url: `${filterApi}/audience/list`,
                     data: JSON.stringify({
-                        audienceId: audienceName.audience_id,
+                        audienceId: audienceId,
                         firstName: con[i].firstName,
                         lastName: con[i].lastName,
                         email: email,
@@ -1838,12 +2300,13 @@ const newAudienceList = async (audienceName, con, memberBadgesData, networkInfoD
                         memberUrn: con[i].memberUrn
                     }),
                     success: function(data){
+                        console.log(`Connection ${i+1} save response:`, data);
                         if(data.message == 'success'){
                             var name = con[i].firstName+' '+con[i].lastName;
                             var jobtitle = con[i].title;
                             index = i +1;
                             skipped= s;
-                            newAudienceListUpdate(con[i].connectionId,audienceName.audience_id,distance,companyUrl,name,jobtitle,index,premium,influencer,jobSeeker,skipped)
+                            newAudienceListUpdate(con[i].connectionId, audienceId, distance, companyUrl, name, jobtitle, index, premium, influencer, jobSeeker, skipped)
                             x++;
                         }else if(data.message == 'User already added to audience list'){
                             $('#afc-displayNewAudienceStatus').empty()
@@ -1855,7 +2318,7 @@ const newAudienceList = async (audienceName, con, memberBadgesData, networkInfoD
                         }
                     },
                     error: function(error){
-                        console.log(error)
+                        console.error(`Error saving connection ${i+1}:`, error)
                         $('.newAudienceAction').attr('disabled', false)
                         $('#afc-displayNewAudienceStatus').html('Something went wrong please try again.');
                     }
@@ -1889,6 +2352,14 @@ const newAudienceListUpdate = async (connectionId,audienceId,distance,companyUrl
     var display = '';
     // update connection data using audience id and connection id (unique)
 
+    console.log(`Updating connection ${index}:`, {
+        connectionId: connectionId,
+        audienceId: audienceId,
+        name: name,
+        distance: distance,
+        companyUrl: companyUrl
+    });
+
     await $.ajax({
         method: 'put',
         beforeSend: function(request) {
@@ -1906,6 +2377,7 @@ const newAudienceListUpdate = async (connectionId,audienceId,distance,companyUrl
             companyUrl: companyUrl
         }),
         success: function(data){
+            console.log(`Connection ${index} update response:`, data);
             if(data.message == 'success'){
                 $('#afc-displayNewAudienceStatus').empty()
                 if(skipped > 0){
@@ -1925,11 +2397,97 @@ const newAudienceListUpdate = async (connectionId,audienceId,distance,companyUrl
                 `;
                 }
                 $('#afc-displayNewAudienceStatus').append(display)
+            } else {
+                console.error(`Failed to update connection ${index}:`, data);
             }
         },
         error: function(error){
-            console.log(error)
-            $('.newAudienceAction').attr('disabled', false)
+            console.error(`Error updating connection ${index}:`, error);
         }
     })
 }
+
+// Helper function to test keyword strategies
+window.testKeywordStrategy = function() {
+    console.log('=== KEYWORD STRATEGY TESTER ===');
+    console.log('Current positive keywords:', getConnectParams.positiveKeywords);
+    console.log('Current negative keywords:', getConnectParams.negativeKeywords);
+    
+    // Sample titles from your search results
+    const sampleTitles = [
+        'Rohit Sharma - Software Development Manager at Amazon Ads',
+        'Saheel Mayekar - MS CS @ University of Southern California',
+        'Ruth Iselema - Chief Executive Officer',
+        'Ishita Ganotra - Product Manager @ Meta',
+        'Shivam Jalotra - senior swe',
+        'Josh Tupas - Software Engineer',
+        'Oluwatosin Olushola - Human Resources | Performance Management',
+        'Jennifer Cahalen - Google Staffing',
+        'Abuchi Okeke - Senior Software Engineer at Walmart',
+        'Vincent Monteiro - Recruiter'
+    ];
+    
+    console.log('\n=== TESTING CURRENT KEYWORDS ===');
+    sampleTitles.forEach(title => {
+        const titleLower = title.toLowerCase();
+        const hasPositiveMatch = getConnectParams.positiveKeywords ? 
+            getConnectParams.positiveKeywords.split(',').some(keyword => 
+                titleLower.includes(keyword.trim().toLowerCase())
+            ) : false;
+        
+        console.log(`${hasPositiveMatch ? '✅' : '❌'} "${title}"`);
+    });
+    
+    console.log('\n=== SUGGESTED KEYWORDS ===');
+    console.log('Try these broader keywords that might match more profiles:');
+    console.log('- "manager" (matches: Software Development Manager, Product Manager)');
+    console.log('- "engineer" (matches: Software Engineer, Senior Software Engineer)');
+    console.log('- "recruiter" (matches: Recruiter, Google Staffing)');
+    console.log('- "executive" (matches: Chief Executive Officer)');
+    console.log('- "senior" (matches: Senior Software Engineer)');
+    console.log('- "product" (matches: Product Manager)');
+    console.log('- "development" (matches: Software Development Manager)');
+    
+    console.log('\n=== QUICK FIXES ===');
+    console.log('1. Clear keywords to get all results:');
+    console.log('   getConnectParams.positiveKeywords = "";');
+    console.log('   getConnectParams.negativeKeywords = "";');
+    console.log('');
+    console.log('2. Use broader keywords:');
+    console.log('   getConnectParams.positiveKeywords = "manager,engineer,recruiter";');
+    console.log('');
+    console.log('3. Use negative keywords instead:');
+    console.log('   getConnectParams.positiveKeywords = "";');
+    console.log('   getConnectParams.negativeKeywords = "student,intern,unemployed";');
+};
+
+// Helper function to clear keywords and restart search
+window.clearKeywordsAndRestart = function() {
+    console.log('Clearing keywords and restarting search...');
+    getConnectParams.positiveKeywords = '';
+    getConnectParams.negativeKeywords = '';
+    getConnectParams.startPosition = 0;
+    audConnectionItems = [];
+    
+    $('#afc-displayNewAudienceStatus').html('<i class="fas fa-spinner fa-spin"></i> Restarting search without keywords...');
+    $('.newAudienceAction').attr('disabled', true);
+    
+    setTimeout(() => {
+        fsGetConnections();
+    }, 1000);
+};
+
+// Helper function to use broader keywords
+window.useBroaderKeywords = function() {
+    console.log('Using broader keywords...');
+    getConnectParams.positiveKeywords = 'manager,engineer,recruiter,executive,senior,product,development';
+    getConnectParams.startPosition = 0;
+    audConnectionItems = [];
+    
+    $('#afc-displayNewAudienceStatus').html('<i class="fas fa-spinner fa-spin"></i> Restarting search with broader keywords...');
+    $('.newAudienceAction').attr('disabled', true);
+    
+    setTimeout(() => {
+        fsGetConnections();
+    }, 1000);
+};

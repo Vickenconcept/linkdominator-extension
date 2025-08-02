@@ -4,10 +4,11 @@ var mainMenu = `
 <div id="mySidepanel" class="sidepanel" style="width:285px;display:none;">
     <div class="inline-block">
         <!--h5 class="nav-header"><b>LinkoMatic</b></h5-->
-        <a href="#" target="_blank">
-            <img src="https://tubetargeterapp.com/img/linkdominator-brand.png" 
+        <a href="https://app.linkdominator.com" target="_blank">
+            <img src="https://app.linkdominator.com/images/linkdominator-brand.png" 
             height="30" 
-            style="margin-left:35px;width:16rem;">
+            style="margin-left:35px;width:16rem;"
+            onerror="this.src='/images/linkdominator-brand.png'">
         </a>
         <span class="closebtn" id="close-nav"><i class="fas fa-minus closer"></i></span>
     </div>
@@ -103,7 +104,7 @@ var mainMenu = `
 
 <span class="float-btn" id="open-nav">
     <!--i class="fas fa-plus my-float"></i-->
-    <img src="https://tubetargeterapp.com/img/linkdominator-48.png" height="40"  class="my-float">
+    <img src="https://app.linkdominator.com/images/linkdominator-48.png" height="40" class="my-float" onerror="this.src='https://app.linkdominator.com/images/linkdominator-48.png'">
 </span>
 `;
 
@@ -125,34 +126,98 @@ $('#close-nav').click(function() {
 })
 
 const getAudienceList = async (fieldId) => {
-    var publicId = $('#me-publicIdentifier').val();
+    console.log('🔍 getAudienceList called for field:', fieldId);
+    
+    // Show loading state
+    $(`#${fieldId}`).empty().append('<option value="">🔄 Loading audiences...</option>');
 
-    $.ajax({
-        method: 'get',
-        url: `${filterApi}/audience?linkedinId=${publicId}`,
-        success: function(data){
-            if(data.length > 0){
-                if(data[0].audience.length > 0){
-                    $(`#${fieldId}`).empty();
-
-                    $('<option/>', {
-                        value: '',
-                        html: 'Select an audience'
-                    }).appendTo(`#${fieldId}`);
-
-                    for (let i=0; i<data[0].audience.length; i++){
-                        $('<option/>', {
-                            value: data[0].audience[i].audience_id,
-                            html: data[0].audience[i].audience_name
-                        }).appendTo(`#${fieldId}`);
-                    }
-                }
-            }
-        },
-        error:function(error){
-            console.log(error)
+    try {
+        const response = await fetchAudiencesFromAPI();
+        console.log('✅ Raw API Response:', response);
+        
+        let audienceArr = [];
+        
+        // Handle the response structure from successResponse method
+        if (response && response.success && response.data && response.data.audience) {
+            audienceArr = response.data.audience;
+            console.log('📊 Found audiences in response.data.audience:', audienceArr.length);
         }
-    })
+        // Handle enhanced apiRequest response format
+        else if (response && response.data && response.data.audience) {
+            audienceArr = response.data.audience;
+            console.log('📊 Found audiences in response.data.audience (enhanced):', audienceArr.length);
+        }
+        // Fallback: check for direct audience array (old format)
+        else if (Array.isArray(response)) {
+            if (response.length > 0 && Array.isArray(response[0].audience)) {
+                audienceArr = response[0].audience;
+                console.log('📊 Found audiences in response[0].audience:', audienceArr.length);
+            }
+        } else if (Array.isArray(response.audience)) {
+            audienceArr = response.audience;
+            console.log('📊 Found audiences in response.audience:', audienceArr.length);
+        }
+        
+        console.log('📋 Final audience array:', audienceArr);
+        
+        // Clear loading and populate dropdown
+        $(`#${fieldId}`).empty();
+        
+        if (audienceArr.length > 0) {
+            // Add default option
+            $('<option/>', {
+                value: '',
+                html: 'Select an audience'
+            }).appendTo(`#${fieldId}`);
+            
+            // Add audience options
+            for (let i = 0; i < audienceArr.length; i++) {
+                $('<option/>', {
+                    value: audienceArr[i].audience_id,
+                    html: `${audienceArr[i].audience_name} (${audienceArr[i].total || 0} leads)`
+                }).appendTo(`#${fieldId}`);
+                console.log(`✅ Added audience: ${audienceArr[i].audience_name} (ID: ${audienceArr[i].audience_id})`);
+            }
+            console.log(`🎉 Successfully populated ${audienceArr.length} audiences in dropdown`);
+        } else {
+            $('<option/>', {
+                value: '',
+                html: 'No audiences found - create one first'
+            }).appendTo(`#${fieldId}`);
+            console.log('ℹ️ No audiences found for this user');
+        }
+        
+        return audienceArr;
+        
+    } catch (error) {
+        console.error('❌ Error fetching audiences:', error);
+        
+        // Clear loading and show error
+        $(`#${fieldId}`).empty();
+        $('<option/>', {
+            value: '',
+            html: '❌ Error loading audiences - check console'
+        }).appendTo(`#${fieldId}`);
+        
+        // Detailed error logging
+        if (error.status) {
+            console.error(`🔍 HTTP Error ${error.status}: ${error.statusText}`);
+            if (error.responseJSON) {
+                console.error('🔍 Error details:', error.responseJSON);
+            }
+        } else {
+            console.error('🔍 Network or timeout error:', error.message);
+        }
+        
+        // Provide helpful troubleshooting info
+        console.log('🔧 Troubleshooting:');
+        console.log('   1. Check if backend server is running');
+        console.log('   2. Verify API endpoint works in browser');
+        console.log('   3. Check browser network tab for detailed error');
+        console.log('   4. Try refreshing the page');
+        
+        throw error;
+    }
 }
 
 const implementPermission = (actionId) => {

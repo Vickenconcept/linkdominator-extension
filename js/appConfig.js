@@ -259,30 +259,34 @@ const sendMiniStats = async (totalConnection, numTotalSentInvitations, profileVi
 }
 
 const userPermissions = async () => {
-  await $.ajax({
-    method: 'get',
-    beforeSend: function(request) {
-      request.setRequestHeader('Content-Type', 'application/json')
-      request.setRequestHeader('lk-id', linkedinId)
-  },
-    url: `${filterApi}/accessCheck`,
-    success: function(data){
-      if (data.status == 401){
-        $('body').append(`<input type="hidden" id="accessCheck" value="${data.status}">`)
-      }else {
-        onMounted()
-        getAutoRespondMessages()
-        getAIContents()
-        getSNLeadList()
-        getCampaigns()
+  try {
+    const response = await fetch(`${filterApi}/accessCheck`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'lk-id': linkedinId
       }
-    },
-    error: function(err, textStatus){
-      if(err.hasOwnProperty('responseJSON'))
-        console.log(err.responseJSON.data.message);
-      else console.log(textStatus);
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
-  })
+
+    const data = await response.json();
+    
+    if (data.status == 401) {
+      $('body').append(`<input type="hidden" id="accessCheck" value="${data.status}">`);
+    } else {
+      onMounted();
+      getAutoRespondMessages();
+      getAIContents();
+      getSNLeadList();
+      getCampaigns();
+    }
+  } catch (error) {
+    console.error('❌ Error in userPermissions:', error);
+    // Don't throw the error to prevent unhandled promise rejection
+  }
 }
 
 const onMounted = () => {
@@ -342,3 +346,263 @@ const onMounted = () => {
 }
 
 const sleep = (delay) => new Promise((resolve) => setTimeout(resolve, delay))
+
+// Enhanced error notification system
+const NotificationSystem = {
+    types: {
+        SUCCESS: 'success',
+        ERROR: 'error',
+        WARNING: 'warning',
+        INFO: 'info'
+    },
+
+    show: function(type, message, duration = 5000) {
+        // Remove existing notifications
+        this.clear();
+        
+        const notification = document.createElement('div');
+        notification.className = `ld-notification ld-notification-${type}`;
+        notification.innerHTML = `
+            <div class="ld-notification-content">
+                <span class="ld-notification-icon">${this.getIcon(type)}</span>
+                <span class="ld-notification-message">${message}</span>
+                <button class="ld-notification-close" onclick="NotificationSystem.clear()">×</button>
+            </div>
+        `;
+        
+        // Add styles if not already added
+        this.addStyles();
+        
+        // Add to page
+        document.body.appendChild(notification);
+        
+        // Auto remove after duration
+        setTimeout(() => {
+            this.clear();
+        }, duration);
+        
+        // Store reference for manual clearing
+        this.currentNotification = notification;
+    },
+
+    clear: function() {
+        const notifications = document.querySelectorAll('.ld-notification');
+        notifications.forEach(notification => {
+            notification.remove();
+        });
+        this.currentNotification = null;
+    },
+
+    getIcon: function(type) {
+        const icons = {
+            success: '✓',
+            error: '✗',
+            warning: '⚠',
+            info: 'ℹ'
+        };
+        return icons[type] || icons.info;
+    },
+
+    addStyles: function() {
+        if (document.getElementById('ld-notification-styles')) {
+            return;
+        }
+
+        const styles = document.createElement('style');
+        styles.id = 'ld-notification-styles';
+        styles.textContent = `
+            .ld-notification {
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                z-index: 10000;
+                max-width: 400px;
+                padding: 15px;
+                border-radius: 8px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                font-size: 14px;
+                line-height: 1.4;
+                animation: ld-notification-slide-in 0.3s ease-out;
+            }
+            
+            .ld-notification-success {
+                background: #d4edda;
+                color: #155724;
+                border: 1px solid #c3e6cb;
+            }
+            
+            .ld-notification-error {
+                background: #f8d7da;
+                color: #721c24;
+                border: 1px solid #f5c6cb;
+            }
+            
+            .ld-notification-warning {
+                background: #fff3cd;
+                color: #856404;
+                border: 1px solid #ffeaa7;
+            }
+            
+            .ld-notification-info {
+                background: #d1ecf1;
+                color: #0c5460;
+                border: 1px solid #bee5eb;
+            }
+            
+            .ld-notification-content {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            }
+            
+            .ld-notification-icon {
+                font-weight: bold;
+                font-size: 16px;
+            }
+            
+            .ld-notification-message {
+                flex: 1;
+            }
+            
+            .ld-notification-close {
+                background: none;
+                border: none;
+                font-size: 18px;
+                cursor: pointer;
+                opacity: 0.7;
+                padding: 0;
+                width: 20px;
+                height: 20px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            
+            .ld-notification-close:hover {
+                opacity: 1;
+            }
+            
+            @keyframes ld-notification-slide-in {
+                from {
+                    transform: translateX(100%);
+                    opacity: 0;
+                }
+                to {
+                    transform: translateX(0);
+                    opacity: 1;
+                }
+            }
+        `;
+        
+        document.head.appendChild(styles);
+    }
+};
+
+// Global error handler for unhandled promise rejections
+window.addEventListener('unhandledrejection', function(event) {
+    console.error('Unhandled promise rejection:', event.reason);
+    
+    // Prevent the default browser behavior
+    event.preventDefault();
+    
+    let errorMessage = 'An unexpected error occurred. Please try again.';
+    
+    // Check if it's a jQuery AJAX error
+    if (event.reason && event.reason.readyState !== undefined) {
+        console.log('🔍 jQuery AJAX error detected:', {
+            readyState: event.reason.readyState,
+            status: event.reason.status,
+            statusText: event.reason.statusText,
+            responseText: event.reason.responseText
+        });
+        
+        // This is a jQuery AJAX error
+        if (event.reason.readyState === 0) {
+            errorMessage = 'Network error - Check your internet connection.';
+        } else if (event.reason.status === 0) {
+            errorMessage = 'Request failed - Server may be unavailable.';
+        } else if (event.reason.status === 429) {
+            errorMessage = 'Rate limit exceeded - Please wait a moment.';
+        } else if (event.reason.status >= 500) {
+            errorMessage = 'Server error - Please try again later.';
+        } else if (event.reason.status === 401) {
+            errorMessage = 'Authentication required - Please refresh the page.';
+        } else if (event.reason.status === 403) {
+            errorMessage = 'Access denied - You may not have permission.';
+        } else if (event.reason.status === 404) {
+            errorMessage = 'Resource not found - The requested endpoint may not exist.';
+        }
+    } else if (event.reason && event.reason.message) {
+        // This is a regular error
+        if (event.reason.message.includes('timeout')) {
+            errorMessage = 'Request timed out - Please try again.';
+        } else if (event.reason.message.includes('Failed to fetch')) {
+            errorMessage = 'Network error - Check your connection.';
+        } else if (event.reason.message.includes('AbortError')) {
+            errorMessage = 'Request was cancelled - Please try again.';
+        } else if (event.reason.message.includes('CSRF')) {
+            errorMessage = 'Authentication error - Please refresh the page.';
+        }
+    }
+    
+    // Show notification
+    if (typeof NotificationSystem !== 'undefined') {
+        NotificationSystem.show('error', errorMessage);
+    } else {
+        console.error('Error:', errorMessage);
+    }
+    
+    // Log the full error for debugging
+    console.error('Full error details:', event.reason);
+});
+
+// Global error handler for JavaScript errors
+window.addEventListener('error', function(event) {
+    console.error('JavaScript error:', event.error);
+    NotificationSystem.show('error', 'A system error occurred. Please refresh the page.');
+});
+
+// Enhanced API error handling
+const handleApiError = function(error, context = '') {
+    console.error(`API Error in ${context}:`, error);
+    
+    let userMessage = 'An error occurred while processing your request.';
+    
+    if (error.message) {
+        if (error.message.includes('Failed to fetch')) {
+            userMessage = 'Network connection error. Please check your internet connection.';
+        } else if (error.message.includes('401')) {
+            userMessage = 'Authentication failed. Please log in again.';
+        } else if (error.message.includes('403')) {
+            userMessage = 'Access denied. You may not have permission for this action.';
+        } else if (error.message.includes('404')) {
+            userMessage = 'The requested resource was not found.';
+        } else if (error.message.includes('500')) {
+            userMessage = 'Server error. Please try again later.';
+        } else if (error.message.includes('timeout')) {
+            userMessage = 'Request timed out. Please try again.';
+        } else {
+            userMessage = error.message;
+        }
+    }
+    
+    NotificationSystem.show('error', userMessage);
+    return userMessage;
+};
+
+// Enhanced success notification
+const handleApiSuccess = function(message, context = '') {
+    console.log(`API Success in ${context}:`, message);
+    NotificationSystem.show('success', message || 'Operation completed successfully.');
+};
+
+// Authentication status checker
+const checkAuthStatus = function() {
+    if (!linkedinId) {
+        NotificationSystem.show('warning', 'LinkedIn authentication required. Please refresh the page.');
+        return false;
+    }
+    return true;
+};
+

@@ -19,9 +19,17 @@ var addConnectionForm = `
                 </div>
                 <div class="form-group">
                     <label for="audience-select" class="font-weight-bold c-header">Select an audience</label>
-                    <select class="form-control shadow-none select-dropdown" id="addc-audience-select" style="height: 35px;">
-                        <option value="">Select an audience</option>
-                    </select>
+                    <div class="input-group">
+                        <select class="form-control shadow-none select-dropdown" id="addc-audience-select" style="height: 35px;">
+                            <option value="">Select an audience</option>
+                        </select>
+                        <div class="input-group-append">
+                            <button type="button" class="btn btn-outline-secondary" id="addc-refresh-audiences" title="Refresh audiences">
+                                <i class="fas fa-sync-alt"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <small class="text-muted">Having trouble? Click the refresh button or check the console for details.</small>
                 </div>
                 <div class="form-group">
                     <label for="addc-search-term" class="font-weight-bold c-header">Search</label>
@@ -531,8 +539,38 @@ $('body').append(addConnectionForm);
 $('#add-connect-menu-click').click(function(){
     implementPermission('addConnect')
     $('#addc-connSecondCheck').prop('checked', true);
-    var fieldId = 'addc-audience-select';
-    getAudienceList(fieldId);
+    
+    console.log('🚀 Add Connection modal opening...');
+    
+    // Check if user profile is loaded
+    var linkedinId = $('#me-publicIdentifier').val();
+    console.log('🔍 Current LinkedIn ID:', linkedinId);
+    
+    if (!linkedinId || linkedinId.trim() === '') {
+        console.log('⚠️ LinkedIn ID not found, calling getUserProfile first...');
+        
+        // Show loading in audience dropdown
+        $('#addc-audience-select').empty().append('<option value="">⏳ Loading user profile...</option>');
+        
+        // Call getUserProfile first, then getAudienceList
+        if (typeof getUserProfile === 'function') {
+            getUserProfile().then(() => {
+                console.log('✅ User profile loaded, now loading audiences...');
+                var fieldId = 'addc-audience-select';
+                getAudienceList(fieldId);
+            }).catch((error) => {
+                console.error('❌ Failed to load user profile:', error);
+                $('#addc-audience-select').empty().append('<option value="">❌ Failed to load profile - please refresh</option>');
+            });
+        } else {
+            console.error('❌ getUserProfile function not available');
+            $('#addc-audience-select').empty().append('<option value="">❌ Profile function not available</option>');
+        }
+    } else {
+        console.log('✅ LinkedIn ID found, loading audiences directly...');
+        var fieldId = 'addc-audience-select';
+        getAudienceList(fieldId);
+    }
 
     // append AI content to dropdown
     helper.setAIContentToDropdown('addc-audience-aicontent')
@@ -618,3 +656,49 @@ $('.addc-commented-check').change(function(){
         $('.addc-user-commented').val('').hide()
     }
 })
+
+// Add refresh audiences button handler
+$('#addc-refresh-audiences').click(function(){
+    console.log('🔄 Manual refresh of audiences requested...');
+    var fieldId = 'addc-audience-select';
+    
+    // Show loading
+    $(this).find('i').addClass('fa-spin');
+    
+    getAudienceList(fieldId).finally(() => {
+        // Remove spinning animation
+        $(this).find('i').removeClass('fa-spin');
+    });
+});
+
+// Debug helper function
+window.debugAudienceSelection = function() {
+    console.log('🔧 AUDIENCE SELECTION DEBUG INFO:');
+    console.log('LinkedIn ID (element):', $('#me-publicIdentifier').val());
+    console.log('LinkedIn ID (global):', typeof linkedinId !== 'undefined' ? linkedinId : 'UNDEFINED');
+    console.log('Filter API:', typeof filterApi !== 'undefined' ? filterApi : 'UNDEFINED');
+    console.log('Platform URL:', typeof PLATFROM_URL !== 'undefined' ? PLATFROM_URL : 'UNDEFINED');
+    console.log('Current audiences in dropdown:', $('#addc-audience-select option').length);
+    
+    // Test API call
+    var publicId = $('#me-publicIdentifier').val() || linkedinId;
+    if (publicId) {
+        console.log('🧪 Testing audience API call...');
+        fetch(`${filterApi}/audience?linkedinId=${publicId}`)
+            .then(response => {
+                console.log('✅ API Response Status:', response.status);
+                return response.json();
+            })
+            .then(data => {
+                console.log('✅ API Response Data:', data);
+            })
+            .catch(error => {
+                console.error('❌ API Test Error:', error);
+            });
+    } else {
+        console.error('❌ No LinkedIn ID available for testing');
+    }
+    
+    console.log('💡 To manually refresh: $("#addc-refresh-audiences").click()');
+    console.log('💡 To reload user profile: getUserProfile()');
+};

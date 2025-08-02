@@ -37,135 +37,108 @@ $('body').append(manageAudienceList);
 
 const getAudienceNameList = async () => {
     var displayList = '';
-    var publicId = $('#me-publicIdentifier').val();
-    
-    console.log('🔍 Fetching audiences for LinkedIn ID:', publicId);
-    console.log('🌐 API URL:', `${filterApi}/audience?linkedinId=${publicId}`);
+    console.log('🔍 getAudienceNameList called...');
 
     // Show loading state
     $('#audience-name-list').empty();
     $('#audience-name-list').html('<center><i class="fas fa-spinner fa-spin"></i> Loading audiences...</center>');
 
-    await $.ajax({
-        method: 'get',
-        url: `${filterApi}/audience?linkedinId=${publicId}`,
-        timeout: 10000, // 10 second timeout
-        success: function(data){
-            console.log('✅ API Response:', data);
-            console.log('📋 Data type:', typeof data);
-            console.log('📋 Data keys:', Object.keys(data));
-            console.log('📋 Has audience property:', data.hasOwnProperty('audience'));
-            console.log('📋 Audience length:', data.audience ? data.audience.length : 'undefined');
+    try {
+        // Use the unified audience fetching function
+        const response = await fetchAudiencesFromAPI();
+            console.log('✅ API Response:', response);
             
-            if(data && data.audience && data.audience.length > 0){
-                var audienceInfo = data.audience;
-                console.log('📊 Audience data:', audienceInfo);
-
-                $('#pager-audience-list').pagination({
-                    dataSource: audienceInfo,
-                    className: 'paginationjs-theme-blue',
-                    pageSize: 5,
-                    callback: function(audienceInfo, pagination) {
-                        $('#audience-name-list').empty()
-
-                        $.each(audienceInfo, function(i,item){
-                            displayList = `
-                                <tr class="audience-list${item.id}">
-                                    <td>${item.audience_name}</td>
-                                    <td>${item.total}</td>
-                                    <td>
-                                        <div class="juez-tooltip">
-                                            <i class="fas fa-user-plus add-more-users cursorr" 
-                                                data-audid ="${item.audience_id}" 
-                                                data-name="${item.audience_name}"></i>
-                                            <span class="juez-tooltiptext">Add more users</span>
-                                        </div>
-                                    </td>
-                                    <td>
-                                        <div class="juez-tooltip">
-                                            <i class="fas fa-eye cursorr get-audience-list" 
-                                                data-name="${item.audience_name}"
-                                                data-audid="${item.audience_id}"></i>
-                                            <span class="juez-tooltiptext">View users</span>
-                                        </div>
-                                    </td>
-                                    <td>
-                                        <div class="juez-tooltip">
-                                            <i class="fas fa-download cursorr export-audience"
-                                            data-audid="${item.audience_id}"></i>
-                                            <span class="juez-tooltiptext">Export</span>
-                                        </div>
-                                    </td>
-                                    <td>
-                                        <div class="juez-tooltip">
-                                            <i class="far fa-trash-alt cursorr delete-audience"
-                                                data-audid="${item.audience_id}"
-                                                data-rowid="${item.id}"></i>
-                                            <span class="juez-tooltiptext">Delete</span>
-                                        </div>
-                                    </td>
-                                </tr>
-                            `;
-                            $('#audience-name-list').append(displayList)
-                        })
-                    }
-                })
-            }else{
-                $('#audience-name-list').empty()
-                displayList = `
-                    <center> 
-                        <div style="color: #666; margin: 20px 0;">
-                            <i class="fas fa-info-circle"></i> No audience available
-                        </div>
-                        <div style="font-size: 12px; color: #999;">
-                            Create your first audience to get started
-                        </div>
-                    </center>
-                `
-                $('#audience-name-list').append(displayList)
-            }
-        },
-        error: function(xhr, status, error){
-            console.error('❌ API Error:', {
-                status: status,
-                error: error,
-                response: xhr.responseText,
-                statusCode: xhr.status
-            });
-            
-            $('#audience-name-list').empty();
-            
-            let errorMessage = 'Failed to load audiences';
-            if (xhr.status === 0) {
-                errorMessage = 'Network error - Check your internet connection';
-            } else if (xhr.status === 404) {
-                errorMessage = 'API endpoint not found';
-            } else if (xhr.status === 500) {
-                errorMessage = 'Server error - Backend issue (Contact support)';
-            } else if (xhr.status === 401) {
-                errorMessage = 'Unauthorized - Check authentication';
-            } else if (xhr.status === 403) {
-                errorMessage = 'Forbidden - Access denied';
-            } else if (xhr.status >= 500) {
-                errorMessage = 'Server error - Backend is down';
-            }
-            
-            displayList = `
-                <center> 
-                    <div style="color: #dc3545; margin: 20px 0;">
-                        <i class="fas fa-exclamation-triangle"></i> ${errorMessage}
-                    </div>
-                    <div style="font-size: 12px; color: #999;">
-                        Status: ${xhr.status} | Error: ${error}
-                    </div>
-                    <button class="btn btn-sm btn-outline-primary mt-2 retry-audience-list">
-                        <i class="fas fa-redo"></i> Retry
-                    </button>
-                </center>
-            `;
-            $('#audience-name-list').append(displayList);
+        let audienceInfo = [];
+        
+        // Handle the response structure consistently
+        if (response && response.success && response.data && response.data.audience) {
+            audienceInfo = response.data.audience;
+            console.log('📊 Found audiences in response.data.audience:', audienceInfo.length);
         }
-    })
+        // Handle enhanced apiRequest response format  
+        else if (response && response.data && response.data.audience) {
+            audienceInfo = response.data.audience;
+            console.log('📊 Found audiences in response.data.audience (enhanced):', audienceInfo.length);
+        }
+        // Fallback for old format
+        else if (Array.isArray(response.audience)) {
+            audienceInfo = response.audience;
+            console.log('📊 Found audiences in response.audience:', audienceInfo.length);
+        }
+        
+        console.log('📋 Final audience data:', audienceInfo);
+
+        if (audienceInfo && audienceInfo.length > 0) {
+                        $('#pager-audience-list').pagination({
+                            dataSource: audienceInfo,
+                            className: 'paginationjs-theme-blue',
+                            pageSize: 5,
+                            callback: function(audienceInfo, pagination) {
+                                $('#audience-name-list').empty()
+
+                                $.each(audienceInfo, function(i,item){
+                                    displayList = `
+                                        <tr class="audience-list${item.id}">
+                                            <td>${item.audience_name}</td>
+                                            <td>${item.total}</td>
+                                            <td>
+                                                <div class="juez-tooltip">
+                                                    <i class="fas fa-user-plus add-more-users cursorr" 
+                                                        data-audid ="${item.audience_id}" 
+                                                        data-name="${item.audience_name}"></i>
+                                                    <span class="juez-tooltiptext">Add more users</span>
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <div class="juez-tooltip">
+                                                    <i class="fas fa-eye cursorr get-audience-list" 
+                                                        data-name="${item.audience_name}"
+                                                        data-audid="${item.audience_id}"></i>
+                                        <span class="juez-tooltiptext">View audience</span>
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <div class="juez-tooltip">
+                                        <i class="fas fa-download download-audience cursorr" 
+                                            data-audid="${item.audience_id}" 
+                                            data-name="${item.audience_name}"></i>
+                                        <span class="juez-tooltiptext">Download audience</span>
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <div class="juez-tooltip">
+                                        <i class="fas fa-trash cursorr delete-audience" 
+                                                        data-audid="${item.audience_id}"
+                                            data-name="${item.audience_name}"></i>
+                                        <span class="juez-tooltiptext">Delete audience</span>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    `;
+                        $('#audience-name-list').append(displayList);
+                    });
+                            }
+            });
+            console.log(`🎉 Successfully loaded ${audienceInfo.length} audiences`);
+        } else {
+            $('#audience-name-list').html('<tr><td colspan="6" class="text-center">No audiences found. Create your first audience!</td></tr>');
+            console.log('ℹ️ No audiences found for this user');
+                }
+        
+    } catch (error) {
+        console.error('❌ Error in getAudienceNameList:', error);
+        
+        // Show error message to user
+        $('#audience-name-list').html(`
+            <tr>
+                <td colspan="6" class="text-center text-danger">
+                    <i class="fas fa-exclamation-triangle"></i> 
+                    Failed to load audiences. ${error.message || 'Please try again.'}
+                    <br><small>Check console for details</small>
+                </td>
+            </tr>
+        `);
+    }
 }
 
 $('body').on('click','.add-more-users',function(){

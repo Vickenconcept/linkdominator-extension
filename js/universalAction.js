@@ -144,100 +144,163 @@ const sendMessage = async (voyagerApi=null) => {
  * For all modules minus service worker and auto response
  * @param {Object} params 
  */
-const sendMessageToConnection = (params, callback) => {
-    let message = changeMessageVariableNames(params.message, params)
-    let url = ''
-    let conversationObj = {}
-    let messageEvent = {
-        value: {
-            'com.linkedin.voyager.messaging.create.MessageCreate' : {
-                attachments: params.attachement,
-                body: message,
-                attributedBody: {"text": message, "attributes": []},
-                mediaAttachments: [],
+const sendMessageToConnection = async (params) => {
+    try {
+        console.log('🔍 Preparing message for:', params.name);
+        
+        // Replace variables in message
+        let message = changeMessageVariableNames(params.message, params);
+        
+        // Determine URL and conversation object based on whether we have an existing conversation
+        let url = '';
+        let conversationObj = {};
+        
+        // Prepare message event
+        const messageEvent = {
+            value: {
+                'com.linkedin.voyager.messaging.create.MessageCreate': {
+                    attachments: params.attachement || [],
+                    body: message,
+                    attributedBody: { "text": message, "attributes": [] },
+                    mediaAttachments: [],
+                }
             }
-        }
-    }
+        };
 
-    if(params.hasOwnProperty('conversationUrnId') && params.conversationUrnId) {
-        url = `${voyagerApi}/messaging/conversations/${params.conversationUrnId}/events?action=create`
-        conversationObj = {
-            eventCreate: messageEvent
+        // Set URL and conversation object based on whether we have an existing conversation
+        if (params.conversationUrnId) {
+            console.log('📧 Using existing conversation:', params.conversationUrnId);
+            url = `${voyagerApi}/messaging/conversations/${params.conversationUrnId}/events?action=create`;
+            conversationObj = {
+                eventCreate: messageEvent
+            };
+        } else {
+            console.log('📧 Creating new conversation');
+            url = `${voyagerApi}/messaging/conversations?action=create`;
+            conversationObj = {
+                conversationCreate: {
+                    eventCreate: messageEvent,
+                    recipients: [params.connectionId],
+                    subtype: params.distance === 1 ? "MEMBER_TO_MEMBER" : "INMAIL"
+                }
+            };
         }
-    }else {
-        url = `${voyagerApi}/messaging/conversations?action=create`
-        conversationObj = {
-            conversationCreate: {
-                eventCreate: messageEvent,
-                recipients: [params.connectionId],
-                subtype: params.distance == 1 ? "MEMBER_TO_MEMBER" : "INMAIL"
-            }
-        }
-    }
 
-    $.ajax({
-        method: 'post',
-        beforeSend: function(req) {
-            req.setRequestHeader('csrf-token', jsession);
-            req.setRequestHeader('accept', accept);
-            req.setRequestHeader('content-type', contentType);
-            req.setRequestHeader('x-li-lang', xLiLang);
-            req.setRequestHeader('x-li-page-instance', xLiPageInstance);
-            req.setRequestHeader('x-li-track', JSON.stringify(xLiTrack));
-            req.setRequestHeader('x-restli-protocol-version', xRestliProtocolVersion);
-        },
-        url: url,
-        data: JSON.stringify(conversationObj),
-        success: function(res) {
-            if(!res.value.createdAt) {
-                callback({status: 'failed', message: 'Message not sent!'})
-            }else{
-                let conversationUrnId = res.value.backendEventUrn.replace('urn:li:messagingMessage:','')
-                
-                sendDeliveryAcknowledgement(conversationUrnId)
-                callback({status: 'successful', message: 'Message sent!'})
+        console.log('📤 Sending message to LinkedIn API...', {
+            url,
+            message: message.substring(0, 50) + '...',
+            recipient: params.name
+        });
+        
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'csrf-token': jsession,
+                'accept': 'application/vnd.linkedin.normalized+json+2.1',
+                'content-type': 'application/json; charset=UTF-8',
+                'x-li-lang': 'en_US',
+                'x-li-page-instance': 'urn:li:page:d_flagship3_messaging_conversation_detail;' + Math.random().toString(36).substring(2, 15),
+                'x-li-track': JSON.stringify({
+                    "clientVersion": "1.11.5612",
+                    "mpVersion": "2.0",
+                    "osName": "web",
+                    "timezoneOffset": new Date().getTimezoneOffset(),
+                    "deviceFormFactor": "DESKTOP",
+                    "mpName": "voyager-web"
+                }),
+                'x-restli-protocol-version': '2.0.0'
+            },
+            body: JSON.stringify(conversationObj),
+            credentials: 'include'
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            console.error('❌ LinkedIn API Error:', {
+                status: response.status,
+                statusText: response.statusText,
+                errorData
+            });
+
+            let errorMessage = 'Failed to send message';
+            if (errorData.message) {
+                errorMessage = errorData.message;
+            } else if (errorData.code) {
+                errorMessage = errorData.code;
+            } else if (response.status === 403) {
+                errorMessage = 'Message inbox might be locked or not a 1st degree connection';
+            } else if (response.status === 429) {
+                errorMessage = 'Too many messages sent. Please wait and try again.';
+            } else if (response.status === 401) {
+                errorMessage = 'LinkedIn session expired. Please refresh the page and try again.';
             }
-        },
-        error: function(err, statusText, responseText) {
-            let notice = '', msg = '';
-            if(err.responseJSON.status) {
-                if(err.responseJSON.message)
-                    notice = err.responseJSON.message
-                else
-                    notice = err.responseJSON.code
-                
-                msg = `Message not sent.
-                    <br/>Reason: ${notice} <br/>
-                    Message inbox might be locked.<br/>
-                    Not a 1st degree connection.
-                `;
-            }else {
-                msg = responseText
-            }
-            callback({status: 'failed', mesaage: msg})
+
+            return {
+                status: 'failed',
+                message: errorMessage
+            };
         }
-    })
-}
+
+        const data = await response.json();
+        
+        if (!data.value?.createdAt) {
+            console.error('❌ Message not created:', data);
+            return {
+                status: 'failed',
+                message: 'Message not sent - no creation timestamp'
+            };
+        }
+
+        // Extract conversation ID and send delivery acknowledgement
+        const conversationUrnId = data.value.backendEventUrn.replace('urn:li:messagingMessage:', '');
+        console.log('✅ Message sent successfully, conversation ID:', conversationUrnId);
+        
+        try {
+            await sendDeliveryAcknowledgement(conversationUrnId);
+            console.log('✅ Delivery acknowledgement sent');
+        } catch (ackError) {
+            console.warn('⚠️ Failed to send delivery acknowledgement:', ackError);
+            // Don't fail the whole operation if this fails
+        }
+
+        return {
+            status: 'successful',
+            message: 'Message sent successfully',
+            conversationId: conversationUrnId
+        };
+
+    } catch (error) {
+        console.error('❌ Error in sendMessageToConnection:', error);
+        return {
+            status: 'failed',
+            message: error.message || 'Unexpected error sending message'
+        };
+    }
+};
 
 /**
- * @param {string} conversationUrnId
+ * Send delivery acknowledgement for a message
+ * @param {string} conversationUrnId - The conversation URN ID
+ * @returns {Promise} - Resolves when acknowledgement is sent
  */
-const sendDeliveryAcknowledgement = conversationUrnId => {
-    let url = `${VOYAGER_API}/voyagerMessagingDashMessengerMessageDeliveryAcknowledgements?action=sendDeliveryAcknowledgement`
-
-    $.ajax({
-        method: 'post',
-        beforeSend: function(req) {
-            req.setRequestHeader('csrf-token', jsession);
-            req.setRequestHeader('accept', 'application/json');
-            req.setRequestHeader('content-type', 'text/plain;charset=UTF-8');
-            req.setRequestHeader('x-li-lang', xLiLang);
-            req.setRequestHeader('x-li-page-instance', 'urn:li:page:d_flagship3_profile_view_base;rh3RgoZWQSq5byvkwh5wvA==');
-            req.setRequestHeader('x-li-track', JSON.stringify(xLiTrack));
-            req.setRequestHeader('x-restli-protocol-version', xRestliProtocolVersion);
-        },
-        url: url,
-        data: JSON.stringify({
+const sendDeliveryAcknowledgement = async (conversationUrnId) => {
+    try {
+        console.log('📨 Sending delivery acknowledgement for:', conversationUrnId);
+        
+        const url = `${VOYAGER_API}/voyagerMessagingDashMessengerMessageDeliveryAcknowledgements?action=sendDeliveryAcknowledgement`;
+        
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'csrf-token': jsession,
+                'accept': 'application/json',
+                'content-type': 'text/plain;charset=UTF-8',
+                'x-li-lang': xLiLang,
+                'x-li-page-instance': 'urn:li:page:d_flagship3_profile_view_base;rh3RgoZWQSq5byvkwh5wvA==',
+                'x-li-track': JSON.stringify(xLiTrack),
+                'x-restli-protocol-version': xRestliProtocolVersion
+            },
+            body: JSON.stringify({
             'clientConsumedAt': dInt,
             'clientId': 'voyager-web',
             'deliveryMechanism': 'REALTIME',
@@ -245,19 +308,32 @@ const sendDeliveryAcknowledgement = conversationUrnId => {
                 `urn:li:msg_message:(urn:li:fsd_profile:${profileUrn},${conversationUrnId})`
             ]
         }),
-        success: function(data) {},
-        error: function(err, textStatus, responseText) {
-            console.log(responseText)
+            credentials: 'include'
+        });
+
+        if (!response.ok) {
+            throw new Error(`Failed to send acknowledgement: ${response.status} ${response.statusText}`);
         }
-    })
+
+        const data = await response.json();
+        console.log('✅ Delivery acknowledgement sent successfully');
+        return data;
+
+    } catch (error) {
+        console.warn('⚠️ Error sending delivery acknowledgement:', error);
+        throw error; // Re-throw to let caller handle it
+    }
 }
 
 /**
  * Get AI contents
+ * @returns {Promise} Resolves when AI contents are loaded
  */
 const getAIContents = () => {
-    let url = `${filterApi}/aicontents`
+    console.log('🔍 Loading AI content templates...');
+    const url = `${filterApi}/aicontents`;
 
+    return new Promise((resolve, reject) => {
     $.ajax({
         method: 'get',
         beforeSend: function(req) {
@@ -265,14 +341,30 @@ const getAIContents = () => {
         },
         url: url,
         success: function(res) {
-            aicontents = res.data
+                if (res.data && Array.isArray(res.data)) {
+                    console.log(`✅ Loaded ${res.data.length} message templates`);
+                    aicontents = res.data;
+                    resolve(res.data);
+                } else {
+                    console.warn('⚠️ No message templates found in response');
+                    aicontents = [];
+                    resolve([]);
+                }
         },
         error: function(err, textStatus) {
-            if(err.hasOwnProperty('responseJSON'))
-                console.log(err.responseJSON.message);
-            else console.log(textStatus);
-        }
-    })
+                console.error('❌ Failed to load message templates:', err);
+                let errorMessage = 'Failed to load message templates';
+                
+                if (err.hasOwnProperty('responseJSON')) {
+                    errorMessage = err.responseJSON.message || errorMessage;
+                } else {
+                    errorMessage = textStatus || errorMessage;
+                }
+                
+                reject(new Error(errorMessage));
+            }
+        });
+    });
 }
 
 /**
@@ -435,15 +527,13 @@ const setParamsToFormFields = (lkmModule, formFields) => {
  * @returns String
  */
 const changeMessageVariableNames = (message, connectionNames) => {
-    if(message.includes('@firstName')){
-        message = message.replace('@firstName',connectionNames.firstName)
-    }
-    if(message.includes('@lastName')){
-        message = message.replace('@lastName',connectionNames.lastName)
-    }
-    if(message.includes('@name')){
-        message = message.replace('@name',connectionNames.name)
-    }
-  
-    return message;
+    return message
+        .replace(/\{firstName\}/g, connectionNames.firstName || '')
+        .replace(/\{lastName\}/g, connectionNames.lastName || '')
+        .replace(/\{name\}/g, connectionNames.name || '')
+        .replace(/\{title\}/g, connectionNames.title || '')
+        .replace(/@firstName/g, connectionNames.firstName || '')
+        .replace(/@lastName/g, connectionNames.lastName || '')
+        .replace(/@name/g, connectionNames.name || '')
+        .replace(/@title/g, connectionNames.title || '');
 }

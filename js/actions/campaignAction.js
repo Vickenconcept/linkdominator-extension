@@ -1,23 +1,97 @@
 let campaignData = [], campaignLeads = [], campaignSequence = [], campaignLeadgenRunning = [];
 let selectedCampaign;
 
+// API configuration and error handling
+const API_CONFIG = {
+    timeout: 30000, // 30 seconds
+    retryAttempts: 3,
+    retryDelay: 2000
+};
+
+// Enhanced fetch wrapper with retry mechanism and error handling
+const apiRequest = async (url, options = {}) => {
+    const defaultOptions = {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json',
+            'lk-id': linkedinId
+            // Removed csrf-token header to eliminate CSRF issues
+        },
+        ...options
+    };
+
+    // Remove CSRF token logic since we're disabling CSRF validation
+    console.log('🌐 Making API request to:', url, 'with options:', defaultOptions);
+
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), API_CONFIG.timeout);
+
+        const response = await fetch(url, {
+            ...defaultOptions,
+            signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+
+        // Check if response is JSON
+        const contentType = response.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+            const data = await response.json();
+            
+            // Check for success status (200 or 201)
+            if (data.status === 200 || data.status === 201) {
+                console.log('✅ API request successful:', data);
+                return data;
+            } else {
+                console.error('❌ API request failed:', data);
+                throw new Error(data.message || 'API request failed');
+            }
+        } else {
+            // Handle non-JSON responses (like CSRF errors)
+            const text = await response.text();
+            console.error('❌ Non-JSON response received:', text);
+            throw new Error(`Server returned: ${text}`);
+        }
+    } catch (error) {
+        if (error.name === 'AbortError') {
+            console.error('⏰ API request timed out');
+            throw new Error('Request timed out');
+        }
+        
+        // Retry logic for network errors
+        if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+            console.log('🔄 Network error, retrying...');
+            if (API_CONFIG.retryCount < API_CONFIG.maxRetries) {
+                API_CONFIG.retryCount++;
+                await new Promise(resolve => setTimeout(resolve, API_CONFIG.retryDelay));
+                return apiRequest(url, options);
+            }
+        }
+        
+        console.error('❌ API request error:', error);
+        throw error;
+    }
+};
+
 /**
  * Get all campaign resource
  */
-const getCampaigns = () => {
-    fetch(`${PLATFROM_URL}/api/campaigns`, {
-        method: 'get',
-        headers: {
-            'lk-id': linkedinId
-        }
-    })
-    .then(res => res.json())
-    .then(res => {
-        if(res.status == 200){
-            campaignData = res.data
-            setCampaigns()
-        }
-    })
+const getCampaigns = async () => {
+    try {
+        console.log('Fetching campaigns...');
+        const response = await apiRequest(`${PLATFROM_URL}/api/campaigns`, {
+            method: 'GET'
+        });
+        
+        campaignData = response.data;
+        setCampaigns();
+        console.log('Campaigns loaded successfully:', campaignData.length);
+        
+    } catch (error) {
+        console.error('Error fetching campaigns:', error);
+        showErrorMessage('Failed to load campaigns: ' + error.message);
+    }
 }
 
 /**
@@ -51,19 +125,21 @@ const setCampaigns = () => {
  * @param {integer} campaignId 
  */
 const getCampaignLeads = async (campaignId, callback) => {
-    await fetch(`${PLATFROM_URL}/api/campaign/${campaignId}/leads`, {
-        method: 'get',
-        headers: {
-            'lk-id': linkedinId
-        }
-    })
-    .then(res => res.json())
-    .then(res => {
-        if(res.status == 200){
-            campaignLeads = res.data
-            callback(res.data)
-        }
-    })
+    try {
+        console.log('Fetching campaign leads for ID:', campaignId);
+        const response = await apiRequest(`${PLATFROM_URL}/api/campaign/${campaignId}/leads`, {
+            method: 'GET'
+        });
+        
+        campaignLeads = response.data;
+        console.log('Campaign leads loaded:', campaignLeads.length);
+        callback(response.data);
+        
+    } catch (error) {
+        console.error('Error fetching campaign leads:', error);
+        showErrorMessage('Failed to load campaign leads: ' + error.message);
+        callback([]);
+    }
 }
 
 /**
@@ -71,94 +147,110 @@ const getCampaignLeads = async (campaignId, callback) => {
  * @param {integer} campaignId
  */
 const getCampaignSequence = async (campaignId) => {
-    console.log('Fetching campaign sequence for ID:', campaignId);
-    console.log('API URL:', `${PLATFROM_URL}/api/campaign/${campaignId}/sequence`);
-    console.log('LinkedIn ID:', linkedinId);
-    
     try {
-        const response = await fetch(`${PLATFROM_URL}/api/campaign/${campaignId}/sequence`, {
-            method: 'get',
-            headers: {
-                'lk-id': linkedinId
-            }
+        console.log('Fetching campaign sequence for ID:', campaignId);
+        const response = await apiRequest(`${PLATFROM_URL}/api/campaign/${campaignId}/sequence`, {
+            method: 'GET'
         });
         
-        console.log('Response status:', response.status);
-        console.log('Response headers:', response.headers);
+        campaignSequence = response.data;
+        console.log('Campaign sequence loaded successfully:', campaignSequence);
+        return campaignSequence;
         
-        const res = await response.json();
-        console.log('API Response:', res);
-        
-        if(res.status == 200){
-            campaignSequence = res.data;
-            console.log('Campaign sequence set:', campaignSequence);
-        } else {
-            console.log('API returned non-200 status:', res.status);
-        }
     } catch (error) {
-        console.log('Error fetching campaign sequence:', error);
+        console.error('Error fetching campaign sequence:', error);
+        showErrorMessage('Failed to load campaign sequence: ' + error.message);
+        return null;
     }
 }
 
 /**
- * Update campaign specific resource
+ * Update campaign
  * @param {object} data 
  */
-const updateCampaign = (data) => {
-    for(let item of campaignData){
-        if(item.id == data.campaignId){
-            selectedCampaign = item
+const updateCampaign = async (data) => {
+    try {
+        console.log('Updating campaign:', data);
+        
+        // Extract campaignId from the data object
+        const campaignId = data.campaignId || data.id;
+        
+        if (!campaignId) {
+            throw new Error('Campaign ID is required');
         }
-    }
-
-    let formData = new FormData();
-    if(selectedCampaign && Object.keys(selectedCampaign).length){
-        formData.append('campaign_name', selectedCampaign.name);
-        formData.append('process_condition', JSON.stringify(selectedCampaign.notProcessConditionIf));
-    }
-    formData.append('status', data.status);
-
-    fetch(`${PLATFROM_URL}/api/campaign/${data.campaignId}/update`, {
-        method: 'post',
-        headers: {
-            'lk-id': linkedinId,
-        },
-        body: formData
-    })
-    .then(res => res.json())
-    .then(res => {
-        if(res.status == 200){
-            getCampaigns()
-            if(data.status == 'running'){
-                chrome.runtime.sendMessage({campaign: selectedCampaign}, function(response) {
-                    console.log(response)
-                })
-            }else if(data.status == 'stop'){
-                chrome.runtime.sendMessage({stopCampaign: selectedCampaign}, function(response) {
-                    console.log(response)
-                })
-            }
+        
+        // Prepare the request data - backend expects specific fields
+        const requestData = {};
+        
+        if (data.status) {
+            requestData.status = data.status;
         }
-    })
+        if (data.campaign_name) {
+            requestData.campaign_name = data.campaign_name;
+        }
+        if (data.process_condition) {
+            requestData.process_condition = data.process_condition;
+        }
+        
+        console.log('Sending campaign update request:', {
+            url: `${PLATFROM_URL}/api/campaign/${campaignId}/update`,
+            data: requestData
+        });
+        
+        const response = await apiRequest(`${PLATFROM_URL}/api/campaign/${campaignId}/update`, {
+            method: 'POST',
+            body: JSON.stringify(requestData)
+        });
+        
+        console.log('Campaign updated successfully');
+        
+        // Refresh campaigns list after update
+        if (typeof getCampaigns === 'function') {
+            getCampaigns();
+        }
+        
+        return response.data;
+        
+    } catch (error) {
+        console.error('Error updating campaign:', error);
+        showErrorMessage('Failed to update campaign: ' + error.message);
+        throw error;
+    }
 }
 
 /**
- * Update run status of specific item in node model
+ * Update sequence node model
+ * @param {object} campaign 
+ * @param {object} nodeModel 
  */
 const updateSequenceNodeModel = async (campaign, nodeModel) => {
-    let formData = new FormData();
-    formData.append('nodeKey', nodeModel.key);
-    formData.append('runStatus', true);
-
-    await fetch(`${PLATFROM_URL}/api/campaign/${campaign.id}/update-node`, {
-        method: 'post',
-        headers: {
-            'lk-id': linkedinId,
-        },
-        body: formData
-    })
-    .then(res => res.json())
-    .then(() => {})
+    try {
+        console.log('Updating sequence node model for campaign:', campaign.id);
+        
+        // Prepare the request data - backend expects specific fields
+        const requestData = {
+            nodeKey: nodeModel.key,
+            runStatus: nodeModel.runStatus || true
+        };
+        
+        console.log('Sending sequence update request:', {
+            url: `${PLATFROM_URL}/api/campaign/${campaign.id}/update-node`,
+            data: requestData
+        });
+        
+        const response = await apiRequest(`${PLATFROM_URL}/api/campaign/${campaign.id}/update-node`, {
+            method: 'POST',
+            body: JSON.stringify(requestData)
+        });
+        
+        console.log('Sequence node model updated successfully');
+        return response.data;
+        
+    } catch (error) {
+        console.error('Error updating sequence node model:', error);
+        showErrorMessage('Failed to update sequence: ' + error.message);
+        throw error;
+    }
 }
 
 /**
@@ -177,27 +269,41 @@ const createLeadGenRunning = campaignId => {
 }
 
 /**
- * Update specified leadgen lead running for the current campaign
+ * Update lead gen running
  * @param {integer} campaignId 
  * @param {integer} leadId 
  * @param {object} data 
  */
 const updateLeadGenRunning = async (campaignId, leadId, data) => {
-    let formData = new FormData();
-    formData.append('acceptedStatus', data.acceptedStatus ? 1 : 0);
-    formData.append('currentNodeKey', data.currentNodeKey);
-    formData.append('nextNodeKey', data.nextNodeKey);
-    formData.append('statusLastId', data.statusLastId);
-
-    await fetch(`${PLATFROM_URL}/api/campaign/${campaignId}/leadgen/${leadId}/update`, {
-        method: 'post',
-        headers: {
-            'lk-id': linkedinId,
-        },
-        body: formData
-    })
-    .then(res => res.json())
-    .then(() => {})
+    try {
+        console.log('Updating lead gen running for campaign:', campaignId, 'lead:', leadId);
+        
+        // Prepare the request data - backend expects specific fields
+        const requestData = {
+            acceptedStatus: data.acceptedStatus ? 1 : 0,
+            currentNodeKey: data.currentNodeKey,
+            nextNodeKey: data.nextNodeKey,
+            statusLastId: data.statusLastId
+        };
+        
+        console.log('Sending lead gen update request:', {
+            url: `${PLATFROM_URL}/api/campaign/${campaignId}/leadgen/${leadId}/update`,
+            data: requestData
+        });
+        
+        const response = await apiRequest(`${PLATFROM_URL}/api/campaign/${campaignId}/leadgen/${leadId}/update`, {
+            method: 'POST',
+            body: JSON.stringify(requestData)
+        });
+        
+        console.log('Lead gen running updated successfully');
+        return response.data;
+        
+    } catch (error) {
+        console.error('Error updating lead gen running:', error);
+        showErrorMessage('Failed to update lead status: ' + error.message);
+        throw error;
+    }
 }
 
 /**
@@ -205,58 +311,106 @@ const updateLeadGenRunning = async (campaignId, leadId, data) => {
  * @param {integer} campaignId 
  */
 const getLeadGenRunning = async (campaignId) => {
-    await fetch(`${PLATFROM_URL}/api/campaign/${campaignId}/leadgen`, {
-        headers: {
-            'lk-id': linkedinId
-        }
-    })
-    .then(res => res.json())
-    .then(res => {
-        if(res.status == 200){
-            campaignLeadgenRunning = res.data
-        }
-    })
-}
-
-const updateLeadNetworkDegree = async (leadData) => {
-    let formData = new FormData();
-    formData.append('networkDegree', leadData.networkDegree);
-    formData.append('leadSrc', leadData.source);
-
-    await fetch(`${PLATFROM_URL}/api/lead/${leadData.id}/update`, {
-        method: 'post',
-        headers: {
-            'lk-id': linkedinId,
-        },
-        body: formData
-    })
-    .then(res => res.json())
-    .then(() => {})
+    try {
+        console.log('Fetching lead gen running for campaign:', campaignId);
+        const response = await apiRequest(`${PLATFROM_URL}/api/campaign/${campaignId}/leads/running`, {
+            method: 'GET'
+        });
+        
+        campaignLeadgenRunning = response.data;
+        console.log('Lead gen running loaded:', campaignLeadgenRunning.length);
+        return response.data;
+        
+    } catch (error) {
+        console.error('Error fetching lead gen running:', error);
+        showErrorMessage('Failed to load lead status: ' + error.message);
+        return [];
+    }
 }
 
 /**
- * Save call status
+ * Update lead network degree
+ * @param {object} leadData 
+ */
+const updateLeadNetworkDegree = async (leadData) => {
+    try {
+        console.log('Updating lead network degree for:', leadData.id);
+        
+        // Prepare the request data - backend expects specific fields
+        const requestData = {
+            networkDegree: leadData.networkDegree,
+            leadSrc: leadData.source || 'aud' // Default to 'aud' for audience leads
+        };
+        
+        console.log('Sending lead network update request:', {
+            url: `${PLATFROM_URL}/api/lead/${leadData.id}/update`,
+            data: requestData
+        });
+        
+        const response = await apiRequest(`${PLATFROM_URL}/api/lead/${leadData.id}/update`, {
+            method: 'POST',
+            body: JSON.stringify(requestData)
+        });
+        
+        console.log('Lead network degree updated successfully');
+        return response.data;
+        
+    } catch (error) {
+        console.error('Error updating lead network degree:', error);
+        showErrorMessage('Failed to update lead network info: ' + error.message);
+        throw error;
+    }
+}
+
+/**
+ * Store call status
+ * @param {object} data 
  */
 const storeCallStatus = async (data) => {
     try {
-        let formData = new FormData();
-        formData.append('recipient', data.recipient);
-        formData.append('profile', data.profile);
-        formData.append('sequence', data.sequence);
-        formData.append('callStatus', data.callStatus);
-
-        await fetch(`${PLATFROM_URL}/api/book-call/store`, {
-            method: 'post',
-            headers: {
-                'lk-id': linkedinId,
-            },
-            body: formData
-        })
-        .then(res => res.json())
-        .then(() => {
-
-        })
+        console.log('Storing call status:', data);
+        
+        // Prepare the request data - backend expects specific fields
+        const requestData = {
+            recipient: data.recipient,
+            profile: data.profile,
+            sequence: data.sequence,
+            callStatus: data.callStatus
+        };
+        
+        console.log('Sending call status store request:', {
+            url: `${PLATFROM_URL}/api/book-call/store`,
+            data: requestData
+        });
+        
+        const response = await apiRequest(`${PLATFROM_URL}/api/book-call/store`, {
+            method: 'POST',
+            body: JSON.stringify(requestData)
+        });
+        
+        console.log('Call status stored successfully');
+        return response.data;
+        
     } catch (error) {
-        console.log(error.message)
+        console.error('Error storing call status:', error);
+        showErrorMessage('Failed to store call status: ' + error.message);
+        throw error;
     }
 }
+
+// Utility function to show error messages to user
+const showErrorMessage = (message) => {
+    console.error('User Error:', message);
+    
+    // Use the new notification system
+    if (typeof NotificationSystem !== 'undefined') {
+        NotificationSystem.show('error', message);
+    } else if (typeof alert !== 'undefined') {
+        // Fallback to basic alert if notification system not available and alert is available
+        console.error('Notification system not available, showing alert:', message);
+        alert('Error: ' + message);
+    } else {
+        // Background script context - just log the error
+        console.error('Error in background context:', message);
+    }
+};

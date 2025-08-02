@@ -1,95 +1,177 @@
-
-$('.messageTargetUserAction').click(function(){
-    $('#displayMessageTargetStatus').empty()
-    var mtuStartP = $('#mtu-startPosition'),
-        mtuTotal = $('#mtu-totalMessageConnect'),
-        mtuDelay = $('#mtu-delayTime'),
-        mtuMessage = $('#mtu-personalMessage'),
-        mtuConnectionIds = [];
-    var mtuconnectnId = '',
-        mturegionId = '',
-        mtucurrCompId = '',
-        mtupastCompId = '',
-        mtuindustryId = '',
-        mtuschoolId = '',
-        mtulangId='';
-    var mtuControlFiels = [mtuDelay,mtuTotal,mtuMessage];
-
-    var queryParams = '';
+// Debug: Add global click listener for testing
+$(document).ready(function() {
+    console.log('✅ Message Target Users Action script loaded');
     
-    // validate fields
-    if(mtuTotal.val() =='' || mtuDelay.val() =='' || mtuMessage.val() ==''){
-        for(var i=0;i<mtuControlFiels.length;i++){
-            if(mtuControlFiels[i].val() == ''){
-                $('#mtu-error-notice').html(`${mtuControlFiels[i].data('name')} field cannot be empty`)
-            }
+    // Test if the button exists
+    setTimeout(() => {
+        const button = $('.messageTargetUserAction');
+        console.log('🔍 Found messageTargetUserAction buttons:', button.length);
+        
+        if (button.length > 0) {
+            console.log('✅ Button found, click handler should be attached');
+        } else {
+            console.log('❌ No messageTargetUserAction button found');
         }
-    }else if(mtuDelay.val() < 30){
-        $('#mtu-error-notice').html(`Delay minimum is 30`)
-    }else{
-        $('#mtu-error-notice').html(``)
+    }, 2000);
+});
 
-        // check if value exists in exclude connection list dropdown
-        if($('#mtu-selectedExConnect li').length > 0){
-            $('#mtu-selectedExConnect li').each(function(index) {
-                mtuConnectionIds.push($(this).data('connectionid'))
-            });
+$('.messageTargetUserAction').click(async function() {
+    try {
+        console.log('🔍 Starting Message Targeted Users process...');
+        
+        // Clear previous status
+        $('#displayMessageTargetStatus').empty();
+        $('#mtu-error-notice').empty();
+
+        // Get form values
+        const form = {
+            startPosition: $('#mtu-startPosition'),
+            total: $('#mtu-totalMessageConnect'),
+            delay: $('#mtu-delayTime'),
+            message: $('#mtu-personalMessage'),
+            audience: $('#mtu-selectAudience'),
+            searchTerm: $('#mtu-search-term')
+        };
+
+        // Validate fields
+        const errors = [];
+        
+        // Required fields
+        if (!form.total.val()) errors.push('Total messages is required');
+        if (!form.delay.val()) errors.push('Delay is required');
+        if (!form.message.val()) errors.push('Message is required');
+        
+        // Delay minimum
+        if (form.delay.val() && parseInt(form.delay.val()) < 30) {
+            errors.push('Delay must be at least 30 seconds');
         }
 
-        // check if value exists in accordion list dropdown
-        if($('#mtu-selectedConnectOf li').length > 0){
-            queryParams += setFIlterQueryParams('#mtu-selectedConnectOf','connectionid','connectionOf')
-        }
-        if($('#mtu-selectedLocation li').length > 0){
-            queryParams += setFIlterQueryParams('#mtu-selectedLocation','regionid','geoUrn')
-        }
-        if($('#mtu-selectedSchool li').length > 0){
-            queryParams += setFIlterQueryParams('#mtu-selectedSchool','schoolid','schoolFilter')
-        }
-        if($('#mtu-selectedCurrComp li').length > 0){
-            queryParams += setFIlterQueryParams('#mtu-selectedCurrComp','currcompid','currentCompany')
-        }
-        if($('#mtu-selectedPastComp li').length > 0){
-            queryParams += setFIlterQueryParams('#mtu-selectedPastComp','pastcompid','pastCompany')
-        }
-        if($('#mtu-selectedIndustry li').length > 0){
-            queryParams += setFIlterQueryParams('#mtu-selectedIndustry','industryid','industry')
-        }
-        if($('#mtu-selectedLanguage li').length > 0){
-            queryParams += setFIlterQueryParams('#mtu-selectedLanguage','langcode','profileLanguage')
+        // Show errors if any
+        if (errors.length > 0) {
+            console.log('❌ Validation errors:', errors);
+            $('#mtu-error-notice').html(`
+                <div class="alert alert-danger">
+                    <ul style="margin-bottom: 0;">
+                        ${errors.map(error => `<li>${error}</li>`).join('')}
+                    </ul>
+                </div>
+            `);
+            return;
         }
 
-        mtuTotal = mtuTotal.val() < 10 ? 10 : mtuTotal.val()
-        mtuStartP = mtuStartP.val() == '' ? 0 : mtuStartP.val()
+        // Clear any previous errors
+        $('#mtu-error-notice').html('');
 
-        // var mtusearchTerm = $('#mtu-search-term').val()
-        if($('#mtu-firstName').val())
-            queryParams += setFIlterQueryParamsFreeText('#mtu-firstName','firstName')
-        if($('#mtu-lastName').val())
-            queryParams += setFIlterQueryParamsFreeText('#mtu-lastName','lastName')
-        if($('#mtu-school').val())
-            queryParams += setFIlterQueryParamsFreeText('#mtu-school','schoolFreetext')
-        if($('#mtu-title').val())
-            queryParams += setFIlterQueryParamsFreeText('#mtu-title','title')
-        if($('#mtu-company').val())
-            queryParams += setFIlterQueryParamsFreeText('#mtu-company','company')
+        // Disable send button
+        $(this).attr('disabled', true);
+        
+        // Get excluded connection IDs
+        const mtuConnectionIds = [];
+        $('#mtu-selectedExConnect li').each(function() {
+            const connectionId = $(this).data('connectionid');
+            if (connectionId) mtuConnectionIds.push(connectionId);
+        });
 
-        $(this).attr('disabled', true)  
+        // Build query parameters
+        let queryParams = '';
 
-        if($('#mtu-selectAudience').val() == '') {
-            if($('#mtu-search-term').val())
-                query = `(keywords:${encodeURIComponent($('#mtu-search-term').val())},flagshipSearchIntent:SEARCH_SRP,queryParameters:(${queryParams}resultType:List(PEOPLE)),includeFiltersInResponse:false)`;
-            else 
+        // Check filter selections
+        if ($('#mtu-selectedConnectOf li').length > 0) {
+            queryParams += setFIlterQueryParams('#mtu-selectedConnectOf', 'connectionid', 'connectionOf');
+        }
+        if ($('#mtu-selectedLocation li').length > 0) {
+            queryParams += setFIlterQueryParams('#mtu-selectedLocation', 'regionid', 'geoUrn');
+        }
+        if ($('#mtu-selectedSchool li').length > 0) {
+            queryParams += setFIlterQueryParams('#mtu-selectedSchool', 'schoolid', 'schoolFilter');
+        }
+        if ($('#mtu-selectedCurrComp li').length > 0) {
+            queryParams += setFIlterQueryParams('#mtu-selectedCurrComp', 'currcompid', 'currentCompany');
+        }
+        if ($('#mtu-selectedPastComp li').length > 0) {
+            queryParams += setFIlterQueryParams('#mtu-selectedPastComp', 'pastcompid', 'pastCompany');
+        }
+        if ($('#mtu-selectedIndustry li').length > 0) {
+            queryParams += setFIlterQueryParams('#mtu-selectedIndustry', 'industryid', 'industry');
+        }
+        if ($('#mtu-selectedLanguage li').length > 0) {
+            queryParams += setFIlterQueryParams('#mtu-selectedLanguage', 'langcode', 'profileLanguage');
+        }
+
+        // Add free text filters
+        if ($('#mtu-firstName').val()) {
+            queryParams += setFIlterQueryParamsFreeText('#mtu-firstName', 'firstName');
+        }
+        if ($('#mtu-lastName').val()) {
+            queryParams += setFIlterQueryParamsFreeText('#mtu-lastName', 'lastName');
+        }
+        if ($('#mtu-school').val()) {
+            queryParams += setFIlterQueryParamsFreeText('#mtu-school', 'schoolFreetext');
+        }
+        if ($('#mtu-title').val()) {
+            queryParams += setFIlterQueryParamsFreeText('#mtu-title', 'title');
+        }
+        if ($('#mtu-company').val()) {
+            queryParams += setFIlterQueryParamsFreeText('#mtu-company', 'company');
+        }
+
+        // Set minimum total and default start position
+        const processedValues = {
+            total: Math.max(parseInt(form.total.val()), 10),
+            startPosition: parseInt(form.startPosition.val()) || 0,
+            delay: parseInt(form.delay.val()),
+            message: form.message.val()
+        };
+
+        console.log('📝 Processed values:', processedValues);
+
+        // Show processing state
+        $('.message-target-notice').show();
+        $('#displayMessageTargetStatus').html(`
+            <div class="alert alert-info">
+                <i class="fas fa-spinner fa-spin"></i> Processing request...
+            </div>
+        `);
+
+        // Process based on audience selection
+        if (!form.audience.val()) {
+            console.log('🔍 No audience selected, using connection search...');
+            
+            let query;
+            if (form.searchTerm.val()) {
+                query = `(keywords:${encodeURIComponent(form.searchTerm.val())},flagshipSearchIntent:SEARCH_SRP,queryParameters:(${queryParams}resultType:List(PEOPLE)),includeFiltersInResponse:false)`;
+            } else {
                 query = `(flagshipSearchIntent:SEARCH_SRP,queryParameters:(${queryParams}resultType:List(PEOPLE)),includeFiltersInResponse:false)`;
-
-            mtuGetConnections(query,mtuStartP,mtuTotal,mtuDelay.val(),mtuMessage.val(),mtuConnectionIds)
-        }else{
-            let audience = parseInt($('#mtu-selectAudience').val());
-
-            mtuGetAudienceData(mtuMessage.val(), mtuDelay.val(), audience);
+            }
+            
+            await mtuGetConnections(
+                query,
+                processedValues.startPosition,
+                processedValues.total,
+                processedValues.delay,
+                processedValues.message,
+                mtuConnectionIds
+            );
+        } else {
+            console.log('👥 Using selected audience:', form.audience.val());
+            const audience = parseInt(form.audience.val());
+            await mtuGetAudienceData(
+                processedValues.message,
+                processedValues.delay,
+                audience
+            );
         }
+
+    } catch (error) {
+        console.error('❌ Error in send button handler:', error);
+        $('#mtu-error-notice').html(`
+            <div class="alert alert-danger">
+                <i class="fas fa-exclamation-circle"></i> Error: ${error.message}
+            </div>
+        `);
+        $('.messageTargetUserAction').attr('disabled', false);
     }
-})
+});
 
 const mtuGetConnections = async (queryParams,mtuStartP,mtuTotal,mtuDelay,mtuMessage,mtuConnectionIds) => {
     $('.message-target-notice').show()
@@ -158,120 +240,208 @@ const mtuGetConnections = async (queryParams,mtuStartP,mtuTotal,mtuDelay,mtuMess
     getConnectionsLooper()
 }
 
-const mtuCleanConnectionsData = (messageItems,totalResultCount,mtuDelay,mtuMessage,mtuConnectionIds) => {
-    let conArr = [], totalMessage = [];
-    let newConArr, profileUrn;
-    let getMtuStore = JSON.parse(localStorage.getItem('lkm-mtu'));
-
-    // update store params
-    if($('#mtu-startPosition').val()) {
-        getMtuStore.position = parseInt($('#mtu-startPosition').val())
-    }
-    if($('#mtu-totalMessageConnect').val()) {
-        getMtuStore.total = parseInt($('#mtu-totalMessageConnect').val())
-    }
-    if($('#mtu-delayTime').val()) {
-        getMtuStore.delay = parseInt($('#mtu-delayTime').val())
-    }
-    localStorage.setItem('lkm-mtu', JSON.stringify(getMtuStore))
-
-    for(let item of messageItems) {
-        profileUrn = item.itemUnion['*entityResult']
-        if(profileUrn.includes('urn:li:fsd_entityResultViewModel:(urn:li:fsd_profile:') && 
-            profileUrn.includes(',SEARCH_SRP,DEFAULT)')) {
-
-            profileUrn = profileUrn.replace('urn:li:fsd_entityResultViewModel:(urn:li:fsd_profile:','')
-            profileUrn = profileUrn.replace(',SEARCH_SRP,DEFAULT)','')
-
-            conArr.push({
-                conId: profileUrn,
-                totalResultCount: totalResultCount
-            })			
+const mtuCleanConnectionsData = (messageItems, totalResultCount, mtuDelay, mtuMessage, mtuConnectionIds) => {
+    try {
+        console.log('🔍 Cleaning connections data...');
+        let conArr = [], totalMessage = [];
+        let newConArr, profileUrn;
+        
+        // Initialize storage if not exists
+        let getMtuStore = localStorage.getItem('lkm-mtu');
+        if (!getMtuStore) {
+            getMtuStore = {
+                position: 0,
+                delay: 30,
+                total: 10,
+                uploads: []
+            };
+            localStorage.setItem('lkm-mtu', JSON.stringify(getMtuStore));
+        } else {
+            getMtuStore = JSON.parse(getMtuStore);
         }
-    }
 
-    // exclude connection if connectid exist in conArr
-    if(mtuConnectionIds.length > 0){
-        const namesToDeleteSet = new Set(mtuConnectionIds);
-        newConArr = conArr.filter((conArr) => {
-            return !namesToDeleteSet.has(conArr.conId);
-          });
-    }else{
-        newConArr = conArr;
-    }
-
-    // get only user defined total
-    for(let z=0;z<newConArr.length;z++) {
-        if(z < parseInt($('#mtu-totalMessageConnect').val())) {
-            totalMessage.push(newConArr[z])
-        }else{
-            break;
+        // Update store params
+        if ($('#mtu-startPosition').val()) {
+            getMtuStore.position = parseInt($('#mtu-startPosition').val());
         }
-    }
+        if ($('#mtu-totalMessageConnect').val()) {
+            getMtuStore.total = parseInt($('#mtu-totalMessageConnect').val());
+        }
+        if ($('#mtu-delayTime').val()) {
+            getMtuStore.delay = parseInt($('#mtu-delayTime').val());
+        }
+        localStorage.setItem('lkm-mtu', JSON.stringify(getMtuStore));
 
-    mtuGetProfileInfo(mtuMessage, mtuDelay, totalMessage)
-}
+        for (let item of messageItems) {
+            profileUrn = item.itemUnion['*entityResult'];
+            if (profileUrn.includes('urn:li:fsd_entityResultViewModel:(urn:li:fsd_profile:') && 
+                profileUrn.includes(',SEARCH_SRP,DEFAULT)')) {
+
+                profileUrn = profileUrn.replace('urn:li:fsd_entityResultViewModel:(urn:li:fsd_profile:', '');
+                profileUrn = profileUrn.replace(',SEARCH_SRP,DEFAULT)', '');
+
+                conArr.push({
+                    conId: profileUrn,
+                    totalResultCount: totalResultCount
+                });
+            }
+        }
+
+        // Exclude connection if connectid exist in mtuConnectionIds
+        if (mtuConnectionIds.length > 0) {
+            const namesToDeleteSet = new Set(mtuConnectionIds);
+            newConArr = conArr.filter((conArr) => {
+                return !namesToDeleteSet.has(conArr.conId);
+            });
+        } else {
+            newConArr = conArr;
+        }
+
+        // Get only user defined total
+        for (let z = 0; z < newConArr.length; z++) {
+            if (z < parseInt($('#mtu-totalMessageConnect').val())) {
+                totalMessage.push(newConArr[z]);
+            } else {
+                break;
+            }
+        }
+
+        console.log(`✅ Found ${totalMessage.length} connections to message`);
+        mtuGetProfileInfo(mtuMessage, mtuDelay, totalMessage);
+
+    } catch (error) {
+        console.error('❌ Error in mtuCleanConnectionsData:', error);
+        $('#displayMessageTargetStatus').html(`
+            <div class="alert alert-danger">
+                <i class="fas fa-exclamation-circle"></i> Error processing connections: ${error.message}
+            </div>
+        `);
+        $('.messageTargetUserAction').attr('disabled', false);
+    }
+};
 
 const mtuGetAudienceData = async (mtuMessage, mtuDelay, audience) => {
-    var conArr = [];
+    try {
+        console.log(`🔍 Fetching audience data for audience ID: ${audience}`);
+        
+        // Show loading state
+        $('.message-target-notice').show();
+        $('#displayMessageTargetStatus').html(`
+            <div class="alert alert-info">
+                <i class="fas fa-spinner fa-spin"></i> Loading audience connections...
+            </div>
+        `);
 
-    await $.ajax({
-        method: 'get',
-        url: `${filterApi}/audience/list?audienceId=${audience}&totalCount=${$('#mtu-totalMessageConnect').val()}`,
-        success: function(data){
-            if(data.length > 0){
-                var dataPath = data[0].audience;
-                if(dataPath.length > 0){
-                    for(let i=0; i<dataPath.length; i++){
-
-                        if(dataPath[i].con_distance != null){
-                            var netDistance = dataPath[i].con_distance.split("_")
-                        }
-                        var targetIdd;
-                        if(dataPath[i].con_member_urn.includes('urn:li:member:')){
-                            targetIdd = dataPath[i].con_member_urn.replace('urn:li:member:','') 
-                        }
-                        // if(parseInt(netDistance[1]) == 1){
-                            conArr.push({
-                                name: dataPath[i].con_first_name+' '+dataPath[i].con_last_name,
-                                firstName: dataPath[i].con_first_name,
-                                lastName: dataPath[i].con_last_name,
-                                title: dataPath[i].con_job_title,
-                                conId: dataPath[i].con_id,
-                                totalResultCount: dataPath.length,
-                                publicIdentifier: dataPath[i].con_public_identifier, 
-                                memberUrn: dataPath[i].con_member_urn,
-                                networkDistance: parseInt(netDistance[1]),
-                                trackingId: dataPath[i].con_tracking_id, 
-                                navigationUrl: `${LINKEDIN_URL}/in/${dataPath[i].con_public_identifier}`, 
-                                targetId: parseInt(targetIdd),
-                                netDistance: parseInt(netDistance[1]),
-                            })
-                        // }
-                    }
-                    if(conArr.length > 0){
-                        mtuSendMessageToConnection(mtuMessage, mtuDelay, conArr)
-                    }else{
-                        $('.message-target-notice').show()
-                        $('#displayMessageTargetStatus').empty()
-                        $('#displayMessageTargetStatus').html('No 1st degree Connections.<br> Messages can only be sent to first degree connections')
-                        $('.messageTargetUserAction').attr('disabled', false)
-                    }
-                }else{
-                    $('.message-target-notice').show()
-                    $('#displayMessageTargetStatus').empty()
-                    $('#displayMessageTargetStatus').html('No data found!')
-                    $('.messageTargetUserAction').attr('disabled', false)
+        const response = await $.ajax({
+            method: 'get',
+            url: `${filterApi}/audience/list?audienceId=${audience}&totalCount=${$('#mtu-totalMessageConnect').val()}`,
+            beforeSend: function(request) {
+                if (linkedinId) {
+                    request.setRequestHeader('lk-id', linkedinId);
                 }
             }
-        },
-        error: function(error){
-            console.log(error)
-            $('#displayMessageTargetStatus').html(error.responseJSON.code)
-            $('.messageTargetUserAction').attr('disabled', false)
+        });
+
+        console.log('📊 Audience API response:', response);
+
+        if (!response || response.length === 0) {
+            console.log('❌ No audience data returned');
+            $('#displayMessageTargetStatus').html(`
+                <div class="alert alert-warning">
+                    <i class="fas fa-exclamation-triangle"></i> No audience data found
+                </div>
+            `);
+            $('.messageTargetUserAction').attr('disabled', false);
+            return;
         }
-    })
-}
+
+        const audienceData = response[0].audience;
+        if (!audienceData || audienceData.length === 0) {
+            console.log('❌ No connections in audience');
+            $('#displayMessageTargetStatus').html(`
+                <div class="alert alert-warning">
+                    <i class="fas fa-exclamation-triangle"></i> No connections found in this audience
+                </div>
+            `);
+            $('.messageTargetUserAction').attr('disabled', false);
+            return;
+        }
+
+        console.log(`📋 Processing ${audienceData.length} connections from audience`);
+
+        const conArr = [];
+        for (let i = 0; i < audienceData.length; i++) {
+            const connection = audienceData[i];
+            
+            let netDistance = null;
+            if (connection.con_distance != null) {
+                netDistance = connection.con_distance.split("_");
+            }
+
+            let targetId = null;
+            if (connection.con_member_urn && connection.con_member_urn.includes('urn:li:member:')) {
+                targetId = connection.con_member_urn.replace('urn:li:member:', '');
+            }
+
+            // Only include connections (commented out distance filter for now)
+            // if (netDistance && parseInt(netDistance[1]) == 1) {
+                conArr.push({
+                    name: `${connection.con_first_name} ${connection.con_last_name}`,
+                    firstName: connection.con_first_name,
+                    lastName: connection.con_last_name,
+                    title: connection.con_job_title,
+                    conId: connection.con_id,
+                    totalResultCount: audienceData.length,
+                    publicIdentifier: connection.con_public_identifier,
+                    memberUrn: connection.con_member_urn,
+                    networkDistance: netDistance ? parseInt(netDistance[1]) : 1,
+                    trackingId: connection.con_tracking_id,
+                    navigationUrl: `${LINKEDIN_URL}/in/${connection.con_public_identifier}`,
+                    targetId: targetId ? parseInt(targetId) : null,
+                    netDistance: netDistance ? parseInt(netDistance[1]) : 1,
+                });
+            // }
+        }
+
+        console.log(`✅ Prepared ${conArr.length} connections for messaging`);
+
+        if (conArr.length > 0) {
+            console.log('🚀 About to call mtuSendMessageToConnection with:', {
+                message: mtuMessage,
+                delay: mtuDelay,
+                connections: conArr.length
+            });
+            await mtuSendMessageToConnection(mtuMessage, mtuDelay, conArr);
+        } else {
+            console.log('❌ No valid connections found');
+            $('#displayMessageTargetStatus').html(`
+                <div class="alert alert-warning">
+                    <i class="fas fa-exclamation-triangle"></i> No 1st degree connections found.<br>Messages can only be sent to first degree connections
+                </div>
+            `);
+            $('.messageTargetUserAction').attr('disabled', false);
+        }
+
+    } catch (error) {
+        console.error('❌ Error in mtuGetAudienceData:', error);
+        
+        let errorMessage = 'Failed to load audience data';
+        if (error.responseJSON && error.responseJSON.message) {
+            errorMessage = error.responseJSON.message;
+        } else if (error.responseText) {
+            errorMessage = error.responseText;
+        } else if (error.message) {
+            errorMessage = error.message;
+        }
+
+        $('#displayMessageTargetStatus').html(`
+            <div class="alert alert-danger">
+                <i class="fas fa-exclamation-circle"></i> Error: ${errorMessage}
+            </div>
+        `);
+        $('.messageTargetUserAction').attr('disabled', false);
+    }
+};
 
 const mtuGetProfileInfo = (mtuMessage, mtuDelay, totalMessage) => {
     $('#displayMessageTargetStatus').html('Getting connection info. Please wait...')
@@ -468,63 +638,130 @@ const mtuGetProfileInfo = (mtuMessage, mtuDelay, totalMessage) => {
 // }
 
 const mtuSendMessageToConnection = async (mtuMessage, mtuDelay, totalMessage) => {
-    var displayLi = '', displayAutomationRecord = '';
-    let x = 0
-    let getMtuStore = JSON.parse(localStorage.getItem('lkm-mtu'));
-    let params = {}
-    $('.message-target-notice').show()
-    // automation table data setup
-    displayAutomationRecord = `
-        <tr id="message-targeted-users-record">
-            <td>Message Targeted Users</td>
-            <td id="mtu-status">Running</td>
-            <td>${totalMessage.length}</td>
-            <td id="mtu-numbered">0/${totalMessage.length}</td>
-            <td id="mtu-bot-action" title="Stop automation"><i class="far fa-dot-circle fa-lg text-danger cursorr"></i></td>
-            <td id="mtu-remained-time">${remainedTime(mtuDelay,totalMessage.length)}</td>
-        </tr>
-    `;
-    $('#no-job').hide()
-    $('#automation-list').append(displayAutomationRecord)
+    try {
+        console.log('🔍 Starting Message Targeted Users for', totalMessage.length, 'connections');
+        console.log('🔍 mtuSendMessageToConnection called with:', {
+            messageLength: mtuMessage?.length || 0,
+            delay: mtuDelay,
+            connectionsCount: totalMessage?.length || 0,
+            firstConnection: totalMessage?.[0]?.name || 'N/A'
+        });
+        
+        var displayLi = '';
+        let x = 0;
+        
+        // Initialize storage if not exists
+        let getMtuStore = localStorage.getItem('lkm-mtu');
+        if (!getMtuStore) {
+            getMtuStore = { uploads: [] };
+        } else {
+            getMtuStore = JSON.parse(getMtuStore);
+        }
 
-    for(const [i, item] of totalMessage.entries()) {
-        params['message'] = mtuMessage
-        params['name'] = totalMessage[i].name
-        params['firstName'] = totalMessage[i].firstName
-        params['lastName'] = totalMessage[i].lastName
-        params['distance'] = totalMessage[i].netDistance
-        params['connectionId'] = totalMessage[i].conId
-        params['attachement'] = getMtuStore.uploads.length ? getMtuStore.uploads : []
+        $('.message-target-notice').show();
 
-        sendMessageToConnection(params, function(result) {
-            $('#displayMessageTargetStatus').empty()
+        // automation table data setup
+        const displayAutomationRecord = `
+            <tr id="message-targeted-users-record">
+                <td>Message Targeted Users</td>
+                <td id="mtu-status">Running</td>
+                <td>${totalMessage.length}</td>
+                <td id="mtu-numbered">0/${totalMessage.length}</td>
+                <td id="mtu-bot-action" title="Stop automation">
+                    <i class="far fa-dot-circle fa-lg text-danger cursorr"></i>
+                </td>
+                <td id="mtu-remained-time">${remainedTime(mtuDelay, totalMessage.length)}</td>
+            </tr>
+        `;
+        $('#no-job').hide();
+        $('#automation-list').append(displayAutomationRecord);
 
-            if(result.status == 'successful') {
-                displayLi = `
-                    <li>Message sent to: <b>${totalMessage[i].name}</b></li>
-                    <li>Total message sent: <b>${i +1}</b></li>
-                `;
-                $('#displayMessageTargetStatus').html(displayLi)
+        for (const [i, item] of totalMessage.entries()) {
+            try {
+                // Prepare message parameters with fallbacks
+                const params = {
+                    message: mtuMessage || '',
+                    name: item.name || `${item.firstName || ''} ${item.lastName || ''}`.trim(),
+                    firstName: item.firstName || '',
+                    lastName: item.lastName || '',
+                    distance: item.netDistance || 2,
+                    connectionId: item.conId,
+                    attachement: getMtuStore?.uploads?.length ? getMtuStore.uploads : []
+                };
 
-                // update automation count done and time remained
-                $('#mtu-numbered').text(`${i +1}/${totalMessage.length}`)
-                $('#mtu-remained-time').text(`${remainedTime(mtuDelay, totalMessage.length - (i +1))}`)
-                x++;
-            }else {
-                $('#displayMessageTargetStatus').html(result.message)
-                $('.messageTargetUserAction').attr('disabled', false)
+                console.log(`📧 Sending message to: ${params.name} (${i + 1}/${totalMessage.length})`);
+
+                // Check if sendMessageToConnection function exists
+                if (typeof sendMessageToConnection !== 'function') {
+                    throw new Error('sendMessageToConnection function is not available. Make sure universalAction.js is loaded.');
+                }
+
+                // Send message using async/await
+                const result = await sendMessageToConnection(params);
+                
+                if (result.status === 'successful') {
+                    console.log('✅ Message sent successfully to:', params.name);
+                    displayLi = `
+                        <li>✅ Message sent to: <b>${params.name}</b></li>
+                        <li>Total sent: <b>${i + 1}</b></li>
+                    `;
+                    $('#displayMessageTargetStatus').html(displayLi);
+
+                    // Update automation count and time remaining
+                    $('#mtu-numbered').text(`${i + 1}/${totalMessage.length}`);
+                    $('#mtu-remained-time').text(`${remainedTime(mtuDelay, totalMessage.length - (i + 1))}`);
+                    x++;
+                } else {
+                    console.log('❌ Failed to send message to:', params.name, result.message);
+                    $('#displayMessageTargetStatus').html(`
+                        <li style="color: red;">❌ Failed to send message to: <b>${params.name}</b></li>
+                        <li>Error: ${result.message || 'Unknown error'}</li>
+                        <li>Continuing with next connection...</li>
+                    `);
+                }
+
+                // Add delay between messages (except for the last one)
+                if (i < totalMessage.length - 1) {
+                    console.log(`⏱️ Waiting ${mtuDelay} seconds before next message...`);
+                    await sleep(mtuDelay * 1000);
+                }
+
+            } catch (itemError) {
+                console.error('❌ Error processing connection:', item.name, itemError);
+                $('#displayMessageTargetStatus').html(`
+                    <li style="color: red;">❌ Error with: <b>${item.name}</b></li>
+                    <li>Error: ${itemError.message}</li>
+                    <li>Continuing with next connection...</li>
+                `);
+                continue; // Continue with next connection
             }
-        })
-        await sleep(mtuDelay*1000)
+        }
+
+        // Enable button and update status
+        $('.messageTargetUserAction').attr('disabled', false);
+        $('#mtu-status').text('Completed');
+        
+        // Remove automation record after delay
+        setTimeout(() => {
+            $('#message-targeted-users-record').remove();
+        }, 5000);
+
+        // Send stats
+        if (x > 0) {
+            console.log('📊 Sending stats:', x, 'messages sent');
+            sendStats(x, 'Message sent');
+        }
+
+    } catch (error) {
+        console.error('❌ Fatal error in mtuSendMessageToConnection:', error);
+        $('#displayMessageTargetStatus').html(`
+            <li style="color: red;">❌ Fatal error: ${error.message}</li>
+            <li>Please try again or check console for details</li>
+        `);
+        $('.messageTargetUserAction').attr('disabled', false);
+        $('#mtu-status').text('Error');
     }
-    $('.messageTargetUserAction').attr('disabled', false)
-    // update automation status
-    $('#mtu-status').text('Completed')
-    setTimeout(() => {
-        $('#message-targeted-users-record').remove()
-    },5000)
-    sendStats(x, 'Message sent')
-}
+};
 
 const mtuViewProfile = async (totalMessage) => {
     await $.ajax({

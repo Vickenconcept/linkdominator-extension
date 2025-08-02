@@ -1,8 +1,17 @@
 
 let getAdcConnectParams = {}
 
+// Utility to get JSESSIONID value without quotes
+function getJSessionId() {
+    const match = document.cookie.match(/JSESSIONID="?([^";]+)"?/);
+    return match ? match[1] : '';
+}
+
 $('body').on('click', '.addConnect', function(){
-    $('#addc-displayConnectStatus').empty()
+    console.log('Add Connect button clicked');
+    $('#addc-displayConnectStatus').empty();
+    $('#addc-displayConnectStatus').html('<li>Processing... Please wait.</li>');
+    $('.addConnect').attr('disabled', true);
     var addcTotalFollow = $('#addc-totalFollow').val() < 10 ? 10 : $('#addc-totalFollow').val(),
         addcDelayFollowTime = $('#addc-delayFollowTime').val(),
         addcStart = $('#addc-startPosition').val() == '' ? 0 : $('#addc-startPosition').val(),
@@ -21,12 +30,14 @@ $('body').on('click', '.addConnect', function(){
     $('#addc-startPosition').val() == '' ? $('#addc-startPosition').val(0) : $('#addc-startPosition').val()
 
     if(addcTotalFollow == '' || addcDelayFollowTime == ''){
+        console.log('Validation failed: Total or Delay is empty');
         $('#addc-error-notice').html('<b>Total</b> and <b>Delay</b> fields cannot be empty')
     }
     else if(addcDelayFollowTime < 30){
+        console.log('Validation failed: Delay is less than 30');
         $('#addc-error-notice').html('Minimum of delay time is 30')
     }else{
-
+        console.log('Validation passed');
         $('#error-notice').html('')
 
             // check if value exists in list dropdown
@@ -131,15 +142,14 @@ $('body').on('click', '.addConnect', function(){
 
         }else if($('#addc-audience-select').val() !=''){
             let audience = parseInt($('#addc-audience-select').val());
-
+            console.log('Audience selected:', audience);
             addcGetAudienceData(audience, addcDelayFollowTime);
-
         }else {
             if($('#addc-search-term').val())
                 query = `(keywords:${encodeURIComponent($('#addc-search-term').val())},flagshipSearchIntent:SEARCH_SRP,queryParameters:(${queryParams}resultType:List(PEOPLE)),includeFiltersInResponse:false)`
             else
                 query = `(flagshipSearchIntent:SEARCH_SRP,queryParameters:(${queryParams}resultType:List(PEOPLE)),includeFiltersInResponse:false)`;
-
+            console.log('No audience selected, using search query:', query);
             addcGetConnections(addcConnectIdList,query,addcTotalFollow,addcStart,addcDelayFollowTime)
         }
         
@@ -589,6 +599,7 @@ var timeOutGetCon;
 //                                 addcProfileActionList(seiveConnArr, addcConnectIdList,addcDelayFollowTime)
 //                             }
 //                         }
+
 //                     }else if (addcConnectionResponse1.length > 0) {
 //                         var totalResult = res['data'].data.paging.total;
 
@@ -833,6 +844,7 @@ var timeOutGetCon;
 // }
 
 const addcGetConnections = (addcConnectIdList,queryParams,addcTotalFollow,addcStart,addcDelayConnectTime) => {
+    console.log('Fetching connections with params:', queryParams, 'Total:', addcTotalFollow, 'Start:', addcStart);
     $('.add-connect').show()
     $('#addc-displayConnectStatus').empty()
     $('#addc-displayConnectStatus').html('Scanning. Please wait...')
@@ -853,6 +865,7 @@ const addcGetConnections = (addcConnectIdList,queryParams,addcTotalFollow,addcSt
                 },
                 url: `${voyagerBlockSearchUrl}&query=${queryParams}&start=${addcStart}`,
                 success: function(data) {
+                    console.log('Connections response:', data);
                     let res = {'data': data}
                     let elements = res['data'].data.elements
                     let included = res['data'].included
@@ -893,19 +906,22 @@ const addcGetConnections = (addcConnectIdList,queryParams,addcTotalFollow,addcSt
                                 addcCleanConnectionsData(connectionItems,totalResultCount,addcConnectIdList,addcDelayConnectTime)
                             }
                         }else {
+                            console.log('No result found, changing search criteria and trying again.');
                             $('#addc-displayConnectStatus').html('No result found, change your search criteria and try again!')
                             $('.addConnect').attr('disabled', false)
                         }
                     }else if(connectionItems.length) {
+                        console.log('Found', connectionItems.length, 'results. Messaging...');
                         $('#addc-displayConnectStatus').html(`Found ${connectionItems.length}. Messaging...`)
                         addcCleanConnectionsData(connectionItems,totalResultCount,addcConnectIdList,addcDelayConnectTime)
                     }else {
+                        console.log('No result found, changing search criteria and trying again.');
                         $('#addc-displayConnectStatus').html('No result found, change your search criteria and try again!')
                         $('.addConnect').attr('disabled', false)
                     }
                 },
                 error: function(error){
-                    console.log(error)
+                    console.log('AJAX error fetching connections:', error)
                     $('#addc-displayConnectStatus').html('Something went wrong while trying to get connections!')
                     $('.addConnect').attr('disabled', false)
                 }
@@ -916,6 +932,7 @@ const addcGetConnections = (addcConnectIdList,queryParams,addcTotalFollow,addcSt
 }
 
 const addcCleanConnectionsData = (connectionItems,totalResultCount,addcConnectIdList,addcDelayConnectTime) => {
+    console.log('Cleaning connections data. Total results:', totalResultCount, 'Total connections to process:', connectionItems.length);
     let conArr = [], totalConnections = [];
     let profileUrn, publicIdentifier;
 
@@ -964,6 +981,7 @@ const addcCleanConnectionsData = (connectionItems,totalResultCount,addcConnectId
 }
 
 const addcProfileActionList = async (addcConArr, addcConnectIdList,addcDelayFollowTime) => {
+    console.log('Preparing to send profile actions for:', addcConArr.length, 'connections.');
     for (var i = 0; i < addcConArr.length; i++) {
         if(i == (addcConArr.length -1)){
             addcConnectIdList += addcConArr[i].connectId
@@ -986,60 +1004,68 @@ const addcProfileActionList = async (addcConArr, addcConnectIdList,addcDelayFoll
     )
     .then( response => response.json() )
     .then( response => {
+        console.log('Profile actions response:', response);
         addcAddConnections(addcConArr, addcDelayFollowTime)
     })
 }
 
 const addcGetAudienceData = async (audience, addcDelayFollowTime) => {
+    console.log('Fetching audience data for audience:', audience, 'with delay:', addcDelayFollowTime);
     var conArr = [];
-
     await $.ajax({
         method: 'get',
         url: `${filterApi}/audience/list?audienceId=${audience}&totalCount=${$('#addc-totalFollow').val()}`,
         success: function(data){
-            if(data.length > 0){
-                var dataPath = data[0].audience;
-                if(dataPath.length > 0){
-                    for(let i=0; i<dataPath.length; i++){
-                        var netDistance = dataPath[i].con_distance !== null ? dataPath[i].con_distance.split("_") : ''
-                        var targetIdd;
-                        if(dataPath[i].con_member_urn.includes('urn:li:member:')){
-                            targetIdd = dataPath[i].con_member_urn.replace('urn:li:member:','') 
-                        }
-
-                        conArr.push({
-                            name: dataPath[i].con_first_name+' '+dataPath[i].con_last_name,
-                            title: dataPath[i].con_job_title,
-                            conId: dataPath[i].con_id,
-                            totalResultCount: dataPath.length,
-                            publicIdentifier: dataPath[i].con_public_identifier, 
-                            profileId: dataPath[i].con_public_identifier, 
-                            memberUrn: dataPath[i].con_member_urn,
-                            networkDistance: parseInt(netDistance[1]),
-                            trackingId: dataPath[i].con_tracking_id, 
-                            navigationUrl: `https://www.linkedin.com/in/${dataPath[i].con_public_identifier}`, 
-                            targetId: parseInt(targetIdd) 
-                        })
+            console.log('Audience data response:', data);
+            let dataPath = [];
+            if (Array.isArray(data)) {
+                if (data.length > 0 && Array.isArray(data[0].audience)) {
+                    dataPath = data[0].audience;
+                }
+            } else if (Array.isArray(data.audience)) {
+                dataPath = data.audience;
+            }
+            if (dataPath.length > 0) {
+                for(let i=0; i<dataPath.length; i++){
+                    var netDistance = dataPath[i].con_distance !== null ? dataPath[i].con_distance.split("_") : ''
+                    var targetIdd;
+                    if(dataPath[i].con_member_urn && dataPath[i].con_member_urn.includes('urn:li:member:')){
+                        targetIdd = dataPath[i].con_member_urn.replace('urn:li:member:','') 
                     }
-                    if(conArr.length > 0){
-                        addcAddConnections(conArr, addcDelayFollowTime)
-                    }else{
-                        $('.follow').show()
-                        $('#displayFollowStatus').empty()
-                        $('#displayFollowStatus').html('No contact in audience!')
-                        $('.addConnect').attr('disabled', false)
-                    }
-                    
+                    conArr.push({
+                        name: dataPath[i].con_first_name+' '+dataPath[i].con_last_name,
+                        title: dataPath[i].con_job_title,
+                        conId: dataPath[i].con_id,
+                        totalResultCount: dataPath.length,
+                        publicIdentifier: dataPath[i].con_public_identifier, 
+                        profileId: dataPath[i].con_public_identifier, 
+                        memberUrn: dataPath[i].con_member_urn,
+                        networkDistance: netDistance && netDistance[1] ? parseInt(netDistance[1]) : null,
+                        trackingId: dataPath[i].con_tracking_id, 
+                        navigationUrl: `https://www.linkedin.com/in/${dataPath[i].con_public_identifier}`, 
+                        targetId: targetIdd ? parseInt(targetIdd) : null
+                    })
+                }
+                if(conArr.length > 0){
+                    console.log('Audience contacts found:', conArr.length);
+                    addcAddConnections(conArr, addcDelayFollowTime)
                 }else{
+                    console.log('No contact in audience!');
                     $('.follow').show()
                     $('#displayFollowStatus').empty()
-                    $('#displayFollowStatus').html('No data found!')
+                    $('#displayFollowStatus').html('No contact in audience!')
                     $('.addConnect').attr('disabled', false)
                 }
+            }else{
+                console.log('No data found in audience!');
+                $('.follow').show()
+                $('#displayFollowStatus').empty()
+                $('#displayFollowStatus').html('No data found!')
+                $('.addConnect').attr('disabled', false)
             }
         },
         error: function(error){
-            console.log(error)
+            console.log('AJAX error fetching audience data:', error)
             $('.addConnect').attr('disabled', false)
         }
     })
@@ -1047,6 +1073,7 @@ const addcGetAudienceData = async (audience, addcDelayFollowTime) => {
 
 var timeOutAddCon;
 const addcAddConnections = async (addcConArrMain, addcDelayFollowTime) => {
+    console.log('Starting connection addition for:', addcConArrMain.length, 'connections.');
     let addcDisplayLi = '', displayAutomationRecord = ''
 	let x = 0;
     let addcConArr = [];
@@ -1083,14 +1110,15 @@ const addcAddConnections = async (addcConArrMain, addcDelayFollowTime) => {
     $('#automation-list').append(displayAutomationRecord)
 
     for(const [i,v] of addcConArr.entries()) {
+        // Back to original LinkedIn API endpoint with improved error handling
         var data = {};
         var message = $('#addc-personalMessage').val();
         var newMessage = '';
 
-        if(message !=''){
-            
+        if(message != ''){
             newMessage = changeMessageVariableNames(message, addcConArr[i]);
-
+            // Remove line breaks that might cause 422 errors
+            newMessage = newMessage.replace(/\n/g, ' ').replace(/\r/g, ' ').trim();
             data = {
                 trackingId: addcConArr[i].trackingId,
                 invitee: {
@@ -1101,7 +1129,7 @@ const addcAddConnections = async (addcConArrMain, addcDelayFollowTime) => {
                 message: newMessage,
                 emberEntityName: 'growth/invitation/norm-invitation',                
             };
-        }else{
+        } else {
             data = {
                 trackingId: addcConArr[i].trackingId,
                 invitee: {
@@ -1112,37 +1140,88 @@ const addcAddConnections = async (addcConArrMain, addcDelayFollowTime) => {
                 emberEntityName: 'growth/invitation/norm-invitation',                
             };
         }
-            
-        fetch(`${voyagerApi}/growth/normInvitations`, {
-            method: 'post',
-            headers: {
-                'cookie': document.cookie,
-                'csrf-token': jsession
-            },
-            body: JSON.stringify(data),
-        })
-        .then( response => response )
-        .then( response => {
-            $('#addc-displayConnectStatus').empty()
-            addcDisplayLi = `
-                <li>Invitation sent to: <b>${addcConArr[i].name}</b></li>
-                <li>Title: <b>${addcConArr[i].title}</b></li>
-                <li>Total sent: <b>${x +1}</b></li>
-            `;
-            $('#addc-displayConnectStatus').html(addcDisplayLi)
-            // console.log( new Date())
 
-            // update automation count done and time remained
-            $('#addc-numbered').text(`${x +1}/${addcConArr.length}`)
-            $('#addc-remained-time').text(`${remainedTime(addcDelayFollowTime, addcConArr.length - (x +1))}`)
+        const jsession = getJSessionId();
+        console.log('🔍 Old LinkedIn API Request for:', addcConArr[i].name);
+        console.log('📦 Payload:', JSON.stringify(data, null, 2));
+        console.log('🔑 CSRF Token:', jsession ? 'Present' : 'Missing');
+        
+        try {
+            await fetch(`${voyagerApi}/growth/normInvitations`, {
+                method: 'POST',
+                headers: {
+                    'csrf-token': jsession,
+                    'accept': 'application/vnd.linkedin.normalized+json+2.1',
+                    'content-type': 'application/json; charset=UTF-8',
+                    'x-restli-protocol-version': '2.0.0',
+                    'x-li-lang': 'en_US',
+                    'x-li-page-instance': 'urn:li:page:d_flagship3_search_srp_people;QazGJ/pNTwuq6OTtMClfPw==',
+                    'x-li-track': JSON.stringify({"clientVersion":"1.10.1335","osName":"web","timezoneOffset":1,"deviceFormFactor":"DESKTOP","mpName":"voyager-web"})
+                },
+                body: JSON.stringify(data),
+                credentials: 'include'
+            })
+            .then(async response => {
+                console.log(`📧 LinkedIn API Response Status: ${response.status} (${response.statusText})`);
+                
+                if (response.status === 200 || response.status === 201) {
+                    console.log('✅ STATUS', response.status, ': Invitation sent successfully to', addcConArr[i].name);
+                    $('#addc-displayConnectStatus').empty();
+                    addcDisplayLi = `
+                        <li>✅ Invitation sent to: <b>${addcConArr[i].name}</b></li>
+                        <li>Title: <b>${addcConArr[i].title}</b></li>
+                        <li>Total sent: <b>${i + 1}</b></li>
+                    `;
+                    $('#addc-displayConnectStatus').html(addcDisplayLi);
+                } else if (response.status === 301) {
+                    console.log('⚠️ STATUS 301: API endpoint moved - LinkedIn may have changed the endpoint');
+                    $('#addc-displayConnectStatus').empty();
+                    $('#addc-displayConnectStatus').html(`<li style='color:orange;'>⚠️ API endpoint moved for: <b>${addcConArr[i].name}</b> (301)</li>`);
+                } else if (response.status === 403) {
+                    console.log('❌ STATUS 403: Forbidden - LinkedIn blocked the request');
+                    $('#addc-displayConnectStatus').empty();
+                    $('#addc-displayConnectStatus').html(`<li style='color:red;'>❌ Forbidden: <b>${addcConArr[i].name}</b> (LinkedIn blocked request)</li>`);
+                } else if (response.status === 422) {
+                    console.log('❌ STATUS 422: Unprocessable Entity - Invalid data in request');
+                    $('#addc-displayConnectStatus').empty();
+                    $('#addc-displayConnectStatus').html(`<li style='color:red;'>❌ Invalid data for: <b>${addcConArr[i].name}</b> (Status: 422)</li>`);
+                } else if (response.status === 429) {
+                    console.log('❌ STATUS 429: Rate Limited - Too many requests');
+                    $('#addc-displayConnectStatus').empty();
+                    $('#addc-displayConnectStatus').html(`<li style='color:red;'>❌ Rate limited: <b>${addcConArr[i].name}</b> (Too many requests)</li>`);
+                } else {
+                    console.log(`⚠️ STATUS ${response.status}: Unexpected response`);
+                    let errorText = await response.text();
+                    let location = response.headers.get('Location');
+                    console.log('Response details:', { errorText, location });
+                    $('#addc-displayConnectStatus').empty();
+                    $('#addc-displayConnectStatus').html(`<li style='color:red;'>❌ Failed to send invitation to: <b>${addcConArr[i].name}</b> (Status: ${response.status})</li>`);
+                }
+                
+                // Try to parse response
+                return response.json().catch(() => {
+                    console.log('📄 No JSON response body (redirect or empty response)');
+                    return { status: response.status, redirected: response.redirected };
+                });
+            })
+            .then(data => {
+                console.log('📧 LinkedIn API Response Data:', data);
+            })
+         } catch (error) {
+             console.log('❌ Error sending invitation to:', addcConArr[i].name, error);
+             $('#addc-displayConnectStatus').empty();
+             $('#addc-displayConnectStatus').html(`<li style='color:red;'>❌ Network error for: <b>${addcConArr[i].name}</b></li>`);
+         }
 
-            if($('#addc-viewProfile').prop('checked') == true){
-                // addcViewProfile(addcConArr[i])
-            }
-            x++;
-        })
+         // Update automation count and time remaining
+         $('#addc-numbered').text(`${i + 1}/${addcConArr.length}`);
+         $('#addc-remained-time').text(`${remainedTime(addcDelayFollowTime, addcConArr.length - (i + 1))}`);
 
-        await sleep(addcDelayFollowTime*1000)
+         // Add delay between requests (except for the last one)
+         if (i < addcConArr.length - 1) {
+             console.log(`⏱️ Waiting ${addcDelayFollowTime} seconds before next invitation...`);
+             await sleep(addcDelayFollowTime * 1000);
+         }
     }
 
     $('.addConnect').attr('disabled', false)

@@ -1,110 +1,239 @@
 
-$('.messageConnectsAction').click(function(){
-    $('#displayMessageConnectsStatus').empty()
-    var macStartP = $('#mac-startPosition'),
-        macTotal = $('#mac-totalMessage'),
-        macDelay = $('#mac-delayFollowTime'),
-        macMessage = $('#mac-personalMessage'),
-        macConnectionIds = [];
+$('.messageConnectsAction').click(async function() {
+    try {
+        console.log('🔍 Starting message send process...');
         
-    var macControlFiels = [macDelay,macTotal,macMessage];
+        // Clear previous status
+        $('#displayMessageConnectsStatus').empty();
+        $('#mac-error-notice').empty();
 
-    // validate fields
-    if(macTotal.val() =='' || macDelay.val() =='' || macMessage.val() ==''){
-        for(var i=0;i<macControlFiels.length;i++){
-            if(macControlFiels[i].val() == ''){
-                $('#mac-error-notice').html(`${macControlFiels[i].data('name')} field cannot be empty`)
-            }
-        }
-    }else if(macDelay.val() < 30){
-        $('#mac-error-notice').html(`Delay minimum is 30`)
-    }else{
-        $('#mac-error-notice').html(``)
+        // Get form values
+        const form = {
+            startPosition: $('#mac-startPosition'),
+            total: $('#mac-totalMessage'),
+            delay: $('#mac-delayFollowTime'),
+            message: $('#mac-personalMessage'),
+            audience: $('#mac-selectAudience')
+        };
 
-        // check if value exists in list dropdown
-        if($('#mac-selectedConnect li').length > 0){
-            $('#mac-selectedConnect li').each(function(index) {
-                macConnectionIds.push($(this).data('connectionid'))
-            });
-        }
-
-        macTotal = macTotal.val() < 10 ? 10 : macTotal.val()
-        macStartP = macStartP.val() == '' ? 0 : macStartP.val()
-
-        $(this).attr('disabled', true) 
+        // Validate fields
+        const errors = [];
         
-        if($('#mac-selectAudience').val() == '') {
-            query = `(flagshipSearchIntent:SEARCH_SRP,queryParameters:(network:List(F),resultType:List(PEOPLE)),includeFiltersInResponse:false)`;
-
-            macGetConnections(query, macStartP, macTotal, macMessage.val(), macDelay.val(), macConnectionIds)
+        // Required fields
+        if (!form.total.val()) errors.push('Total messages is required');
+        if (!form.delay.val()) errors.push('Delay is required');
+        if (!form.message.val()) errors.push('Message is required');
+        
+        // Delay minimum
+        if (form.delay.val() && parseInt(form.delay.val()) < 30) {
+            errors.push('Delay must be at least 30 seconds');
         }
-        else
-            macAudienceList($('#mac-selectAudience').val(), macMessage.val(), macDelay.val())
+
+        // Show errors if any
+        if (errors.length > 0) {
+            console.log('❌ Validation errors:', errors);
+            $('#mac-error-notice').html(`
+                <div class="alert alert-danger">
+                    <ul style="margin-bottom: 0;">
+                        ${errors.map(error => `<li>${error}</li>`).join('')}
+                    </ul>
+                </div>
+            `);
+            return;
+        }
+
+        // Clear any previous errors
+        $('#mac-error-notice').html('');
+
+        // Disable send button
+        $(this).attr('disabled', true);
+        
+        // Get excluded connection IDs
+        const macConnectionIds = [];
+        $('#mac-selectedConnect li').each(function() {
+            const connectionId = $(this).data('connectionid');
+            if (connectionId) macConnectionIds.push(connectionId);
+        });
+
+        // Set minimum total and default start position
+        const processedValues = {
+            total: Math.max(parseInt(form.total.val()), 10),
+            startPosition: parseInt(form.startPosition.val()) || 0,
+            delay: parseInt(form.delay.val()),
+            message: form.message.val()
+        };
+
+        console.log('📝 Processed values:', processedValues);
+
+        // Show processing state
+        $('.message-connects-notice').show();
+        $('#displayMessageConnectsStatus').html(`
+            <div class="alert alert-info">
+                <i class="fas fa-spinner fa-spin"></i> Processing request...
+            </div>
+        `);
+
+        // Process based on audience selection
+        if (!form.audience.val()) {
+            console.log('🔍 No audience selected, using connection search...');
+            const query = `(flagshipSearchIntent:SEARCH_SRP,queryParameters:(network:List(F),resultType:List(PEOPLE)),includeFiltersInResponse:false)`;
+            
+            await macGetConnections(
+                query,
+                processedValues.startPosition,
+                processedValues.total,
+                processedValues.message,
+                processedValues.delay,
+                macConnectionIds
+            );
+        } else {
+            console.log('👥 Using selected audience:', form.audience.val());
+            await macAudienceList(
+                form.audience.val(),
+                processedValues.message,
+                processedValues.delay
+            );
+        }
+
+    } catch (error) {
+        console.error('❌ Error in send button handler:', error);
+        $('#mac-error-notice').html(`
+            <div class="alert alert-danger">
+                <i class="fas fa-exclamation-circle"></i> Error: ${error.message}
+            </div>
+        `);
+        $('.messageConnectsAction').attr('disabled', false);
     }
-})
+});
 
 const macGetConnections = async (queryParams, macStartP, macTotal, macMessage, macDelay, macConnectionIds) => {
-    $('.message-connects-notice').show()
-    $('#displayMessageConnectsStatus').empty()
-    $('#displayMessageConnectsStatus').html('Scanning. Please wait...')
-    let messageItems = [], totalResultCount = 0;
+    try {
+        console.log('🔍 Scanning for connections...');
+        $('.message-connects-notice').show();
+        $('#displayMessageConnectsStatus').html(`
+            <div class="alert alert-info">
+                <i class="fas fa-spinner fa-spin"></i> Scanning for connections...
+            </div>
+        `);
 
-    let getConnectionsLooper = () => {
-        setTimeout(async () => {
-            $.ajax({
-                method: 'get',
-                beforeSend: function(request) {
-                    request.setRequestHeader('csrf-token', jsession);
-                    request.setRequestHeader('accept', 'application/vnd.linkedin.normalized+json+2.1');
-                    request.setRequestHeader('content-type', contentType);
-                    request.setRequestHeader('x-li-lang', xLiLang);
-                    request.setRequestHeader('x-li-page-instance', 'urn:li:page:d_flagship3_search_srp_people;QazGJ/pNTwuq6OTtMClfPw==');
-                    request.setRequestHeader('x-li-track', JSON.stringify({"clientVersion":"1.10.1335","osName":"web","timezoneOffset":1,"deviceFormFactor":"DESKTOP","mpName":"voyager-web"}));
-                    request.setRequestHeader('x-restli-protocol-version', xRestliProtocolVersion);
-                },
-                url: `${voyagerBlockSearchUrl}&query=${queryParams}&start=${macStartP}`,
-                success: function(data) {
-                    var res = {'data': data};
-                    let elements = res['data'].data.elements
+        let messageItems = [];
+        let totalResultCount = 0;
+        let retryCount = 0;
+        const MAX_RETRIES = 3;
 
-                    if(elements.length) {
-                        if(totalResultCount == 0)
-                            totalResultCount = res['data'].data.metadata.totalResultCount
+        const getConnectionsLooper = async () => {
+            try {
+                console.log(`📥 Fetching connections batch starting at ${macStartP}`);
+                
+                const response = await fetch(`${voyagerBlockSearchUrl}&query=${queryParams}&start=${macStartP}`, {
+                    method: 'GET',
+                    headers: {
+                        'csrf-token': jsession,
+                        'accept': 'application/vnd.linkedin.normalized+json+2.1',
+                        'content-type': contentType,
+                        'x-li-lang': xLiLang,
+                        'x-li-page-instance': 'urn:li:page:d_flagship3_search_srp_people;QazGJ/pNTwuq6OTtMClfPw==',
+                        'x-li-track': JSON.stringify({
+                            "clientVersion": "1.10.1335",
+                            "osName": "web",
+                            "timezoneOffset": 1,
+                            "deviceFormFactor": "DESKTOP",
+                            "mpName": "voyager-web"
+                        }),
+                        'x-restli-protocol-version': xRestliProtocolVersion
+                    },
+                    credentials: 'include'
+                });
 
-                        if(elements[1].items.length) {
-                            for(let item of elements[1].items) {
-                                messageItems.push(item)
-                            }
-
-                            if(messageItems.length < macTotal) {
-                                macStartP = parseInt(macStartP) + 11
-                                $('#mac-startPosition').val(macStartP)
-                                getConnectionsLooper()
-                            }else {
-                                macCleanConnectionsData(messageItems, totalResultCount, macMessage, macDelay, macConnectionIds)
-                            }
-                        }else {
-                            $('#displayMessageConnectsStatus').html('No result found, change your search criteria and try again!')
-                            $('.messageConnectsAction').attr('disabled', false)
-                        }
-                    }else if(messageItems.length) {
-                        $('#displayMessageConnectsStatus').html(`Found ${messageItems.length}. Messaging...`)
-                        macCleanConnectionsData(messageItems, totalResultCount, macMessage, macDelay, macConnectionIds)
-                    }else {
-                        $('#displayMessageConnectsStatus').html('No result found, change your search criteria and try again!')
-                        $('.messageConnectsAction').attr('disabled', false)
-                    }
-                },
-                error: function(error){
-                    console.log(error)
-                    $('#displayMessageConnectsStatus').html('Something went wrong while trying to get connections!')
-                    $('.messageConnectsAction').attr('disabled', false)
+                if (!response.ok) {
+                    throw new Error(`API call failed: ${response.status} ${response.statusText}`);
                 }
-            })
-        },10000)
+
+                const data = await response.json();
+                const elements = data.data.elements;
+
+                if (!elements || !elements.length) {
+                    throw new Error('No elements found in response');
+                }
+
+                // Update total count if first batch
+                if (totalResultCount === 0) {
+                    totalResultCount = data.data.metadata.totalResultCount;
+                    console.log(`📊 Total connections found: ${totalResultCount}`);
+                }
+
+                // Process items
+                if (elements[1] && elements[1].items && elements[1].items.length) {
+                    console.log(`✅ Found ${elements[1].items.length} connections in this batch`);
+                    messageItems.push(...elements[1].items);
+
+                    // Update status
+                    $('#displayMessageConnectsStatus').html(`
+                        <div class="alert alert-info">
+                            <i class="fas fa-spinner fa-spin"></i> Found ${messageItems.length} connections so far...
+                        </div>
+                    `);
+
+                    // Check if we need more
+                    if (messageItems.length < macTotal) {
+                        macStartP = parseInt(macStartP) + 11;
+                        $('#mac-startPosition').val(macStartP);
+                        console.log(`⏱️ Waiting 10 seconds before next batch...`);
+                        await new Promise(resolve => setTimeout(resolve, 10000));
+                        await getConnectionsLooper();
+                    } else {
+                        console.log(`✅ Found enough connections (${messageItems.length}), processing...`);
+                        await macCleanConnectionsData(messageItems, totalResultCount, macMessage, macDelay, macConnectionIds);
+                    }
+                } else {
+                    console.log('⚠️ No items found in this batch');
+                    if (messageItems.length > 0) {
+                        console.log(`✅ Using ${messageItems.length} previously found connections`);
+                        $('#displayMessageConnectsStatus').html(`Found ${messageItems.length}. Messaging...`);
+                        await macCleanConnectionsData(messageItems, totalResultCount, macMessage, macDelay, macConnectionIds);
+                    } else {
+                        $('#displayMessageConnectsStatus').html(`
+                            <div class="alert alert-warning">
+                                <i class="fas fa-exclamation-triangle"></i> No connections found.<br>
+                                Please change your search criteria and try again.
+                            </div>
+                        `);
+                        $('.messageConnectsAction').attr('disabled', false);
+                    }
+                }
+
+            } catch (error) {
+                console.error('❌ Error in connection loop:', error);
+                retryCount++;
+
+                if (retryCount < MAX_RETRIES) {
+                    console.log(`🔄 Retry ${retryCount} of ${MAX_RETRIES}...`);
+                    $('#displayMessageConnectsStatus').html(`
+                        <div class="alert alert-warning">
+                            <i class="fas fa-sync fa-spin"></i> Connection error, retrying (${retryCount}/${MAX_RETRIES})...
+                        </div>
+                    `);
+                    await new Promise(resolve => setTimeout(resolve, 5000));
+                    await getConnectionsLooper();
+                } else {
+                    throw new Error(`Failed after ${MAX_RETRIES} retries: ${error.message}`);
+                }
+            }
+        };
+
+        await getConnectionsLooper();
+
+    } catch (error) {
+        console.error('❌ Fatal error in macGetConnections:', error);
+        $('#displayMessageConnectsStatus').html(`
+            <div class="alert alert-danger">
+                <i class="fas fa-exclamation-circle"></i> Error scanning connections:<br>
+                ${error.message}
+            </div>
+        `);
+        $('.messageConnectsAction').attr('disabled', false);
     }
-    getConnectionsLooper();
-}
+};
 
 const macCleanConnectionsData = (messageItems, totalResultCount, macMessage, macDelay, macConnectionIds) => {
     let conArr = [];
@@ -227,55 +356,96 @@ const macGetProfileInfo = (macMessage, macDelay, totalMessage) => {
 }
 
 const macAudienceList = async (audienceId, macMessage, macDelay) => {
-    var conArr = [];
-    var conArr2 = [];
-    $('.message-connects-notice').show()
+    try {
+        console.log('🔍 Fetching audience list:', audienceId);
+        $('.message-connects-notice').show();
+        $('#displayMessageConnectsStatus').html('<center><i class="fas fa-spinner fa-spin"></i> Loading audience...</center>');
 
-    await $.ajax({
-        method: 'get',
-        url: `${filterApi}/audience/list?audienceId=${audienceId}&totalCount=${$('#mac-totalMessage').val()}`,
-        success: function(data){
-            if(data.length > 0){
-                var dataPath = data[0].audience;
-                if(dataPath.length > 0){
-                    for(let i=0; i<dataPath.length; i++){
-                        if(dataPath[i].con_distance != null){
-                            var netDistance = dataPath[i].con_distance.split("_")[1]
-                        }
-                        var targetIdd;
-                        if(dataPath[i].con_member_urn.includes('urn:li:member:')){
-                            targetIdd = dataPath[i].con_member_urn.replace('urn:li:member:','') 
-                        }
-
-                        conArr.push({
-                            name:  dataPath[i].con_first_name+' '+dataPath[i].con_last_name,
-                            firstName: dataPath[i].con_first_name,
-                            lastName: dataPath[i].con_last_name,
-                            title: dataPath[i].con_job_title,
-                            conId: dataPath[i].con_id,
-                            totalResult: dataPath.length,
-                            netDistance: parseInt(netDistance) 
-                        })
-                    }
-                    if(conArr.length > 0){
-                        macSendMessageToConnection(macMessage, macDelay, conArr)
-                    }else{
-                        $('#displayMessageConnectsStatus').empty()
-                        $('#displayMessageConnectsStatus').html('No 1st degree Connection.<br> Messages can only be sent to first degree connections')
-                        $('.messageConnectsAction').attr('disabled', false)
-                    }
-                }else{
-                    $('#displayMessageConnectsStatus').empty()
-                    $('#displayMessageConnectsStatus').html('No data found!')
-                    $('.messageConnectsAction').attr('disabled', false)
-                }
+        const response = await fetch(`${filterApi}/audience/list?audienceId=${audienceId}&totalCount=${$('#mac-totalMessage').val()}`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
             }
-        },
-        error: function(error){
-            // console.log(error)
-            $('.messageConnectsAction').attr('disabled', false)
+        });
+
+        if (!response.ok) {
+            throw new Error(`API call failed: ${response.status} ${response.statusText}`);
         }
-    })
+
+        const data = await response.json();
+        console.log('✅ Audience data received:', data);
+
+        if (!data || !data.length || !data[0].audience || !data[0].audience.length) {
+            console.log('⚠️ No audience data found');
+            $('#displayMessageConnectsStatus').html('No audience data found. Please check your audience selection.');
+            $('.messageConnectsAction').attr('disabled', false);
+            return;
+        }
+
+        const audienceMembers = data[0].audience;
+        console.log(`📊 Processing ${audienceMembers.length} audience members`);
+
+        const conArr = audienceMembers.map(member => {
+            // Extract network distance safely
+            let netDistance = 2; // Default to 2nd degree
+            if (member.con_distance) {
+                const parts = member.con_distance.split("_");
+                if (parts.length > 1) {
+                    netDistance = parseInt(parts[1]) || 2;
+                        }
+            }
+
+            // Extract member ID safely
+            let targetId = member.con_id;
+            if (member.con_member_urn && member.con_member_urn.includes('urn:li:member:')) {
+                targetId = member.con_member_urn.replace('urn:li:member:', '');
+                        }
+
+            return {
+                name: `${member.con_first_name || ''} ${member.con_last_name || ''}`.trim(),
+                firstName: member.con_first_name || '',
+                lastName: member.con_last_name || '',
+                title: member.con_job_title || '',
+                conId: targetId,
+                totalResult: audienceMembers.length,
+                netDistance: netDistance
+            };
+        });
+
+        // Filter for 1st degree connections only
+        const firstDegreeConnections = conArr.filter(conn => conn.netDistance === 1);
+
+        if (firstDegreeConnections.length === 0) {
+            console.log('⚠️ No first degree connections found');
+            $('#displayMessageConnectsStatus').html(`
+                <div class="alert alert-warning">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    No 1st degree connections found in this audience.<br>
+                    Messages can only be sent to 1st degree connections.<br>
+                    Total connections found: ${conArr.length}<br>
+                    - 1st degree: ${firstDegreeConnections.length}<br>
+                    - Other degrees: ${conArr.length - firstDegreeConnections.length}
+                </div>
+            `);
+            $('.messageConnectsAction').attr('disabled', false);
+            return;
+        }
+
+        console.log(`✅ Found ${firstDegreeConnections.length} first degree connections`);
+        await macSendMessageToConnection(macMessage, macDelay, firstDegreeConnections);
+
+    } catch (error) {
+        console.error('❌ Error in macAudienceList:', error);
+        $('#displayMessageConnectsStatus').html(`
+            <div class="alert alert-danger">
+                <i class="fas fa-exclamation-circle"></i>
+                Error loading audience: ${error.message}<br>
+                Please try again or check console for details.
+            </div>
+        `);
+        $('.messageConnectsAction').attr('disabled', false);
+        }
 }
 
 var timeOutMessageAllCon;
@@ -400,61 +570,109 @@ var timeOutMessageAllCon;
 // }
 
 const macSendMessageToConnection = async (macMessage, macDelay, dataArr) => {
-    var displayLi = '', i = 0, x = 0, displayAutomationRecord = '';
+    try {
+        console.log('🔍 Starting Message All Connections for', dataArr.length, 'connections');
+        var displayLi = '', x = 0;
     let getMacStore = JSON.parse(localStorage.getItem('lkm-mac'));
-    let params = {}
 
-    $('.message-connects-notice').show()
+        $('.message-connects-notice').show();
 
     // automation table data setup
-    displayAutomationRecord = `
+        const displayAutomationRecord = `
         <tr id="message-all-connects-record">
             <td>Message All Connections</td>
             <td id="mac-status">Running</td>
-            <td>${totalFollow.length}</td>
-            <td id="mac-numbered">0/${totalFollow.length}</td>
-            <td id="mac-bot-action" title="Stop automation"><i class="far fa-dot-circle fa-lg text-danger cursorr"></i></td>
-            <td id="mac-remained-time">${remainedTime(macDelay, totalFollow.length)}</td>
+                <td>${dataArr.length}</td>
+                <td id="mac-numbered">0/${dataArr.length}</td>
+                <td id="mac-bot-action" title="Stop automation">
+                    <i class="far fa-dot-circle fa-lg text-danger cursorr"></i>
+                </td>
+                <td id="mac-remained-time">${remainedTime(macDelay, dataArr.length)}</td>
         </tr>
     `;
-    $('#no-job').hide()
-    $('#automation-list').append(displayAutomationRecord)
+        $('#no-job').hide();
+        $('#automation-list').append(displayAutomationRecord);
 
-    for(const [i, item] of dataArr.entries()) {
-        params['message'] = macMessage
-        params['name'] = dataArr[i].name
-        params['firstName'] = dataArr[i].firstName
-        params['lastName'] = dataArr[i].lastName
-        params['distance'] = dataArr[i].netDistance
-        params['connectionId'] = dataArr[i].conId
-        params['attachement'] = getMacStore.uploads.length ? getMacStore.uploads : []
+        for (const [i, item] of dataArr.entries()) {
+            try {
+                // Prepare message parameters with fallbacks
+                const params = {
+                    message: macMessage || '',
+                    name: item.name || `${item.firstName || ''} ${item.lastName || ''}`.trim(),
+                    firstName: item.firstName || '',
+                    lastName: item.lastName || '',
+                    distance: item.netDistance || 2,
+                    connectionId: item.conId,
+                    attachement: getMacStore?.uploads?.length ? getMacStore.uploads : []
+                };
 
-        sendMessageToConnection(params, (result) => {
-            if(result.status == 'successful') {
+                console.log(`📧 Sending message to: ${params.name} (${i + 1}/${dataArr.length})`);
+
+                // Send message using async/await
+                const result = await sendMessageToConnection(params);
+                
+                if (result.status === 'successful') {
+                    console.log('✅ Message sent successfully to:', params.name);
                 displayLi = `
-                    <li>Message sent to: <b>${dataArr[i].name}</b></li>
-                    <li>Total message sent: <b>${i +1}</b></li>
+                        <li>✅ Message sent to: <b>${params.name}</b></li>
+                        <li>Total sent: <b>${i + 1}</b></li>
                 `;
-                $('#displayMessageConnectsStatus').html(displayLi)
+                    $('#displayMessageConnectsStatus').html(displayLi);
 
-                // update automation count done and time remained
-                $('#mac-numbered').text(`${x +1}/${totalFollow.length}`)
-                $('#mac-remained-time').text(`${remainedTime(macDelay, dataArr.length - (i +1))}`)
+                    // Update automation count and time remaining
+                    $('#mac-numbered').text(`${i + 1}/${dataArr.length}`);
+                    $('#mac-remained-time').text(`${remainedTime(macDelay, dataArr.length - (i + 1))}`);
                 x++;
-            }else {
-                $('#displayMessageConnectsStatus').html(result.message)
-                $('.messageConnectsAction').attr('disabled', false)
+                } else {
+                    console.log('❌ Failed to send message to:', params.name, result.message);
+                    $('#displayMessageConnectsStatus').html(`
+                        <li style="color: red;">❌ Failed to send message to: <b>${params.name}</b></li>
+                        <li>Error: ${result.message || 'Unknown error'}</li>
+                        <li>Continuing with next connection...</li>
+                    `);
+                }
+
+                // Add delay between messages (except for the last one)
+                if (i < dataArr.length - 1) {
+                    console.log(`⏱️ Waiting ${macDelay} seconds before next message...`);
+                    await sleep(macDelay * 1000);
+                }
+
+            } catch (itemError) {
+                console.error('❌ Error processing connection:', item.name, itemError);
+                $('#displayMessageConnectsStatus').html(`
+                    <li style="color: red;">❌ Error with: <b>${item.name}</b></li>
+                    <li>Error: ${itemError.message}</li>
+                    <li>Continuing with next connection...</li>
+                `);
+                continue; // Continue with next connection
             }
-        })
-        await sleep(macDelay*1000)
+        }
+
+        // Enable button and update status
+        $('.messageConnectsAction').attr('disabled', false);
+        $('#mac-status').text('Completed');
+        
+        // Remove automation record after delay
+        setTimeout(() => {
+            $('#message-all-connects-record').remove();
+        }, 5000);
+
+        // Send stats
+        if (x > 0) {
+            console.log('📊 Sending stats:', x, 'messages sent');
+            sendStats(x, 'Message sent');
+        }
+
+    } catch (error) {
+        console.error('❌ Fatal error in macSendMessageToConnection:', error);
+        $('#displayMessageConnectsStatus').html(`
+            <li style="color: red;">❌ Fatal error: ${error.message}</li>
+            <li>Please try again or check console for details</li>
+        `);
+        $('.messageConnectsAction').attr('disabled', false);
+        $('#mac-status').text('Error');
     }
-    $('.messageConnectsAction').attr('disabled', false)
-    // update automation status
-    $('#mac-status').text('Completed')
-    setTimeout(function(){
-        $('#message-all-connects-record').remove()
-    }, 5000)
-    sendStats(x, 'Message sent')
 }
 
 // work in progress 
