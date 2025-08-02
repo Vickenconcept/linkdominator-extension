@@ -344,7 +344,7 @@ const mtuGetAudienceData = async (mtuMessage, mtuDelay, audience) => {
 
         console.log('📊 Audience API response:', response);
 
-        if (!response || response.length === 0) {
+        if (!response || !response.audience) {
             console.log('❌ No audience data returned');
             $('#displayMessageTargetStatus').html(`
                 <div class="alert alert-warning">
@@ -355,7 +355,7 @@ const mtuGetAudienceData = async (mtuMessage, mtuDelay, audience) => {
             return;
         }
 
-        const audienceData = response[0].audience;
+        const audienceData = response.audience;
         if (!audienceData || audienceData.length === 0) {
             console.log('❌ No connections in audience');
             $('#displayMessageTargetStatus').html(`

@@ -31,9 +31,134 @@ var manageAudienceList = `
         </div>
     </div>
 </div>
+
+<!-- Custom Delete Confirmation Modal -->
+<div class="modal fade" id="deleteConfirmationModal" tabindex="-1" role="dialog" aria-labelledby="deleteConfirmationModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered" role="document">
+        <div class="modal-content border-0 shadow-lg">
+            <div class="modal-header bg-danger text-white border-0">
+                <h5 class="modal-title" id="deleteConfirmationModalLabel">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    Confirm Deletion
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-dismiss="modal" aria-label="Close">&times;</button>
+            </div>
+            <div class="modal-body text-center py-4">
+                <div class="mb-4">
+                    <i class="fas fa-trash-alt text-danger" style="font-size: 3rem;"></i>
+                </div>
+                <h6 class="mb-3">Are you sure you want to delete this item?</h6>
+                <p class="text-muted mb-0" id="deleteItemName"></p>
+                <div class="alert alert-warning mt-3" role="alert">
+                    <i class="fas fa-info-circle me-2"></i>
+                    <strong>Warning:</strong> This action cannot be undone.
+                </div>
+            </div>
+            <div class="modal-footer border-0 justify-content-center">
+                <button type="button" class="btn btn-secondary px-4" data-dismiss="modal">
+                    <i class="fas fa-times me-2"></i>Cancel
+                </button>
+                <button type="button" class="btn btn-danger px-4" id="confirmDeleteBtn">
+                    <i class="fas fa-trash me-2"></i>Delete
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
 `;
 
 $('body').append(manageAudienceList);
+
+// Add custom styles for the delete confirmation modal
+const customStyles = `
+<style>
+#deleteConfirmationModal .modal-content {
+    border-radius: 15px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+}
+
+#deleteConfirmationModal .modal-header {
+    border-radius: 15px 15px 0 0;
+    background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+}
+
+#deleteConfirmationModal .modal-body {
+    padding: 2rem;
+}
+
+#deleteConfirmationModal .btn {
+    border-radius: 8px;
+    font-weight: 600;
+    padding: 10px 24px;
+    transition: all 0.3s ease;
+}
+
+#deleteConfirmationModal .btn-danger {
+    background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+    border: none;
+    box-shadow: 0 4px 15px rgba(220, 53, 69, 0.3);
+}
+
+#deleteConfirmationModal .btn-danger:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(220, 53, 69, 0.4);
+}
+
+#deleteConfirmationModal .btn-secondary {
+    background: linear-gradient(135deg, #6c757d 0%, #5a6268 100%);
+    border: none;
+    box-shadow: 0 4px 15px rgba(108, 117, 125, 0.3);
+}
+
+#deleteConfirmationModal .btn-secondary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(108, 117, 125, 0.4);
+}
+
+#deleteConfirmationModal .alert-warning {
+    background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%);
+    border: 1px solid #ffeaa7;
+    border-radius: 8px;
+}
+
+.alert-danger.position-fixed {
+    border-radius: 8px;
+    box-shadow: 0 4px 15px rgba(220, 53, 69, 0.3);
+    animation: slideInRight 0.3s ease-out;
+}
+
+@keyframes slideInRight {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+</style>
+`;
+
+$('head').append(customStyles);
+
+// Add click handlers for modal close buttons
+$('body').on('click', '[data-dismiss="modal"]', function() {
+    $(this).closest('.modal').modal('hide');
+});
+
+// Close modal when clicking outside or pressing ESC
+$('#deleteConfirmationModal').on('click', function(e) {
+    if (e.target === this) {
+        $(this).modal('hide');
+    }
+});
+
+$(document).on('keydown', function(e) {
+    if (e.key === 'Escape' && $('#deleteConfirmationModal').hasClass('show')) {
+        $('#deleteConfirmationModal').modal('hide');
+    }
+});
 
 const getAudienceNameList = async () => {
     var displayList = '';
@@ -99,17 +224,18 @@ const getAudienceNameList = async () => {
                                             </td>
                                             <td>
                                                 <div class="juez-tooltip">
-                                        <i class="fas fa-download download-audience cursorr" 
+                                        <i class="fas fa-download export-audience cursorr" 
                                             data-audid="${item.audience_id}" 
                                             data-name="${item.audience_name}"></i>
-                                        <span class="juez-tooltiptext">Download audience</span>
+                                        <span class="juez-tooltiptext">Export audience</span>
                                                 </div>
                                             </td>
                                             <td>
                                                 <div class="juez-tooltip">
                                         <i class="fas fa-trash cursorr delete-audience" 
                                                         data-audid="${item.audience_id}"
-                                            data-name="${item.audience_name}"></i>
+                                            data-name="${item.audience_name}"
+                                            data-rowid="${item.id}"></i>
                                         <span class="juez-tooltiptext">Delete audience</span>
                                                 </div>
                                             </td>
@@ -224,41 +350,117 @@ $('body').on('click','.get-audience-list', function(){
 
 $('body').on('click','.delete-user',function(){
     var rowId = $(this).data('rowid');
+    var $deleteBtn = $(this);
+    
+    console.log('🗑️ Deleting user from audience:', { rowId });
 
-    $.ajax({
-        method: 'delete',
-        url: `${filterApi}/audience/list?rowId=${rowId}`,
-        success: function(data){
-            if(data.message == 'Deleted successfully'){
-                $('.user-list'+rowId).find('td').fadeOut(1000,function(){ 
-                    $('.user-list'+rowId).remove();                    
-                }); 
+    // Show custom confirmation modal
+    $('#deleteItemName').text('this user from the audience');
+    $('#deleteConfirmationModal').modal('show');
+
+    // Handle confirmation
+    $('#confirmDeleteBtn').off('click.deleteUser').on('click.deleteUser', function() {
+        // Disable the delete button to prevent double-clicks
+        $deleteBtn.prop('disabled', true).addClass('disabled');
+        
+        // Hide the modal
+        $('#deleteConfirmationModal').modal('hide');
+
+        $.ajax({
+            method: 'delete',
+            url: `${filterApi}/audience/list?rowId=${rowId}`,
+            success: function(data){
+                console.log('✅ Delete user response:', data);
+                if(data.message == 'Deleted successfully'){
+                    // Find and remove the row
+                    var $row = $('.user-list'+rowId);
+                    if ($row.length > 0) {
+                        $row.find('td').fadeOut(1000, function(){ 
+                            $row.remove();
+                            console.log('✅ User row removed from UI');
+                            
+                            // Check if no more rows exist
+                            if ($('#audience-user-list tr').length === 0) {
+                                $('#audience-user-list').html('<tr><td colspan="7" class="text-center">No users found in this audience!</td></tr>');
+                            }
+                        }); 
+                    } else {
+                        console.warn('⚠️ User row not found in DOM');
+                    }
+                } else {
+                    console.error('❌ Delete user failed:', data.message);
+                    showErrorAlert('Failed to delete user: ' + (data.message || 'Unknown error'));
+                }
+            },
+            error: function(error){
+                console.error('❌ Delete user request failed:', error);
+                showErrorAlert('Failed to delete user. Please try again.');
+            },
+            complete: function() {
+                // Re-enable the delete button
+                $deleteBtn.prop('disabled', false).removeClass('disabled');
             }
-        },
-        error: function(error){
-            console.log(error)
-        }
-    })
+        });
+    });
 })
 
 $('body').on('click','.delete-audience',function(){
     var audienceId = $(this).data('audid');
     var rowId = $(this).data('rowid');
+    var audienceName = $(this).data('name');
+    var $deleteBtn = $(this);
+    
+    console.log('🗑️ Deleting audience:', { audienceId, rowId, audienceName });
 
-    $.ajax({
-        method: 'delete',
-        url: `${filterApi}/audience?audienceId=${audienceId}`,
-        success: function(data){
-            if(data.message == 'Deleted successfully'){
-                $('.audience-list'+rowId).find('td').fadeOut(1000,function(){ 
-                    $('.audience-list'+rowId).remove();                    
-                }); 
+    // Show custom confirmation modal
+    $('#deleteItemName').text(`"${audienceName}"`);
+    $('#deleteConfirmationModal').modal('show');
+
+    // Handle confirmation
+    $('#confirmDeleteBtn').off('click.deleteAudience').on('click.deleteAudience', function() {
+        // Disable the delete button to prevent double-clicks
+        $deleteBtn.prop('disabled', true).addClass('disabled');
+        
+        // Hide the modal
+        $('#deleteConfirmationModal').modal('hide');
+
+        $.ajax({
+            method: 'delete',
+            url: `${filterApi}/audience?audienceId=${audienceId}`,
+            success: function(data){
+                console.log('✅ Delete response:', data);
+                if(data.message == 'Deleted successfully'){
+                    // Find and remove the row
+                    var $row = $('.audience-list'+rowId);
+                    if ($row.length > 0) {
+                        $row.find('td').fadeOut(1000, function(){ 
+                            $row.remove();
+                            console.log('✅ Row removed from UI');
+                            
+                            // Check if no more rows exist
+                            if ($('#audience-name-list tr').length === 0) {
+                                $('#audience-name-list').html('<tr><td colspan="6" class="text-center">No audiences found. Create your first audience!</td></tr>');
+                            }
+                        }); 
+                    } else {
+                        console.warn('⚠️ Row not found in DOM, refreshing list...');
+                        getAudienceNameList(); // Refresh the list
+                    }
+                } else {
+                    console.error('❌ Delete failed:', data.message);
+                    showErrorAlert('Failed to delete audience: ' + (data.message || 'Unknown error'));
+                }
+            },
+            error: function(error){
+                console.error('❌ Delete request failed:', error);
+                showErrorAlert('Failed to delete audience. Please try again.');
+            },
+            complete: function() {
+                // Re-enable the delete button
+                $deleteBtn.prop('disabled', false).removeClass('disabled');
             }
-        },
-        error: function(error){
-            console.log(error)
-        }
-    })
+        });
+    });
 })
 
 $('body').on('click','.export-audience',function(){
@@ -308,6 +510,33 @@ $('body').on('click','.retry-audience-list',function(){
     console.log('🔄 Retrying audience list...');
     getAudienceNameList();
 })
+
+// Custom error alert function
+const showErrorAlert = (message) => {
+    // Create error alert HTML
+    const errorAlert = `
+        <div class="alert alert-danger alert-dismissible fade show position-fixed" 
+             style="top: 20px; right: 20px; z-index: 9999; min-width: 300px;" 
+             role="alert">
+            <i class="fas fa-exclamation-circle me-2"></i>
+            <strong>Error:</strong> ${message}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+    `;
+    
+    // Remove any existing error alerts
+    $('.alert-danger.position-fixed').remove();
+    
+    // Add new error alert
+    $('body').append(errorAlert);
+    
+    // Auto-remove after 5 seconds
+    setTimeout(() => {
+        $('.alert-danger.position-fixed').fadeOut(500, function() {
+            $(this).remove();
+        });
+    }, 5000);
+}
 
 const formatDate = (date) => {
     let d = new Date(date);

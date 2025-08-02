@@ -15,6 +15,16 @@ $('body').on('click','.addFollowUppAction',function() {
 
         // send message to service worker
         chrome.runtime.sendMessage({scheduleInfo: getMfuStore}, function(response) {
+            // Check for extension context errors
+            if (chrome.runtime.lastError) {
+                if (chrome.runtime.lastError.message && chrome.runtime.lastError.message.includes('Extension context invalidated')) {
+                    console.log('🔄 Extension was reloaded during message followup, this is normal behavior');
+                    return;
+                }
+                console.error('❌ Error sending message followup:', chrome.runtime.lastError);
+                return;
+            }
+            
             $('.message-followup-notice').show()
             $('#displayMessageFollowUpStatus').html(`<li>Schedule added</li>`)
         })

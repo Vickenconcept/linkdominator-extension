@@ -1,5 +1,30 @@
 var userData;
 
+// Global error handler for JavaScript errors
+window.addEventListener('error', function(event) {
+    console.error('JavaScript error:', event.error);
+    
+    // Handle extension context invalidated error
+    if (event.error && event.error.message && event.error.message.includes('Extension context invalidated')) {
+        console.log('🔄 Extension context invalidated - extension was reloaded/updated');
+        // Don't show error message for this case as it's expected behavior
+        return;
+    }
+    
+    // Handle other extension-related errors
+    if (event.error && event.error.message && (
+        event.error.message.includes('Extension context') ||
+        event.error.message.includes('chrome.runtime') ||
+        event.error.message.includes('Receiving end does not exist')
+    )) {
+        console.log('🔄 Extension communication error - likely due to reload/update');
+        return;
+    }
+    
+    // Use console.error instead of NotificationSystem to avoid circular dependencies
+    console.error('A system error occurred. Please refresh the page.');
+});
+
 var mainMenu = `
 <div id="mySidepanel" class="sidepanel" style="width:285px;display:none;">
     <div class="inline-block">
@@ -30,6 +55,7 @@ var mainMenu = `
         <div class="menu-divider-menu"></div>
         <span id="campaign-menu-click">
             <i class="fas fa-flag fa-lg sm-icon"></i>&nbsp;&nbsp;Campaign
+            <i class="fas fa-circle fa-sm" id="status-indicator" style="color: #ccc; margin-left: 8px; font-size: 8px; vertical-align: middle;" title="Campaign Status: Inactive"></i>
         </span>
         <div class="menu-divider-menu"></div>
         <span id="add-connect-menu-click">
@@ -109,6 +135,193 @@ var mainMenu = `
 `;
 
 $('body').append(mainMenu)
+
+// Function to check campaign status
+const checkCampaignStatus = () => {
+    try {
+        // Check if extension context is still valid
+        if (chrome.runtime && chrome.runtime.id) {
+            chrome.runtime.sendMessage({
+                action: 'checkCampaignStatus'
+            }, function(response) {
+                // Check for extension context errors
+                if (chrome.runtime.lastError) {
+                    console.log('🔄 Extension context error (likely reloaded):', chrome.runtime.lastError.message);
+                    stopStatusChecking(); // Stop monitoring when context is invalid
+                    return;
+                }
+                
+                try {
+                    if (response && response.status) {
+                        const statusIndicator = $('#status-indicator');
+                        
+                        switch(response.status) {
+                            case 'running':
+                                statusIndicator.css('color', '#28a745');
+                                statusIndicator.attr('title', `Campaign Status: ${response.message || 'Running'}`);
+                                startStatusChecking(); // Ensure monitoring is active
+                                break;
+                            case 'processing':
+                                statusIndicator.css('color', '#ffc107');
+                                statusIndicator.attr('title', `Campaign Status: ${response.message || 'Processing'}`);
+                                startStatusChecking(); // Ensure monitoring is active
+                                break;
+                            case 'completed':
+                                statusIndicator.css('color', '#17a2b8');
+                                statusIndicator.attr('title', `Campaign Status: ${response.message || 'Completed'}`);
+                                stopStatusChecking(); // Stop monitoring when completed
+                                break;
+                            case 'inactive':
+                                // Check if service worker is ready
+                                if (response.message && response.message.includes('Service worker ready')) {
+                                    statusIndicator.css('color', '#6c757d'); // Dark gray - ready but no campaigns
+                                    statusIndicator.attr('title', 'Campaign Status: Ready - No active campaigns');
+                                    stopStatusChecking(); // Stop monitoring when no campaigns
+                                } else {
+                                    statusIndicator.css('color', '#ccc'); // Light gray - inactive
+                                    statusIndicator.attr('title', 'Campaign Status: Inactive');
+                                    stopStatusChecking(); // Stop monitoring when inactive
+                                }
+                                break;
+                            default:
+                                statusIndicator.css('color', '#ccc');
+                                statusIndicator.attr('title', 'Campaign Status: Inactive');
+                                stopStatusChecking(); // Stop monitoring for unknown status
+                        }
+                    } else {
+                        // If no response, service worker might be inactive
+                        const statusIndicator = $('#status-indicator');
+                        statusIndicator.css('color', '#dc3545'); // Red
+                        statusIndicator.attr('title', 'Campaign Status: Service Worker Inactive - Please refresh extension');
+                        stopStatusChecking(); // Stop monitoring when service worker is inactive
+                    }
+                } catch (error) {
+                    console.error('Error processing campaign status response:', error);
+                    const statusIndicator = $('#status-indicator');
+                    statusIndicator.css('color', '#dc3545'); // Red
+                    statusIndicator.attr('title', 'Campaign Status: Error processing response');
+                }
+            });
+        }
+        
+        // Also check service worker status
+        if (chrome.runtime && chrome.runtime.id) {
+            chrome.runtime.sendMessage({
+                action: 'checkServiceWorkerStatus'
+            }, function(response) {
+                // Check for extension context errors
+                if (chrome.runtime.lastError) {
+                    console.log('🔄 Extension context error (likely reloaded):', chrome.runtime.lastError.message);
+                    stopStatusChecking(); // Stop monitoring when context is invalid
+                    return;
+                }
+                
+                try {
+                    if (response && !response.active) {
+                        const statusIndicator = $('#status-indicator');
+                        statusIndicator.css('color', '#dc3545'); // Red
+                        statusIndicator.attr('title', 'Campaign Status: Service Worker Inactive - Please refresh extension');
+                        stopStatusChecking(); // Stop monitoring when service worker is inactive
+                    }
+                } catch (error) {
+                    console.error('Error processing service worker status response:', error);
+                }
+            });
+        }
+    } catch (error) {
+        console.error('Error in checkCampaignStatus:', error);
+        // If we get here, the extension context is definitely invalid
+        stopStatusChecking();
+    }
+};
+
+// Variable to track if campaigns are running
+let campaignsRunning = false;
+let statusCheckInterval = null;
+
+// Function to start status checking
+const startStatusChecking = () => {
+    if (!statusCheckInterval) {
+        console.log('🔄 Starting campaign status monitoring...');
+        statusCheckInterval = setInterval(checkCampaignStatus, 30000);
+        campaignsRunning = true;
+    }
+};
+
+// Function to stop status checking
+const stopStatusChecking = () => {
+    if (statusCheckInterval) {
+        console.log('⏸️ Stopping campaign status monitoring...');
+        clearInterval(statusCheckInterval);
+        statusCheckInterval = null;
+        campaignsRunning = false;
+    }
+};
+
+// Initial status check
+checkCampaignStatus();
+
+// Cleanup function to clear interval when extension is unloaded
+window.addEventListener('beforeunload', function() {
+    stopStatusChecking();
+});
+
+// Add manual restart function for service worker
+const restartServiceWorker = () => {
+    console.log('🔄 Manually restarting service worker...');
+    chrome.runtime.reload();
+};
+
+// Add click handler for manual restart (optional)
+$('#campaign-menu-click').on('dblclick', function() {
+    restartServiceWorker();
+});
+
+// Listen for campaign status updates from background script
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === 'updateCampaignStatus') {
+        const statusIndicator = $('#status-indicator');
+        
+        switch(request.status) {
+            case 'running':
+                statusIndicator.css('color', '#28a745'); // Green
+                statusIndicator.attr('title', `Campaign Status: ${request.message || 'Running'}`);
+                startStatusChecking(); // Start monitoring when campaigns are running
+                break;
+            case 'processing':
+                statusIndicator.css('color', '#ffc107'); // Yellow
+                statusIndicator.attr('title', `Campaign Status: ${request.message || 'Processing'}`);
+                startStatusChecking(); // Start monitoring when campaigns are processing
+                break;
+            case 'completed':
+                statusIndicator.css('color', '#17a2b8'); // Blue
+                statusIndicator.attr('title', `Campaign Status: ${request.message || 'Completed'}`);
+                stopStatusChecking(); // Stop monitoring when campaigns are completed
+                break;
+            case 'inactive':
+                // Check if service worker is ready
+                if (request.message && request.message.includes('Service worker ready')) {
+                    statusIndicator.css('color', '#6c757d'); // Dark gray - ready but no campaigns
+                    statusIndicator.attr('title', 'Campaign Status: Ready - No active campaigns');
+                    stopStatusChecking(); // Stop monitoring when no campaigns are running
+                } else {
+                    statusIndicator.css('color', '#ccc'); // Light gray - inactive
+                    statusIndicator.attr('title', 'Campaign Status: Inactive');
+                    stopStatusChecking(); // Stop monitoring when inactive
+                }
+                break;
+            case 'error':
+                statusIndicator.css('color', '#dc3545'); // Red
+                statusIndicator.attr('title', `Campaign Status: ${request.message || 'Error'}`);
+                stopStatusChecking(); // Stop monitoring on error
+                break;
+            default:
+                statusIndicator.css('color', '#ccc'); // Gray
+                statusIndicator.attr('title', 'Campaign Status: Inactive');
+                stopStatusChecking(); // Stop monitoring for unknown status
+        }
+    }
+});
 getUserProfile();
 
 $('#open-nav').click(function(){

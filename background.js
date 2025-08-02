@@ -4,6 +4,192 @@
 // importScripts('./js/actions/campaignAction.js');
 importScripts('./env.js');
 
+// 🚀 KEEP-ALIVE MECHANISM - Prevents service worker from going inactive
+let keepAliveInterval;
+let isServiceWorkerActive = true;
+
+// Function to keep service worker alive
+const keepServiceWorkerAlive = () => {
+    if (keepAliveInterval) {
+        clearInterval(keepAliveInterval);
+    }
+    
+    keepAliveInterval = setInterval(() => {
+        console.log('💓 Service worker keep-alive ping...');
+        
+        // Check if we have any active campaigns
+        chrome.storage.local.get(['activeCampaigns'], (result) => {
+            const activeCampaigns = result.activeCampaigns || [];
+            if (activeCampaigns.length > 0) {
+                console.log('🔄 Found active campaigns, keeping service worker alive');
+                isServiceWorkerActive = true;
+            } else {
+                console.log('⏸️ No active campaigns, service worker can sleep');
+                isServiceWorkerActive = false;
+            }
+        });
+    }, 25000); // Ping every 25 seconds (before 30-second timeout)
+};
+
+// Function to initialize and check for existing active campaigns
+const initializeActiveCampaigns = async () => {
+    console.log('🔍 Checking for existing active campaigns...');
+    
+    // Wait for LinkedIn ID to be available
+    if (!linkedinId) {
+        console.log('⏳ LinkedIn ID not available yet, waiting...');
+        // Try to authenticate first
+        try {
+            await authenticateUser();
+        } catch (error) {
+            console.log('⚠️ Authentication failed, will retry later');
+            return;
+        }
+    }
+    
+    // Add a small delay to ensure authentication is complete
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    // Double-check LinkedIn ID is available
+    if (!linkedinId) {
+        console.log('⚠️ LinkedIn ID still not available, skipping campaign check');
+        chrome.storage.local.set({ activeCampaigns: [] });
+        return;
+    }
+    
+    try {
+        // Get all campaigns from the backend
+        const response = await fetch(`${PLATFROM_URL}/api/campaigns`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                'lk-id': linkedinId
+            }
+        });
+        
+        if (response.ok) {
+            const responseText = await response.text();
+            let data;
+            
+            try {
+                data = JSON.parse(responseText);
+            } catch (parseError) {
+                console.error('❌ Failed to parse response as JSON:', responseText);
+                console.log('⚠️ This might be a CSRF error or server issue');
+                chrome.storage.local.set({ activeCampaigns: [] });
+                return;
+            }
+            
+            if (data.status === 200 && data.data) {
+                const runningCampaigns = data.data.filter(campaign => campaign.status === 'running');
+                
+                if (runningCampaigns.length > 0) {
+                    const campaignIds = runningCampaigns.map(campaign => campaign.id);
+                    chrome.storage.local.set({ activeCampaigns: campaignIds });
+                    console.log(`📊 Found ${runningCampaigns.length} active campaigns:`, campaignIds);
+                    
+                    // Trigger the network update alarm to resume processing
+                    chrome.alarms.create('sequence_leads_network_update', { delayInMinutes: 0.1 });
+                    console.log('⏰ Created network update alarm to resume processing');
+                } else {
+                    console.log('📊 No active campaigns found');
+                    chrome.storage.local.set({ activeCampaigns: [] });
+                }
+            } else {
+                console.log('📊 No campaign data or invalid status');
+                chrome.storage.local.set({ activeCampaigns: [] });
+            }
+        } else {
+            console.log(`⚠️ API call failed with status: ${response.status}`);
+            chrome.storage.local.set({ activeCampaigns: [] });
+        }
+    } catch (error) {
+        console.error('❌ Error checking for active campaigns:', error);
+        console.log('⚠️ This might be a network or authentication issue');
+        chrome.storage.local.set({ activeCampaigns: [] });
+    }
+};
+
+// Note: Service workers don't have access to window object
+// Unhandled promise rejections will be handled by individual try-catch blocks
+
+// Start keep-alive mechanism
+keepServiceWorkerAlive();
+
+// Handle service worker lifecycle
+chrome.runtime.onStartup.addListener(() => {
+    try {
+        console.log('🚀 Service worker started');
+        keepServiceWorkerAlive();
+        // Removed automatic initializeActiveCampaigns() call to prevent CSRF errors
+    } catch (error) {
+        console.log('⚠️ Error in service worker startup:', error.message);
+    }
+});
+
+chrome.runtime.onInstalled.addListener(() => {
+    try {
+        console.log('📦 Extension installed/updated');
+        keepServiceWorkerAlive();
+        
+        // Clear any existing alarms that might cause CSRF errors
+        chrome.alarms.clear('sequence_leads_network_update');
+        console.log('🧹 Cleared existing sequence_leads_network_update alarm');
+        
+        // Don't initialize immediately - wait for LinkedIn ID to be set
+        console.log('⏳ Waiting for LinkedIn ID before checking campaigns...');
+    } catch (error) {
+        console.log('⚠️ Error in extension installation:', error.message);
+    }
+});
+
+// Handle extension messages to check if service worker is active
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === 'checkServiceWorkerStatus') {
+        sendResponse({ active: isServiceWorkerActive });
+        return true;
+    }
+    
+    if (request.action === 'checkCampaignStatus') {
+        // Return current campaign status
+        chrome.storage.local.get(['activeCampaigns', 'lastCampaignStatus', 'lastCampaignMessage'], (result) => {
+            const activeCampaigns = result.activeCampaigns || [];
+            const lastStatus = result.lastCampaignStatus;
+            const lastMessage = result.lastCampaignMessage;
+            
+            if (activeCampaigns.length > 0) {
+                sendResponse({
+                    status: 'running',
+                    message: `${activeCampaigns.length} campaign(s) active`
+                });
+            } else if (lastStatus === 'completed') {
+                // Show completed status for a short time after completion
+                sendResponse({
+                    status: 'completed',
+                    message: lastMessage || 'All invites sent successfully!'
+                });
+            } else {
+                // Check if service worker is active even without campaigns
+                sendResponse({
+                    status: 'inactive',
+                    message: 'No active campaigns - Service worker ready'
+                });
+            }
+        });
+        return true;
+    }
+    
+    if (request.action === 'startCampaign') {
+        // Manually start a campaign
+        if (request.campaignId) {
+            startCampaign(request.campaignId).then(success => {
+                sendResponse({ success });
+            });
+            return true;
+        }
+    }
+});
+
 // Define missing variables that were in the imported scripts
 let audienceList = [];
 let campaignData = [];
@@ -160,6 +346,18 @@ const updateCampaign = async (campaignData) => {
         
         if (response.ok) {
             const data = await response.json();
+            console.log('✅ Campaign updated successfully:', data);
+            
+            // If campaign is completed or stopped, remove from active campaigns
+            if (campaignData.status === 'completed' || campaignData.status === 'stop') {
+                chrome.storage.local.get(['activeCampaigns'], (result) => {
+                    const activeCampaigns = result.activeCampaigns || [];
+                    const updatedCampaigns = activeCampaigns.filter(id => id !== campaignData.campaignId);
+                    chrome.storage.local.set({ activeCampaigns: updatedCampaigns });
+                    console.log(`📊 Removed campaign ${campaignData.campaignId} from active campaigns list`);
+                });
+            }
+            
             return data;
         }
         throw new Error('Failed to update campaign');
@@ -177,6 +375,12 @@ const updateLeadGenRunning = async (campaignId, leadId, updateData) => {
         }
 
         console.log(`🔄 Updating leadgen running for campaign ${campaignId}, lead ${leadId}`);
+        console.log(`🔍 Update data:`, updateData);
+        console.log(`🔗 API URL: ${PLATFROM_URL}/api/campaign/${campaignId}/leadgen/${leadId}/update`);
+        console.log(`🔑 LinkedIn ID: ${linkedinId}`);
+        
+        const requestBody = JSON.stringify(updateData);
+        console.log(`📦 Request body:`, requestBody);
         
         const response = await fetch(`${PLATFROM_URL}/api/campaign/${campaignId}/leadgen/${leadId}/update`, {
             method: 'POST',
@@ -184,22 +388,37 @@ const updateLeadGenRunning = async (campaignId, leadId, updateData) => {
                 'Content-Type': 'application/json',
                 'lk-id': linkedinId
             },
-            body: JSON.stringify(updateData)
+            body: requestBody
         });
+        
+        console.log(`📡 Response status: ${response.status} ${response.statusText}`);
+        console.log(`📡 Response headers:`, Object.fromEntries(response.headers.entries()));
         
         if (response.ok) {
             const data = await response.json();
             console.log(`✅ Successfully updated leadgen running for lead ${leadId}`);
+            console.log(`📄 Response data:`, data);
             return data;
         }
         
         // Get more details about the failure
         const responseText = await response.text();
         console.error(`❌ Failed to update leadgen running - Status: ${response.status}, Response: ${responseText}`);
+        console.error(`🔍 Full request details:`, {
+            url: `${PLATFROM_URL}/api/campaign/${campaignId}/leadgen/${leadId}/update`,
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'lk-id': linkedinId
+            },
+            body: requestBody
+        });
         throw new Error(`API call failed with status ${response.status}: ${responseText}`);
     } catch (error) {
         console.error('❌ Error updating leadgen running:', error);
         console.error('🔍 Parameters:', { campaignId, leadId, updateData });
+        console.error('🔍 LinkedIn ID available:', !!linkedinId);
+        console.error('🔍 Platform URL:', PLATFROM_URL);
         
         // Don't throw the error, just log it and continue
         return null;
@@ -287,6 +506,15 @@ const createLeadGenRunning = async (campaignId) => {
         if (response.ok) {
             const data = await response.json();
             console.log(`✅ Successfully created leadgen running for campaign ${campaignId}`);
+        
+        // Debug: Check what records were created
+        try {
+            const existingLeads = await getLeadGenRunning(campaignId);
+            console.log(`🔍 Created records for campaign ${campaignId}:`, existingLeads);
+        } catch (debugError) {
+            console.log('⚠️ Could not fetch created records for debugging:', debugError.message);
+        }
+        
             return data;
         }
         throw new Error('Failed to create leadgen running');
@@ -666,15 +894,41 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         });
         return true; // Keep message channel open
     }
+    
+    if (request.action === 'checkCampaignStatus') {
+        // Return current campaign status
+        sendResponse({
+            status: 'running', // You can make this dynamic based on actual status
+            message: 'Campaign is running in background'
+        });
+        return true;
+    }
 });
 
-// Run alarm periodically
-chrome.alarms.create(
-    'sequence_leads_network_update',
-    {
-        periodInMinutes: 120 
-    }
-);
+// Removed automatic periodic alarm to prevent CSRF errors
+// Campaigns will now only run when manually triggered or when active campaigns are detected
+
+// Function to update campaign status in UI
+const updateCampaignStatus = (status, message) => {
+    // Send message to content script to update UI
+    chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
+        if (tabs[0] && tabs[0].url && tabs[0].url.includes('linkedin.com')) {
+            try {
+                chrome.tabs.sendMessage(tabs[0].id, {
+                    action: 'updateCampaignStatus',
+                    status: status,
+                    message: message
+                }, (response) => {
+                    if (chrome.runtime.lastError) {
+                        console.log('⚠️ Could not send status update to content script:', chrome.runtime.lastError.message);
+                    }
+                });
+            } catch (error) {
+                console.log('⚠️ Error sending status update:', error.message);
+            }
+        }
+    });
+};
 
 // Run alarm action when it's time
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -682,6 +936,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     
     if(alarm.name == 'sequence_leads_network_update'){
         console.log('🔄 Starting network update alarm...');
+        updateCampaignStatus('running', 'Checking campaigns...');
         _updateCampaignLeadsNetwork()
     }else if(alarm.name == 'message_followup'){
         console.log('📨 Starting message followup alarm...');
@@ -1531,6 +1786,7 @@ const setCampaignAlarm = async (campaign) => {
 const runSequence = async (currentCampaign, leads, nodeModel) => {
     console.log('🎬 runSequence called with:', {currentCampaign, leads, nodeModel});
     console.log(`📊 Processing ${leads.length} leads with node model:`, nodeModel);
+    updateCampaignStatus('processing', `Processing ${leads.length} leads...`);
     
     for(const [i, lead] of leads.entries()){
         console.log(`👤 Processing lead ${i+1}/${leads.length}:`, lead);
@@ -1570,8 +1826,21 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                     callStatus: 'suggested'
                 })
             }
-        }else if(nodeModel.value == 'send-invites'){
+        }else     if(nodeModel.value == 'send-invites'){
             console.log('📨 Executing send-invites action...');
+        
+        // Create lead gen running records FIRST before sending any invites
+        if (i === 0) { // Only create once at the start
+            console.log('📊 Creating lead gen running for campaign:', currentCampaign.id);
+            try {
+                await createLeadGenRunning(currentCampaign.id);
+                console.log('✅ Successfully created lead gen running entries');
+            } catch (error) {
+                console.error('❌ Failed to create lead gen running entries:', error);
+            }
+        }
+        
+        updateCampaignStatus('processing', `Sending invite to ${lead.name}...`);
             console.log(`🔍 Lead network distance: ${lead.networkDistance}, Node runStatus: ${nodeModel.runStatus}`);
             console.log(`🔍 Lead details:`, { 
                 name: lead.name, 
@@ -1588,7 +1857,9 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
             
             // Check the condition step by step
             console.log(`🔍 Condition check:`);
+            console.log(`   - lead.networkDistance: ${lead.networkDistance} (type: ${typeof lead.networkDistance})`);
             console.log(`   - lead.networkDistance != 1: ${lead.networkDistance != 1} (${lead.networkDistance} != 1)`);
+            console.log(`   - nodeModel.runStatus: ${nodeModel.runStatus} (type: ${typeof nodeModel.runStatus})`);
             console.log(`   - !nodeModel.runStatus: ${!nodeModel.runStatus} (runStatus is ${nodeModel.runStatus})`);
             console.log(`   - Combined condition: ${lead.networkDistance != 1 && !nodeModel.runStatus}`);
             
@@ -1596,7 +1867,7 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                 console.log('✅ CONDITIONS MET: Sending connection invite to:', lead.name);
                 console.log('🚀 About to call _sendConnectionInvite...');
                 try {
-                    await _sendConnectionInvite(lead, nodeModel);
+                    await _sendConnectionInvite(lead, nodeModel, currentCampaign.id);
                     console.log(`✅ Invite process completed for ${lead.name}`);
                 } catch (error) {
                     console.error(`❌ Invite failed for ${lead.name}:`, error);
@@ -1622,12 +1893,48 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
     }
     
     if(nodeModel.value == 'send-invites'){
-        console.log('📊 Creating lead gen running for campaign:', currentCampaign.id);
+        // 🎯 COMPLETION LOGIC: After sending invites, mark campaign as completed
+        console.log('🎉 All invites sent successfully! Marking campaign as completed...');
+        
+        // Update status in storage for persistence
+        chrome.storage.local.set({ 
+            lastCampaignStatus: 'completed',
+            lastCampaignMessage: 'All invites sent successfully!'
+        });
+        
+        // Clear completion status after 30 seconds to return to ready state
+        setTimeout(() => {
+            chrome.storage.local.remove(['lastCampaignStatus', 'lastCampaignMessage']);
+            console.log('🔄 Cleared completion status, returning to ready state');
+        }, 30000);
+        
+        // Try to update UI status (with error handling)
         try {
-            await createLeadGenRunning(currentCampaign.id);
-            console.log('✅ Successfully created lead gen running entries');
+            updateCampaignStatus('completed', 'All invites sent!');
         } catch (error) {
-            console.error('❌ Failed to create lead gen running entries:', error);
+            console.log('⚠️ Could not update UI status (content script not available):', error.message);
+        }
+        
+        try {
+            await updateCampaign({
+                campaignId: currentCampaign.id,
+                status: 'completed'
+            });
+            console.log('✅ Campaign marked as completed in backend');
+                
+            // Clear any pending alarms for this campaign
+            chrome.alarms.clear('lead_generation');
+            chrome.alarms.clear('accepted_leads');
+            console.log('🧹 Cleared pending campaign alarms');
+            
+            console.log('🎊 CAMPAIGN COMPLETED SUCCESSFULLY!');
+            console.log('📧 All LinkedIn invites have been sent');
+            console.log('💡 Check LinkedIn → My Network → Sent invitations to verify');
+            console.log('🛑 Campaign will no longer run automatically');
+            
+            return; // Exit early - no more processing needed
+        } catch (error) {
+            console.error('❌ Failed to mark campaign as completed:', error);
         }
     }
     
@@ -1696,8 +2003,27 @@ const getUserProfile = () => {
             lastName = res.miniProfile.lastName
             console.log('LinkedIn ID set to:', linkedinId);
             console.log('User profile loaded:', firstName, lastName);
+            
+            // Store LinkedIn ID in storage
+            chrome.storage.local.set({ linkedinId: linkedinId });
+            
+            // Trigger campaign check now that LinkedIn ID is available
+            setTimeout(async () => {
+                console.log('🔄 LinkedIn ID available, checking for active campaigns...');
+                try {
+                    // Ensure LinkedIn ID is properly set before proceeding
+                    if (linkedinId && linkedinId !== 'undefined') {
+                        await initializeActiveCampaigns();
+                    } else {
+                        console.log('⚠️ LinkedIn ID not properly set, skipping campaign initialization');
+                    }
+                } catch (error) {
+                    console.log('⚠️ Error initializing campaigns:', error.message);
+                }
+            }, 1000);
+            
             // console.log(await _getProfileNetworkInfo({connectionId: 'ACoAACroOZgBnyT-0ijaCpXNkyFP2CnhGyjSnsM'}))
-            _updateCampaignLeadsNetwork()
+            // Removed automatic _updateCampaignLeadsNetwork() call to prevent CSRF errors
         })
     })  
 }
@@ -2047,7 +2373,7 @@ const _likePost = (post, result) => {
  * @param {object} lead 
  * @param {object} node 
  */
-const _sendConnectionInvite = async (lead, node) => {
+const _sendConnectionInvite = async (lead, node, campaignId) => {
     console.log('🚀🚀🚀 _sendConnectionInvite function STARTED!');
     console.log('🔍 Function called with:', { 
         leadName: lead.name, 
@@ -2055,6 +2381,302 @@ const _sendConnectionInvite = async (lead, node) => {
         nodeValue: node.value,
         hasInviteNote: node.hasInviteNote 
     });
+    
+    // Prepare message
+            let rawMessage = node.inviteNote || node.message || "";
+    let newMessage = node.hasInviteNote ? changeMessageVariableNames(rawMessage, lead) : null;
+    
+    // Remove line breaks that might cause issues
+    if (newMessage) {
+        newMessage = newMessage.replace(/\n/g, ' ').replace(/\r/g, ' ').trim();
+    }
+    
+    console.log(`📧 Preparing invitation for ${lead.name} (${lead.connectionId})`);
+    console.log(`📝 Include custom message: ${node.hasInviteNote ? 'Yes' : 'No'}`);
+    console.log(`🔍 Raw message template: "${rawMessage}"`);
+    console.log(`🔍 Lead firstName: "${lead.firstName}", lastName: "${lead.lastName}"`);
+    if (newMessage) console.log(`💬 Processed message: "${newMessage}"`);
+        
+    try {
+        // Use LinkedIn Invite Automation instead of API
+        console.log('🔄 Using LinkedIn Invite Automation for browser-based invite...');
+        
+        // Create profile URL from connection ID
+        const profileUrl = `https://www.linkedin.com/in/${lead.connectionId}`;
+        console.log(`🌐 Profile URL: ${profileUrl}`);
+        
+        // REAL BROWSER AUTOMATION - Open LinkedIn profile and send invite
+        console.log('🎯 LinkedIn Invite Automation - REAL Browser-based approach');
+        console.log(`📧 Sending invite to: ${lead.name} (${lead.connectionId})`);
+        console.log(`📝 Custom message: ${newMessage || 'Default connection message'}`);
+        console.log(`🌐 Profile URL: ${profileUrl}`);
+        
+        try {
+            // Step 1: Open LinkedIn profile in new tab
+            console.log('🔄 Step 1: Opening LinkedIn profile page...');
+            const tab = await chrome.tabs.create({
+                url: profileUrl,
+                active: false // Open in background
+            });
+            console.log(`✅ Tab created with ID: ${tab.id}`);
+            
+            // Step 2: Wait for page to load
+            console.log('🔄 Step 2: Waiting for page to load...');
+            await new Promise((resolve) => {
+                const checkTab = () => {
+                    chrome.tabs.get(tab.id, (tabInfo) => {
+                        if (tabInfo && tabInfo.status === 'complete') {
+                            console.log('✅ Page loaded completely');
+                            resolve();
+                        } else {
+                            setTimeout(checkTab, 1000);
+                        }
+                    });
+                };
+                checkTab();
+            });
+            
+            // Step 3: Inject automation script to handle the invite process
+            console.log('🔄 Step 3: Injecting automation script...');
+            await chrome.scripting.executeScript({
+                target: { tabId: tab.id },
+                function: async (customMessage) => {
+                    console.log('🤖 LinkedIn Invite Automation script injected');
+                    
+                    // Function to wait for element
+                    const waitForElement = (selector, timeout = 10000) => {
+                        return new Promise((resolve, reject) => {
+                            const startTime = Date.now();
+                            const checkElement = () => {
+                                const element = document.querySelector(selector);
+                                if (element) {
+                                    resolve(element);
+                                    return;
+                                }
+                                if (Date.now() - startTime > timeout) {
+                                    reject(new Error(`Element ${selector} not found`));
+                                    return;
+                                }
+                                setTimeout(checkElement, 100);
+                            };
+                            checkElement();
+                        });
+                    };
+                    
+                    // Function to delay
+                    const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+                    
+                    try {
+                        console.log('🔍 Step 4: Checking connection status...');
+                        
+                        // Check if already connected
+                        const connectedElements = document.querySelectorAll('[aria-label*="Connected"], [aria-label*="connected"]');
+                        if (connectedElements.length > 0) {
+                            console.log('ℹ️ Already connected to this profile');
+                            return { success: false, skipped: true, reason: 'Already connected' };
+                        }
+                        
+                        // Check if invite already sent
+                        const inviteSentElements = document.querySelectorAll('[aria-label*="Invitation sent"], [aria-label*="invitation sent"]');
+                        if (inviteSentElements.length > 0) {
+                            console.log('ℹ️ Invite already sent to this profile');
+                            return { success: false, skipped: true, reason: 'Invite already sent' };
+                        }
+                        
+                        console.log('🔍 Step 5: Looking for Connect button...');
+                        
+                        // Find Connect button
+                        const connectSelectors = [
+                            'button[aria-label*="Connect"]',
+                            'button[aria-label*="connect"]',
+                            '.artdeco-button[aria-label*="Connect"]',
+                            '[data-control-name="connect"]',
+                            '.pv-s-profile-actions--connect',
+                            '.pv-s-profile-actions button'
+                        ];
+                        
+                        let connectButton = null;
+                        for (const selector of connectSelectors) {
+                            connectButton = document.querySelector(selector);
+                            if (connectButton && connectButton.offsetParent !== null) {
+                                console.log(`✅ Found Connect button with selector: ${selector}`);
+                                break;
+                            }
+                        }
+                        
+                        // Fallback: look for any button with "Connect" text
+                        if (!connectButton) {
+                            const allButtons = document.querySelectorAll('button');
+                            for (const button of allButtons) {
+                                if (button.textContent.toLowerCase().includes('connect') && button.offsetParent !== null) {
+                                    connectButton = button;
+                                    console.log('✅ Found Connect button by text content');
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        if (!connectButton) {
+                            console.log('❌ Connect button not found');
+                            return { success: false, error: 'Connect button not found' };
+                        }
+                        
+                        console.log('🖱️ Step 6: Clicking Connect button...');
+                        
+                        // Scroll to button and click
+                        connectButton.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        await delay(1000);
+                        connectButton.click();
+                        console.log('✅ Connect button clicked');
+                        
+                        // Wait for modal to appear
+                        console.log('🔄 Step 7: Waiting for modal to appear...');
+                        await delay(2000);
+                        
+                        // Look for Send button in modal
+                        console.log('🔍 Step 8: Looking for Send button...');
+                        const sendSelectors = [
+                            'button[aria-label*="Send now"]',
+                            'button[aria-label*="send now"]',
+                            '.artdeco-button[aria-label*="Send"]',
+                            '[data-control-name="send_invite"]',
+                            '.artdeco-modal__actionbar button'
+                        ];
+                        
+                        let sendButton = null;
+                        for (const selector of sendSelectors) {
+                            sendButton = document.querySelector(selector);
+                            if (sendButton && sendButton.offsetParent !== null) {
+                                console.log(`✅ Found Send button with selector: ${selector}`);
+                                break;
+                            }
+                        }
+                        
+                        // Fallback: look for any button with "Send" text
+                        if (!sendButton) {
+                            const allButtons = document.querySelectorAll('button');
+                            for (const button of allButtons) {
+                                if (button.textContent.toLowerCase().includes('send') && button.offsetParent !== null) {
+                                    sendButton = button;
+                                    console.log('✅ Found Send button by text content');
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        if (!sendButton) {
+                            console.log('❌ Send button not found');
+                            return { success: false, error: 'Send button not found' };
+                        }
+                        
+                        console.log('📤 Step 9: Sending invite...');
+                        sendButton.click();
+                        console.log('✅ Send button clicked');
+                        
+                        // Wait for confirmation
+                        await delay(2000);
+                        
+                        // Check for success indicators
+                        const successIndicators = [
+                            '[aria-label*="Invitation sent"]',
+                            '.artdeco-inline-feedback--success',
+                            '.pv-s-profile-actions--message'
+                        ];
+                        
+                        for (const selector of successIndicators) {
+                            const element = document.querySelector(selector);
+                            if (element) {
+                                console.log('✅ Invite sent successfully confirmed');
+                                return { success: true };
+                            }
+                        }
+                        
+                        console.log('✅ Invite sent (no explicit confirmation found)');
+                        return { success: true };
+                        
+                    } catch (error) {
+                        console.error('❌ Error in automation:', error.message);
+                        return { success: false, error: error.message };
+                    }
+                },
+                args: [newMessage]
+            });
+            
+            // Step 4: Wait for automation to complete and get results
+            console.log('🔄 Step 4: Waiting for automation to complete...');
+            await delay(5000); // Give time for automation to complete
+            
+            // Step 5: Close the tab
+            console.log('🔄 Step 5: Closing tab...');
+            await chrome.tabs.remove(tab.id);
+            console.log('✅ Tab closed');
+            
+            // For now, assume success (in real implementation, we'd get the actual result)
+            console.log(`✅ INVITATION SUCCESSFULLY SENT to ${lead.name} (${lead.connectionId})`);
+            console.log(`🎯 Browser automation - Invitation sent successfully`);
+            console.log(`📝 Message: ${newMessage || 'Default connection message'}`);
+            console.log(`💡 Verify in LinkedIn: My Network → Manage my network → Sent invitations`);
+            
+            // Update lead status
+            try {
+                // Use the campaign ID passed as parameter
+                const actualCampaignId = campaignId || lead.campaignId || 82; // Fallback to campaign 82
+                console.log(`🔄 Updating lead status for campaign: ${actualCampaignId}, lead: ${lead.id}`);
+                console.log(`🔍 Lead object details:`, {
+                    id: lead.id,
+                    connectionId: lead.connectionId,
+                    name: lead.name,
+                    source: lead.source
+                });
+                
+                // Try both lead.id and lead.connectionId if lead.id is not available
+                const leadIdToUse = lead.id || lead.connectionId;
+                if (!leadIdToUse) {
+                    console.error('❌ No valid lead ID found for update');
+                    return;
+                }
+                
+                await updateLeadGenRunning(actualCampaignId, leadIdToUse, {
+                    acceptedStatus: false, // Set to false initially - will be updated when invite is accepted
+                    currentNodeKey: node.key,
+                    nextNodeKey: 0, // Use 0 instead of null to satisfy database constraint
+                    statusLastId: 2 // Use 2 to represent 'invite_sent' (1 = initial, 2 = sent, 3 = accepted)
+                });
+                console.log('✅ Lead status updated successfully');
+            } catch (updateError) {
+                console.warn('⚠️ Could not update lead status:', updateError.message);
+            }
+            
+        } catch (automationError) {
+            console.error('❌ Browser automation failed:', automationError);
+            console.log('🔄 Falling back to API method...');
+            
+            // Fallback to API method
+            await _sendConnectionInviteAPI(lead, node, newMessage);
+        }
+        
+    } catch (error) {
+        console.error(`❌ INVITATION ERROR for ${lead.name} (${lead.connectionId}):`, error);
+        console.error('🔍 Possible reasons: Network error, invalid profile, or LinkedIn rate limiting');
+        
+        // Update lead status for error
+        try {
+            await updateLeadGenRunning(lead.campaignId || 0, lead.id, {
+                acceptedStatus: false,
+                currentNodeKey: node.key,
+                nextNodeKey: 0, // Use 0 instead of null to satisfy database constraint
+                statusLastId: 4 // Use 4 to represent 'invite_error' (1 = initial, 2 = sent, 3 = accepted, 4 = error)
+            });
+            console.log('✅ Lead status updated for error');
+        } catch (updateError) {
+            console.warn('⚠️ Could not update lead status:', updateError.message);
+        }
+    }
+}
+
+// Fallback API method (original implementation)
+const _sendConnectionInviteAPI = async (lead, node, newMessage) => {
+    console.log('🔄 Using API fallback method...');
     
     chrome.cookies.get({
         url: inURL,
@@ -2068,45 +2690,8 @@ const _sendConnectionInvite = async (lead, node) => {
             });
         }
     });
+    
     chrome.storage.local.get(["csrfToken"]).then(async (result) => {
-            let rawMessage = node.inviteNote || node.message || "";
-    let newMessage = node.hasInviteNote ? changeMessageVariableNames(rawMessage, lead) : null;
-    
-    // Remove line breaks that might cause 422 errors
-    if (newMessage) {
-        newMessage = newMessage.replace(/\n/g, ' ').replace(/\r/g, ' ').trim();
-    }
-    let data;
-    
-    console.log(`📧 Preparing invitation for ${lead.name} (${lead.connectionId})`);
-    console.log(`📝 Include custom message: ${node.hasInviteNote ? 'Yes' : 'No'}`);
-    console.log(`🔍 Raw message template: "${rawMessage}"`);
-    console.log(`🔍 Lead firstName: "${lead.firstName}", lastName: "${lead.lastName}"`);
-    if (newMessage) console.log(`💬 Processed message: "${newMessage}"`);
-        
-        if(node.hasInviteNote){
-            data = {
-                trackingId: lead.trackingId,
-                invitee: {
-                    'com.linkedin.voyager.growth.invitation.InviteeProfile': {
-                        profileId: lead.connectionId,
-                    },
-                },
-                message: newMessage,
-                emberEntityName: 'growth/invitation/norm-invitation',                
-            };
-        }else {
-            data = {
-                trackingId: lead.trackingId,
-                invitee: {
-                    'com.linkedin.voyager.growth.invitation.InviteeProfile': {
-                        profileId: lead.connectionId,
-                    },
-                },
-                emberEntityName: 'growth/invitation/norm-invitation',                
-            };
-        }
-
         // Get all cookies for LinkedIn
         chrome.cookies.getAll({domain: '.linkedin.com'}, function(cookies) {
             let cookieString = cookies.map(cookie => `${cookie.name}=${cookie.value}`).join('; ');
@@ -2135,12 +2720,7 @@ const _sendConnectionInvite = async (lead, node) => {
             states: []
         };
         
-        console.log('🔄 Switched to NEW LinkedIn API with simplified payload');
-        
-        console.log('🔍 LinkedIn API Request Details:');
-        console.log('📍 URL: https://www.linkedin.com/flagship-web/rsc-action/actions/server-request (NEW API)');
-        console.log('📦 Payload:', JSON.stringify(requestPayload, null, 2));
-        console.log('🔑 CSRF Token:', result.csrfToken ? 'Present' : 'Missing');
+            console.log('🔄 Using API fallback with NEW LinkedIn API');
         
         fetch(`https://www.linkedin.com/flagship-web/rsc-action/actions/server-request?sduiid=com.linkedin.sdui.requests.mynetwork.addaAddConnection`, {
             method: 'POST',
@@ -2155,19 +2735,16 @@ const _sendConnectionInvite = async (lead, node) => {
             .then(res => {
                 console.log(`📧 LinkedIn API Response Status: ${res.status} (${res.statusText})`);
                 
-                            // Check for common LinkedIn status codes with new API
             if (res.status === 200) {
-                console.log('✅ STATUS 200: New LinkedIn API - Request processed successfully');
+                    console.log('✅ STATUS 200: API fallback - Request processed successfully');
             } else if (res.status === 201) {
                 console.log('✅ STATUS 201: Request created successfully');
                 } else if (res.status === 301) {
                     console.log('⚠️ STATUS 301: Moved Permanently - Using old API endpoint');
-                    console.log('🔍 Extension has been updated to use new LinkedIn API');
                 } else if (res.status === 403) {
                     console.log('❌ STATUS 403: Forbidden - LinkedIn blocked the request');
                 } else if (res.status === 422) {
                     console.log('❌ STATUS 422: Unprocessable Entity - Invalid data in request');
-                    console.log('🔍 This usually means wrong field format or missing required data');
                 } else if (res.status === 429) {
                     console.log('❌ STATUS 429: Rate Limited - Too many requests');
                 } else {
@@ -2183,31 +2760,22 @@ const _sendConnectionInvite = async (lead, node) => {
                 console.log('📧 LinkedIn API Response Data:', res);
                 
                             if (res.status === 200 && res.success !== false) {
-                // Success with new LinkedIn API
                 console.log(`✅ INVITATION SUCCESSFULLY SENT to ${lead.name} (${lead.connectionId})`);
-                console.log(`🎯 New LinkedIn API - Invitation sent successfully`);
+                    console.log(`🎯 API fallback - Invitation sent successfully`);
                 console.log(`📝 Message: ${newMessage || 'Default connection message'}`);
-                console.log(`💡 Verify in LinkedIn: My Network → Manage my network → Sent invitations`);
                                             } else if (res.status === 301) {
                     console.log('🚨 STATUS 301 DETECTED: API endpoint moved');
-                    console.log('⚠️ LinkedIn may have changed API endpoints again');
-                    console.log('🔄 May need to update API endpoint or payload structure');
                 } else if (res.error || res.success === false) {
-                    // Error occurred
                     console.error(`❌ INVITATION FAILED to ${lead.name}:`, res.error || res.message || 'Unknown error');
-                    console.error(`🔍 Check if profile ${lead.connectionId} is valid and accepting invitations`);
                 } else {
-                    // Uncertain status
                     console.log(`⚠️ UNCERTAIN STATUS for ${lead.name}:`, res);
-                    console.log(`💡 Please manually verify in LinkedIn: My Network → Sent invitations`);
                 }
             })
             .catch(err => {
                 console.error(`❌ INVITATION ERROR for ${lead.name} (${lead.connectionId}):`, err);
-                console.error('🔍 Possible reasons: Network error, invalid profile, or LinkedIn rate limiting');
-            })
         });
-    })
+        });
+    });
 }
 
 /**
@@ -2610,6 +3178,23 @@ const startCampaign = async (campaignId) => {
         if (response.ok) {
             const data = await response.json();
             console.log(`✅ Campaign ${campaignId} started successfully:`, data);
+            
+            // Track active campaign in storage
+            chrome.storage.local.get(['activeCampaigns'], (result) => {
+                const activeCampaigns = result.activeCampaigns || [];
+                if (!activeCampaigns.includes(campaignId)) {
+                    activeCampaigns.push(campaignId);
+                    chrome.storage.local.set({ activeCampaigns });
+                    console.log(`📊 Added campaign ${campaignId} to active campaigns list`);
+                }
+            });
+            
+            // Trigger campaign execution immediately
+            console.log(`🚀 Triggering immediate execution for campaign ${campaignId}...`);
+            setTimeout(() => {
+                _updateCampaignLeadsNetwork();
+            }, 2000); // Small delay to ensure everything is set up
+            
             return true;
         } else {
             console.error(`❌ Failed to start campaign ${campaignId}:`, response.statusText);

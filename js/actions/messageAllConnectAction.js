@@ -376,14 +376,14 @@ const macAudienceList = async (audienceId, macMessage, macDelay) => {
         const data = await response.json();
         console.log('✅ Audience data received:', data);
 
-        if (!data || !data.length || !data[0].audience || !data[0].audience.length) {
+        if (!data || !data.audience || !data.audience.length) {
             console.log('⚠️ No audience data found');
             $('#displayMessageConnectsStatus').html('No audience data found. Please check your audience selection.');
             $('.messageConnectsAction').attr('disabled', false);
             return;
         }
 
-        const audienceMembers = data[0].audience;
+        const audienceMembers = data.audience;
         console.log(`📊 Processing ${audienceMembers.length} audience members`);
 
         const conArr = audienceMembers.map(member => {
