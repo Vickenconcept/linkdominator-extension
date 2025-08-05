@@ -215,29 +215,50 @@ const sendMessageToConnection = async (params) => {
         });
 
         if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
+            const responseData = await response.json().catch(() => ({}));
             console.error('❌ LinkedIn API Error:', {
                 status: response.status,
                 statusText: response.statusText,
-                errorData
+                responseData
             });
 
-            let errorMessage = 'Failed to send message';
+            // Extract error data from the nested structure
+            const errorData = responseData.data || responseData;
+            
+            // Use LinkedIn's own error message if available, otherwise provide a simple fallback
+            let errorMessage = '';
+            
             if (errorData.message) {
                 errorMessage = errorData.message;
-            } else if (errorData.code) {
-                errorMessage = errorData.code;
+            } else if (errorData.code === 'NOT_ENOUGH_CREDIT') {
+                errorMessage = 'Insufficient InMail credits';
+            } else if (errorData.code === 'UNRESPONDED_INMAIL_EXISTS') {
+                errorMessage = 'Previous InMail pending response';
+            } else if (errorData.code === 'INVALID_RECIPIENT') {
+                errorMessage = 'Invalid recipient';
+            } else if (errorData.code === 'MESSAGE_QUOTA_EXCEEDED') {
+                errorMessage = 'Message limit reached';
             } else if (response.status === 403) {
-                errorMessage = 'Message inbox might be locked or not a 1st degree connection';
+                // Check for specific 403 error messages
+                if (errorData.message && errorData.message.includes("can't be accessed")) {
+                    errorMessage = 'Profile is private or blocked';
+                } else if (errorData.message && errorData.message.includes("not a 1st degree")) {
+                    errorMessage = 'Access denied - not a 1st degree connection';
+                } else {
+                    errorMessage = 'Access denied - profile may be private or blocked';
+                }
             } else if (response.status === 429) {
-                errorMessage = 'Too many messages sent. Please wait and try again.';
+                errorMessage = 'Rate limit exceeded';
             } else if (response.status === 401) {
-                errorMessage = 'LinkedIn session expired. Please refresh the page and try again.';
+                errorMessage = 'Session expired';
+            } else {
+                errorMessage = 'Failed to send message';
             }
 
             return {
-                status: 'failed',
-                message: errorMessage
+                status: 'info',
+                message: errorMessage,
+                errorCode: errorData.code || response.status
             };
         }
 

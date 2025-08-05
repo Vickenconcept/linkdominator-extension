@@ -413,19 +413,63 @@ const macAudienceList = async (audienceId, macMessage, macDelay) => {
             };
         });
 
-        // Filter for 1st degree connections only
+        // Filter for 1st degree connections only (LinkedIn only allows direct messaging to 1st degree)
         const firstDegreeConnections = conArr.filter(conn => conn.netDistance === 1);
+        const otherDegreeConnections = conArr.filter(conn => conn.netDistance > 1);
+
+        console.log(`📊 Connection breakdown:`, {
+            total: conArr.length,
+            '1st degree': firstDegreeConnections.length,
+            'other degrees': otherDegreeConnections.length
+        });
 
         if (firstDegreeConnections.length === 0) {
             console.log('⚠️ No first degree connections found');
             $('#displayMessageConnectsStatus').html(`
-                <div class="alert alert-warning">
-                    <i class="fas fa-exclamation-triangle"></i>
-                    No 1st degree connections found in this audience.<br>
-                    Messages can only be sent to 1st degree connections.<br>
-                    Total connections found: ${conArr.length}<br>
-                    - 1st degree: ${firstDegreeConnections.length}<br>
-                    - Other degrees: ${conArr.length - firstDegreeConnections.length}
+                <div class="card border-warning" style="background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%); border-left: 4px solid #ffc107;">
+                    <div class="card-body p-4">
+                        <div class="d-flex align-items-center mb-3">
+                            <div class="bg-warning rounded-circle p-2 mr-3" style="width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;">
+                                <i class="fas fa-exclamation-triangle text-white"></i>
+                            </div>
+                            <h5 class="mb-0 text-warning font-weight-bold">No 1st Degree Connections Found</h5>
+                        </div>
+                        
+                        <p class="text-muted mb-3">
+                            <i class="fas fa-info-circle mr-2"></i>
+                            Messages can only be sent to 1st degree connections on LinkedIn.
+                        </p>
+                        
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <div class="bg-white rounded p-3 border">
+                                    <h6 class="text-primary mb-2"><i class="fas fa-users mr-2"></i>Connection Summary</h6>
+                                    <div class="d-flex justify-content-between">
+                                        <span>Total connections:</span>
+                                        <span class="font-weight-bold">${conArr.length}</span>
+                                    </div>
+                                    <div class="d-flex justify-content-between">
+                                        <span>1st degree:</span>
+                                        <span class="text-success font-weight-bold">${firstDegreeConnections.length}</span>
+                                    </div>
+                                    <div class="d-flex justify-content-between">
+                                        <span>Other degrees:</span>
+                                        <span class="text-warning font-weight-bold">${otherDegreeConnections.length}</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="bg-info text-white rounded p-3">
+                                    <h6 class="mb-2"><i class="fas fa-lightbulb mr-2"></i>Solution</h6>
+                                    <p class="mb-0 small">
+                                        Use <strong>"Send Targeted Messages"</strong> feature for 2nd+ degree connections with InMail support.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                        
+
+                    </div>
                 </div>
             `);
             $('.messageConnectsAction').attr('disabled', false);
@@ -433,6 +477,46 @@ const macAudienceList = async (audienceId, macMessage, macDelay) => {
         }
 
         console.log(`✅ Found ${firstDegreeConnections.length} first degree connections`);
+        $('#displayMessageConnectsStatus').html(`
+            <div class="card border-success" style="background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%); border-left: 4px solid #28a745;">
+                <div class="card-body p-4">
+                    <div class="d-flex align-items-center mb-3">
+                        <div class="bg-success rounded-circle p-2 mr-3" style="width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;">
+                            <i class="fas fa-check-circle text-white"></i>
+                        </div>
+                        <h5 class="mb-0 text-success font-weight-bold">Ready to Send Messages</h5>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-8">
+                            <div class="bg-white rounded p-3 border">
+                                <h6 class="text-primary mb-2"><i class="fas fa-users mr-2"></i>Connection Summary</h6>
+                                <div class="d-flex justify-content-between mb-2">
+                                    <span>Total connections:</span>
+                                    <span class="font-weight-bold">${conArr.length}</span>
+                                </div>
+                                <div class="d-flex justify-content-between mb-2">
+                                    <span>1st degree (will be messaged):</span>
+                                    <span class="text-success font-weight-bold">${firstDegreeConnections.length}</span>
+                                </div>
+                                <div class="d-flex justify-content-between">
+                                    <span>Other degrees (skipped):</span>
+                                    <span class="text-muted font-weight-bold">${otherDegreeConnections.length}</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="bg-success text-white rounded p-3 text-center">
+                                <i class="fas fa-paper-plane fa-2x mb-2"></i>
+                                <h6 class="mb-0">Messages Ready</h6>
+                                <small>Direct messaging enabled</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `);
+
         await macSendMessageToConnection(macMessage, macDelay, firstDegreeConnections);
 
     } catch (error) {
@@ -624,11 +708,11 @@ const macSendMessageToConnection = async (macMessage, macDelay, dataArr) => {
                     $('#mac-remained-time').text(`${remainedTime(macDelay, dataArr.length - (i + 1))}`);
                 x++;
                 } else {
-                    console.log('❌ Failed to send message to:', params.name, result.message);
+                    console.log('ℹ️ Message not sent to:', params.name, result.message);
                     $('#displayMessageConnectsStatus').html(`
-                        <li style="color: red;">❌ Failed to send message to: <b>${params.name}</b></li>
-                        <li>Error: ${result.message || 'Unknown error'}</li>
-                        <li>Continuing with next connection...</li>
+                        <li style="color: blue;">ℹ️ Message not sent to: <b>${params.name}</b></li>
+                        <li style="color: blue;">Info: ${result.message}</li>
+                        <li style="color: gray;">Continuing with next connection...</li>
                     `);
                 }
 

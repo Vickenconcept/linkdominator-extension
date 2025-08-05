@@ -712,11 +712,11 @@ const mtuSendMessageToConnection = async (mtuMessage, mtuDelay, totalMessage) =>
                     $('#mtu-remained-time').text(`${remainedTime(mtuDelay, totalMessage.length - (i + 1))}`);
                     x++;
                 } else {
-                    console.log('❌ Failed to send message to:', params.name, result.message);
+                    console.log('ℹ️ Message not sent to:', params.name, result.message);
                     $('#displayMessageTargetStatus').html(`
-                        <li style="color: red;">❌ Failed to send message to: <b>${params.name}</b></li>
-                        <li>Error: ${result.message || 'Unknown error'}</li>
-                        <li>Continuing with next connection...</li>
+                        <li style="color: blue;">ℹ️ Message not sent to: <b>${params.name}</b></li>
+                        <li style="color: blue;">Info: ${result.message}</li>
+                        <li style="color: gray;">Continuing with next connection...</li>
                     `);
                 }
 

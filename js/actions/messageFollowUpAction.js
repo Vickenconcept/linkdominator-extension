@@ -132,7 +132,7 @@ const sendFollowupMessage = async (data) => {
             }else {
                 $('.startFollowUpAction').attr('disabled', false)
                 $('.message-followup-notice').show()
-                $('#displayMessageFollowUpStatus').html(`<li>${result.message}</li>`)
+                $('#displayMessageFollowUpStatus').html(`<li style="color: blue;">Info: ${result.message}</li>`);
             }
         })
         await sleep(30000)

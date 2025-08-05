@@ -32,10 +32,14 @@ $('body').on('click', '.addConnect', function(){
     if(addcTotalFollow == '' || addcDelayFollowTime == ''){
         console.log('Validation failed: Total or Delay is empty');
         $('#addc-error-notice').html('<b>Total</b> and <b>Delay</b> fields cannot be empty')
+        $('.addConnect').attr('disabled', false);
+        return;
     }
     else if(addcDelayFollowTime < 30){
         console.log('Validation failed: Delay is less than 30');
         $('#addc-error-notice').html('Minimum of delay time is 30')
+        $('.addConnect').attr('disabled', false);
+        return;
     }else{
         console.log('Validation passed');
         $('#error-notice').html('')
@@ -140,17 +144,41 @@ $('body').on('click', '.addConnect', function(){
 
             addcGetLikedProfiles(addcCommentId,addcConnectIdList,addcTotalFollow,addcStart,addcDelayFollowTime);
 
-        }else if($('#addc-audience-select').val() !=''){
-            let audience = parseInt($('#addc-audience-select').val());
-            console.log('Audience selected:', audience);
-            addcGetAudienceData(audience, addcDelayFollowTime);
         }else {
-            if($('#addc-search-term').val())
-                query = `(keywords:${encodeURIComponent($('#addc-search-term').val())},flagshipSearchIntent:SEARCH_SRP,queryParameters:(${queryParams}resultType:List(PEOPLE)),includeFiltersInResponse:false)`
-            else
-                query = `(flagshipSearchIntent:SEARCH_SRP,queryParameters:(${queryParams}resultType:List(PEOPLE)),includeFiltersInResponse:false)`;
-            console.log('No audience selected, using search query:', query);
-            addcGetConnections(addcConnectIdList,query,addcTotalFollow,addcStart,addcDelayFollowTime)
+            // Check which method is selected
+            let audienceMethodSelected = $('#audience-method-card').hasClass('selected');
+            let searchMethodSelected = $('#search-method-card').hasClass('selected');
+            
+            // If audience method is selected, validate that an audience is chosen
+            if(audienceMethodSelected && $('#addc-audience-select').val() == ''){
+                console.log('Validation failed: Audience method selected but no audience chosen');
+                $('#addc-error-notice').html('Please select an audience from the dropdown');
+                $('.addConnect').attr('disabled', false);
+                return;
+            }
+            
+            // If audience is selected (either method), use audience data
+            if($('#addc-audience-select').val() !='' || $('#addc-audience-select-search').val() !=''){
+                let audience = parseInt($('#addc-audience-select').val() || $('#addc-audience-select-search').val());
+                console.log('Audience selected:', audience);
+                addcGetAudienceData(audience, addcDelayFollowTime);
+            }
+            // If search method is selected and no audience, use search parameters
+            else if(searchMethodSelected || (!audienceMethodSelected && !searchMethodSelected)) {
+                if($('#addc-search-term').val())
+                    query = `(keywords:${encodeURIComponent($('#addc-search-term').val())},flagshipSearchIntent:SEARCH_SRP,queryParameters:(${queryParams}resultType:List(PEOPLE)),includeFiltersInResponse:false)`
+                else
+                    query = `(flagshipSearchIntent:SEARCH_SRP,queryParameters:(${queryParams}resultType:List(PEOPLE)),includeFiltersInResponse:false)`;
+                console.log('Using search parameters, query:', query);
+                addcGetConnections(addcConnectIdList,query,addcTotalFollow,addcStart,addcDelayFollowTime)
+            }
+            // If no method is selected, show error
+            else {
+                console.log('Validation failed: No method selected');
+                $('#addc-error-notice').html('Please select either an audience or search parameters');
+                $('.addConnect').attr('disabled', false);
+                return;
+            }
         }
         
         $(this).attr('disabled', true)
@@ -865,16 +893,35 @@ const addcGetConnections = (addcConnectIdList,queryParams,addcTotalFollow,addcSt
                 },
                 url: `${voyagerBlockSearchUrl}&query=${queryParams}&start=${addcStart}`,
                 success: function(data) {
-                    console.log('Connections response:', data);
-                    let res = {'data': data}
-                    let elements = res['data'].data.elements
-                    let included = res['data'].included
+                    try {
+                        console.log('Connections response:', data);
+                        let res = {'data': data}
+                        
+                        // Check if the expected data structure exists
+                        if(!res['data'] || !res['data'].data || !res['data'].data.elements) {
+                            console.error('❌ Unexpected response structure:', res);
+                            $('#addc-displayConnectStatus').html('Unexpected response structure from LinkedIn API');
+                            $('.addConnect').attr('disabled', false);
+                            return;
+                        }
+                        
+                        let elements = res['data'].data.elements
+                        let included = res['data'].included
 
-                    if(elements.length) {
+                    console.log('🔍 Response structure analysis:', {
+                        elementsLength: elements ? elements.length : 'undefined',
+                        elementsType: typeof elements,
+                        hasElements1: elements && elements[1] ? 'yes' : 'no',
+                        elements1Type: elements && elements[1] ? typeof elements[1] : 'N/A',
+                        hasItems: elements && elements[1] && elements[1].items ? 'yes' : 'no'
+                    });
+
+                    if(elements && elements.length) {
                         if(totalResultCount == 0)
                             totalResultCount = res['data'].data.metadata.totalResultCount
 
-                        if(elements[1].items.length) {
+                        // Check if elements[1] exists and has items
+                        if(elements[1] && elements[1].items && elements[1].items.length) {
                             for(let item of included) {
                                 // perform checks
                                 if(item.hasOwnProperty('title') && item.hasOwnProperty('primarySubtitle')) {
@@ -906,6 +953,34 @@ const addcGetConnections = (addcConnectIdList,queryParams,addcTotalFollow,addcSt
                                 addcCleanConnectionsData(connectionItems,totalResultCount,addcConnectIdList,addcDelayConnectTime)
                             }
                         }else {
+                            console.log('⚠️ Unexpected response structure - elements[1] or items not found');
+                            console.log('🔍 Elements structure:', elements);
+                            
+                            // Try alternative approach - check if included has profile data directly
+                            if(included && included.length > 0) {
+                                console.log('🔄 Trying alternative approach with included data...');
+                                let validProfiles = included.filter(item => 
+                                    item && item.hasOwnProperty('title') && 
+                                    item.hasOwnProperty('primarySubtitle') &&
+                                    item.title && item.title.text &&
+                                    item.primarySubtitle && item.primarySubtitle.text
+                                );
+                                
+                                if(validProfiles.length > 0) {
+                                    console.log(`✅ Found ${validProfiles.length} valid profiles in included data`);
+                                    for(let item of validProfiles) {
+                                        if(item.title.text.includes('LinkedIn Member') == false) {
+                                            connectionItems.push(item);
+                                        }
+                                    }
+                                    
+                                    if(connectionItems.length > 0) {
+                                        addcCleanConnectionsData(connectionItems, totalResultCount, addcConnectIdList, addcDelayConnectTime);
+                                        return;
+                                    }
+                                }
+                            }
+                            
                             console.log('No result found, changing search criteria and trying again.');
                             $('#addc-displayConnectStatus').html('No result found, change your search criteria and try again!')
                             $('.addConnect').attr('disabled', false)
@@ -918,6 +993,11 @@ const addcGetConnections = (addcConnectIdList,queryParams,addcTotalFollow,addcSt
                         console.log('No result found, changing search criteria and trying again.');
                         $('#addc-displayConnectStatus').html('No result found, change your search criteria and try again!')
                         $('.addConnect').attr('disabled', false)
+                    }
+                    } catch (error) {
+                        console.error('❌ Error processing connections response:', error);
+                        $('#addc-displayConnectStatus').html('Error processing LinkedIn response');
+                        $('.addConnect').attr('disabled', false);
                     }
                 },
                 error: function(error){
@@ -1109,119 +1189,85 @@ const addcAddConnections = async (addcConArrMain, addcDelayFollowTime) => {
     $('#no-job').hide()
     $('#automation-list').append(displayAutomationRecord)
 
-    for(const [i,v] of addcConArr.entries()) {
-        // Back to original LinkedIn API endpoint with improved error handling
-        var data = {};
-        var message = $('#addc-personalMessage').val();
-        var newMessage = '';
+    // Get personal message if provided
+    let personalMessage = $('#addc-personalMessage').val();
+    if (personalMessage && personalMessage.trim() !== '') {
+        console.log('📝 Personal message will be included with invites');
+    }
 
-        if(message != ''){
-            newMessage = changeMessageVariableNames(message, addcConArr[i]);
-            // Remove line breaks that might cause 422 errors
-            newMessage = newMessage.replace(/\n/g, ' ').replace(/\r/g, ' ').trim();
-            data = {
-                trackingId: addcConArr[i].trackingId,
-                invitee: {
-                    'com.linkedin.voyager.growth.invitation.InviteeProfile': {
-                        profileId: addcConArr[i].profileId,
-                    },
-                },
-                message: newMessage,
-                emberEntityName: 'growth/invitation/norm-invitation',                
-            };
-        } else {
-            data = {
-                trackingId: addcConArr[i].trackingId,
-                invitee: {
-                    'com.linkedin.voyager.growth.invitation.InviteeProfile': {
-                        profileId: addcConArr[i].profileId,
-                    },
-                },
-                emberEntityName: 'growth/invitation/norm-invitation',                
-            };
-        }
-
-        const jsession = getJSessionId();
-        console.log('🔍 Old LinkedIn API Request for:', addcConArr[i].name);
-        console.log('📦 Payload:', JSON.stringify(data, null, 2));
-        console.log('🔑 CSRF Token:', jsession ? 'Present' : 'Missing');
+            // Show initial instruction for automated connection process
+        $('#addc-displayConnectStatus').html(`
+            <li style="color: blue; font-weight: bold;">🤖 Automated Connection Process Started</li>
+            <li style="color: blue;">📝 Profiles will open in background tabs for automated connection</li>
+            <li style="color: blue;">⏱️ Each tab will be processed automatically and closed</li>
+            <li style="color: blue;">🔄 No manual intervention required - fully automated</li>
+            <li style="color: blue;">💡 You can continue working while connections are being sent</li>
+        `);
         
+        // Process each connection using manual profile opening
+        for(const [i,v] of addcConArr.entries()) {
+        const profile = addcConArr[i];
+        console.log(`🔍 Processing connection ${i+1}/${addcConArr.length}: ${profile.name}`);
+
         try {
-            await fetch(`${voyagerApi}/growth/normInvitations`, {
-                method: 'POST',
-                headers: {
-                    'csrf-token': jsession,
-                    'accept': 'application/vnd.linkedin.normalized+json+2.1',
-                    'content-type': 'application/json; charset=UTF-8',
-                    'x-restli-protocol-version': '2.0.0',
-                    'x-li-lang': 'en_US',
-                    'x-li-page-instance': 'urn:li:page:d_flagship3_search_srp_people;QazGJ/pNTwuq6OTtMClfPw==',
-                    'x-li-track': JSON.stringify({"clientVersion":"1.10.1335","osName":"web","timezoneOffset":1,"deviceFormFactor":"DESKTOP","mpName":"voyager-web"})
-                },
-                body: JSON.stringify(data),
-                credentials: 'include'
-            })
-            .then(async response => {
-                console.log(`📧 LinkedIn API Response Status: ${response.status} (${response.statusText})`);
-                
-                if (response.status === 200 || response.status === 201) {
-                    console.log('✅ STATUS', response.status, ': Invitation sent successfully to', addcConArr[i].name);
-                    $('#addc-displayConnectStatus').empty();
-                    addcDisplayLi = `
-                        <li>✅ Invitation sent to: <b>${addcConArr[i].name}</b></li>
-                        <li>Title: <b>${addcConArr[i].title}</b></li>
-                        <li>Total sent: <b>${i + 1}</b></li>
-                    `;
-                    $('#addc-displayConnectStatus').html(addcDisplayLi);
-                } else if (response.status === 301) {
-                    console.log('⚠️ STATUS 301: API endpoint moved - LinkedIn may have changed the endpoint');
-                    $('#addc-displayConnectStatus').empty();
-                    $('#addc-displayConnectStatus').html(`<li style='color:orange;'>⚠️ API endpoint moved for: <b>${addcConArr[i].name}</b> (301)</li>`);
-                } else if (response.status === 403) {
-                    console.log('❌ STATUS 403: Forbidden - LinkedIn blocked the request');
-                    $('#addc-displayConnectStatus').empty();
-                    $('#addc-displayConnectStatus').html(`<li style='color:red;'>❌ Forbidden: <b>${addcConArr[i].name}</b> (LinkedIn blocked request)</li>`);
-                } else if (response.status === 422) {
-                    console.log('❌ STATUS 422: Unprocessable Entity - Invalid data in request');
-                    $('#addc-displayConnectStatus').empty();
-                    $('#addc-displayConnectStatus').html(`<li style='color:red;'>❌ Invalid data for: <b>${addcConArr[i].name}</b> (Status: 422)</li>`);
-                } else if (response.status === 429) {
-                    console.log('❌ STATUS 429: Rate Limited - Too many requests');
-                    $('#addc-displayConnectStatus').empty();
-                    $('#addc-displayConnectStatus').html(`<li style='color:red;'>❌ Rate limited: <b>${addcConArr[i].name}</b> (Too many requests)</li>`);
-                } else {
-                    console.log(`⚠️ STATUS ${response.status}: Unexpected response`);
-                    let errorText = await response.text();
-                    let location = response.headers.get('Location');
-                    console.log('Response details:', { errorText, location });
-                    $('#addc-displayConnectStatus').empty();
-                    $('#addc-displayConnectStatus').html(`<li style='color:red;'>❌ Failed to send invitation to: <b>${addcConArr[i].name}</b> (Status: ${response.status})</li>`);
-                }
-                
-                // Try to parse response
-                return response.json().catch(() => {
-                    console.log('📄 No JSON response body (redirect or empty response)');
-                    return { status: response.status, redirected: response.redirected };
-                });
-            })
-            .then(data => {
-                console.log('📧 LinkedIn API Response Data:', data);
-            })
-         } catch (error) {
-             console.log('❌ Error sending invitation to:', addcConArr[i].name, error);
-             $('#addc-displayConnectStatus').empty();
-             $('#addc-displayConnectStatus').html(`<li style='color:red;'>❌ Network error for: <b>${addcConArr[i].name}</b></li>`);
-         }
+            // Use the new browser automation function instead of broken API
+            const result = await sendConnectionInviteBrowser(profile, personalMessage);
+            
+                               if (result.success && result.manual) {
+                       // Fallback manual connection - profile opened for user to connect
+                       addcDisplayLi = `
+                           <li style="color: orange;">⚠️ Fallback: Profile opened for: <b>${profile.name}</b></li>
+                           <li style="color: orange;">📝 Automation failed - please connect manually</li>
+                           <li>Title: <b>${profile.title || 'N/A'}</b></li>
+                           <li>Total profiles processed: <b>${i+1}</b></li>
+                       `;
+                       $('#addc-displayConnectStatus').html(addcDisplayLi);
+                       console.log(`⚠️ Fallback manual connection needed for: ${profile.name}`);
+                   } else if (result.success) {
+                       x++;
+                       addcDisplayLi = `
+                           <li style="color: green;">✅ Connection invite sent to: <b>${profile.name}</b></li>
+                           <li>Title: <b>${profile.title || 'N/A'}</b></li>
+                           <li>Total invites sent: <b>${x}</b></li>
+                       `;
+                       $('#addc-displayConnectStatus').html(addcDisplayLi);
+                       console.log(`✅ Successfully sent invite to: ${profile.name}`);
+                   } else if (result.skipped) {
+                       addcDisplayLi = `
+                           <li style="color: orange;">⏭️ Skipped: <b>${profile.name}</b> - ${result.reason}</li>
+                           <li>Total invites sent: <b>${x}</b></li>
+                       `;
+                       $('#addc-displayConnectStatus').html(addcDisplayLi);
+                       console.log(`⏭️ Skipped ${profile.name}: ${result.reason}`);
+                   } else {
+                       addcDisplayLi = `
+                           <li style="color: red;">❌ Failed to send invite to: <b>${profile.name}</b></li>
+                           <li style="color: red;">Error: ${result.error}</li>
+                           <li>Total invites sent: <b>${x}</b></li>
+                       `;
+                       $('#addc-displayConnectStatus').html(addcDisplayLi);
+                       console.log(`❌ Failed to send invite to: ${profile.name}: ${result.error}`);
+                   }
 
-         // Update automation count and time remaining
-         $('#addc-numbered').text(`${i + 1}/${addcConArr.length}`);
-         $('#addc-remained-time').text(`${remainedTime(addcDelayFollowTime, addcConArr.length - (i + 1))}`);
+            // Update progress
+            $('#addc-numbered').text(`${i+1}/${addcConArr.length}`);
+            $('#addc-remained-time').text(`${remainedTime(addcDelayFollowTime, addcConArr.length - (i+1))}`);
 
-         // Add delay between requests (except for the last one)
-         if (i < addcConArr.length - 1) {
-             console.log(`⏱️ Waiting ${addcDelayFollowTime} seconds before next invitation...`);
-             await sleep(addcDelayFollowTime * 1000);
-         }
+            // Wait before next invite (except for the last one)
+            if (i < addcConArr.length - 1) {
+                console.log(`⏳ Waiting ${addcDelayFollowTime} seconds before next invite...`);
+                await new Promise(resolve => setTimeout(resolve, addcDelayFollowTime * 1000));
+            }
+
+        } catch (error) {
+            console.error(`❌ Error processing ${profile.name}:`, error);
+            addcDisplayLi = `
+                <li style="color: red;">❌ Error with: <b>${profile.name}</b></li>
+                <li style="color: red;">Error: ${error.message}</li>
+                <li>Total invites sent: <b>${x}</b></li>
+            `;
+            $('#addc-displayConnectStatus').html(addcDisplayLi);
+        }
     }
 
     $('.addConnect').attr('disabled', false)
@@ -1300,3 +1346,107 @@ $('body').on('click','#addc-bot-action',function(){
         $('#add-connect-record').remove()
     }, 5000)
 })
+
+/**
+ * Send connection invite using browser automation (same as campaign system)
+ * @param {Object} profile - Profile object with connection data
+ * @param {string} customMessage - Custom message to include with invite
+ * @returns {Promise<Object>} - Result object with success status
+ */
+const sendConnectionInviteBrowser = async (profile, customMessage = null) => {
+    console.log('🚀🚀🚀 sendConnectionInviteBrowser function STARTED!');
+    console.log('🔍 Function called with:', { 
+        profileName: profile.name, 
+        profileId: profile.conId || profile.connectionId,
+        hasCustomMessage: !!customMessage 
+    });
+    
+    try {
+        // Create profile URL from connection ID - handle both search and audience data
+        let profileId = profile.conId || profile.connectionId || profile.profileId || profile.publicIdentifier;
+        
+        if (!profileId) {
+            console.error('❌ No profile ID found in profile data:', profile);
+            return { 
+                success: false, 
+                error: 'User profile not accessible' 
+            };
+        }
+        
+        // Validate profile ID is not "undefined" or empty
+        if (profileId === 'undefined' || profileId === '' || profileId === null) {
+            console.error('❌ Invalid profile ID:', profileId);
+            return { 
+                success: false, 
+                error: 'User profile not accessible' 
+            };
+        }
+        
+        const profileUrl = `https://www.linkedin.com/in/${profileId}`;
+        console.log(`🌐 Profile URL: ${profileUrl}`);
+        console.log(`🔍 Profile ID source:`, {
+            conId: profile.conId,
+            connectionId: profile.connectionId,
+            profileId: profile.profileId,
+            publicIdentifier: profile.publicIdentifier,
+            usedId: profileId
+        });
+        
+                // Step 1: Open LinkedIn profile in background tab using chrome.tabs.create
+        console.log('🔄 Step 1: Opening LinkedIn profile page in background tab...');
+        
+                // Always try to send message to background script first
+        console.log('🔄 Attempting to send message to background script for automation...');
+        
+        try {
+            const result = await chrome.runtime.sendMessage({
+                action: 'sendConnectionInvite',
+                data: {
+                    profileName: profile.name,
+                    profileId: profileId,
+                    profileUrl: profileUrl,
+                    customMessage: customMessage
+                }
+            });
+            
+            console.log('📊 Background script automation result:', result);
+            return result;
+            
+        } catch (messageError) {
+            console.error('❌ Error sending message to background script:', messageError);
+            console.log('🔄 Background script automation failed, using fallback method...');
+        }
+        
+        // Fallback: use window.open if background script is not available
+        console.log('🔄 Fallback: Using window.open for background tab...');
+            const newWindow = window.open(profileUrl, '_blank');
+            console.log(`✅ Fallback window opened for profile: ${profile.name}`);
+            
+            if (!newWindow) {
+                throw new Error('Failed to open profile - popup may be blocked');
+            }
+            
+            // Wait a bit for the window to load
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            
+            // Close the window after a reasonable time
+            setTimeout(() => {
+                try {
+                    newWindow.close();
+                    console.log('✅ Fallback window closed');
+                } catch (error) {
+                    console.log('⚠️ Could not close fallback window:', error.message);
+                }
+            }, 15000); // Keep window open for 15 seconds
+            
+            console.log(`✅ FALLBACK WINDOW OPENED for ${profile.name} - please connect manually`);
+            return { 
+                success: true, 
+                message: 'Fallback window opened - please connect manually',
+                manual: true 
+            };
+    } catch (error) {
+        console.error('❌ Error in sendConnectionInviteBrowser:', error.message);
+        return { success: false, error: error.message };
+    }
+};

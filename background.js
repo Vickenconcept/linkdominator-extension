@@ -8,6 +8,316 @@ importScripts('./env.js');
 let keepAliveInterval;
 let isServiceWorkerActive = true;
 
+// Message handler for connection invites from content scripts
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    console.log('📨 Background script received message:', request);
+    
+    if (request.action === 'sendConnectionInvite') {
+        console.log('🔗 Processing connection invite request from content script');
+        
+        // Handle the connection invite asynchronously
+        handleConnectionInviteRequest(request.data)
+            .then(result => {
+                console.log('✅ Connection invite completed:', result);
+                sendResponse(result);
+            })
+            .catch(error => {
+                console.error('❌ Connection invite failed:', error);
+                sendResponse({ 
+                    success: false, 
+                    error: error.message 
+                });
+            });
+        
+        // Return true to indicate we'll send a response asynchronously
+        return true;
+    }
+});
+
+// Function to handle connection invite requests from content scripts
+const handleConnectionInviteRequest = async (data) => {
+    console.log('🚀🚀🚀 handleConnectionInviteRequest function STARTED!');
+    console.log('🔍 Function called with:', data);
+    
+    const { profileName, profileId, profileUrl, customMessage } = data;
+    
+    try {
+        // Step 1: Open LinkedIn profile in new tab
+        console.log('🔄 Step 1: Opening LinkedIn profile page...');
+        console.log(`🌐 Opening URL: ${profileUrl}`);
+        
+        const tab = await chrome.tabs.create({
+            url: profileUrl,
+            active: false // Open in background
+        });
+        console.log(`✅ Tab created with ID: ${tab.id}`);
+        
+        if (!tab || !tab.id) {
+            throw new Error('Failed to create tab');
+        }
+        
+        // Step 2: Wait for page to load
+        console.log('🔄 Step 2: Waiting for page to load...');
+        await new Promise((resolve) => {
+            const checkTab = () => {
+                chrome.tabs.get(tab.id, (tabInfo) => {
+                    if (tabInfo && tabInfo.status === 'complete') {
+                        console.log('✅ Page loaded completely');
+                        resolve();
+                    } else {
+                        setTimeout(checkTab, 1000);
+                    }
+                });
+            };
+            checkTab();
+        });
+        
+        // Step 3: Inject automation script to handle the invite process
+        console.log('🔄 Step 3: Injecting automation script...');
+        const result = await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            function: async (customMessage) => {
+                console.log('🤖 LinkedIn Connection Automation script executing...');
+                
+                // Function to delay
+                const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+                
+                try {
+                    console.log('🔍 Step 4: Checking connection status...');
+                    
+                    // Check if already connected
+                    const connectedElements = document.querySelectorAll('[aria-label*="Connected"], [aria-label*="connected"]');
+                    if (connectedElements.length > 0) {
+                        console.log('ℹ️ Already connected to this profile');
+                        return { success: false, skipped: true, reason: 'Already connected' };
+                    }
+                    
+                    // Check if invite already sent
+                    const inviteSentElements = document.querySelectorAll('[aria-label*="Invitation sent"], [aria-label*="invitation sent"]');
+                    if (inviteSentElements.length > 0) {
+                        console.log('ℹ️ Invite already sent to this profile');
+                        return { success: false, skipped: true, reason: 'Invite already sent' };
+                    }
+                    
+                    console.log('🔍 Step 5: Looking for Connect button...');
+                    
+                    // Find Connect button using multiple selectors
+                    const connectSelectors = [
+                        'button[aria-label*="Connect"]',
+                        'button[aria-label*="connect"]',
+                        '.artdeco-button[aria-label*="Connect"]',
+                        '[data-control-name="connect"]',
+                        '.pv-s-profile-actions--connect',
+                        '.pv-s-profile-actions button'
+                    ];
+                    
+                    let connectButton = null;
+                    for (const selector of connectSelectors) {
+                        connectButton = document.querySelector(selector);
+                        if (connectButton && connectButton.offsetParent !== null) {
+                            console.log(`✅ Found Connect button with selector: ${selector}`);
+                            break;
+                        }
+                    }
+                    
+                    // Fallback: look for any button with "Connect" text
+                    if (!connectButton) {
+                        const allButtons = document.querySelectorAll('button');
+                        for (const button of allButtons) {
+                            if (button.textContent.toLowerCase().includes('connect') && button.offsetParent !== null) {
+                                connectButton = button;
+                                console.log('✅ Found Connect button by text content');
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if (!connectButton) {
+                        console.log('❌ Connect button not found');
+                        return { success: false, error: 'Connect button not found' };
+                    }
+                    
+                    console.log('🖱️ Step 6: Clicking Connect button...');
+                    console.log('🔍 Connect button details:', {
+                        text: connectButton.textContent,
+                        ariaLabel: connectButton.getAttribute('aria-label'),
+                        className: connectButton.className,
+                        visible: connectButton.offsetParent !== null
+                    });
+                    
+                    // Scroll to button and click
+                    connectButton.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    await delay(1000);
+                    
+                    // Try multiple click methods
+                    try {
+                        connectButton.click();
+                        console.log('✅ Connect button clicked successfully');
+                    } catch (clickError) {
+                        console.log('⚠️ Standard click failed, trying alternative method:', clickError.message);
+                        // Alternative click method
+                        connectButton.dispatchEvent(new MouseEvent('click', {
+                            bubbles: true,
+                            cancelable: true,
+                            view: window
+                        }));
+                        console.log('✅ Connect button clicked with alternative method');
+                    }
+                    
+                    // Wait for modal to appear
+                    console.log('🔄 Step 7: Waiting for modal to appear...');
+                    await delay(2000);
+                    
+                    // Add custom message if provided
+                    if (customMessage) {
+                        console.log('📝 Step 7.5: Adding custom message...');
+                        const messageSelectors = [
+                            'textarea[aria-label*="message"]',
+                            'textarea[placeholder*="message"]',
+                            '.artdeco-modal__content textarea',
+                            'textarea'
+                        ];
+                        
+                        let messageTextarea = null;
+                        for (const selector of messageSelectors) {
+                            messageTextarea = document.querySelector(selector);
+                            if (messageTextarea && messageTextarea.offsetParent !== null) {
+                                console.log(`✅ Found message textarea with selector: ${selector}`);
+                                break;
+                            }
+                        }
+                        
+                        if (messageTextarea) {
+                            messageTextarea.value = customMessage;
+                            messageTextarea.dispatchEvent(new Event('input', { bubbles: true }));
+                            console.log('✅ Custom message added');
+                        } else {
+                            console.log('⚠️ Message textarea not found, sending without custom message');
+                        }
+                    }
+                    
+                    // Look for Send button in modal
+                    console.log('🔍 Step 8: Looking for Send button...');
+                    const sendSelectors = [
+                        'button[aria-label*="Send now"]',
+                        'button[aria-label*="send now"]',
+                        '.artdeco-button[aria-label*="Send"]',
+                        '[data-control-name="send_invite"]',
+                        '.artdeco-modal__actionbar button'
+                    ];
+                    
+                    let sendButton = null;
+                    for (const selector of sendSelectors) {
+                        sendButton = document.querySelector(selector);
+                        if (sendButton && sendButton.offsetParent !== null) {
+                            console.log(`✅ Found Send button with selector: ${selector}`);
+                            break;
+                        }
+                    }
+                    
+                    // Fallback: look for any button with "Send" text
+                    if (!sendButton) {
+                        const allButtons = document.querySelectorAll('button');
+                        for (const button of allButtons) {
+                            if (button.textContent.toLowerCase().includes('send') && button.offsetParent !== null) {
+                                sendButton = button;
+                                console.log('✅ Found Send button by text content');
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if (!sendButton) {
+                        console.log('❌ Send button not found');
+                        return { success: false, error: 'Send button not found' };
+                    }
+                    
+                    console.log('📤 Step 9: Sending invite...');
+                    console.log('🔍 Send button details:', {
+                        text: sendButton.textContent,
+                        ariaLabel: sendButton.getAttribute('aria-label'),
+                        className: sendButton.className,
+                        visible: sendButton.offsetParent !== null
+                    });
+                    
+                    // Try multiple click methods for send button
+                    try {
+                        sendButton.click();
+                        console.log('✅ Send button clicked successfully');
+                    } catch (sendClickError) {
+                        console.log('⚠️ Standard send click failed, trying alternative method:', sendClickError.message);
+                        // Alternative click method
+                        sendButton.dispatchEvent(new MouseEvent('click', {
+                            bubbles: true,
+                            cancelable: true,
+                            view: window
+                        }));
+                        console.log('✅ Send button clicked with alternative method');
+                    }
+                    
+                    // Wait for confirmation
+                    await delay(2000);
+                    
+                    // Check for success indicators
+                    const successIndicators = [
+                        '[aria-label*="Invitation sent"]',
+                        '.artdeco-inline-feedback--success',
+                        '.pv-s-profile-actions--message'
+                    ];
+                    
+                    for (const selector of successIndicators) {
+                        const element = document.querySelector(selector);
+                        if (element) {
+                            console.log('✅ Invite sent successfully confirmed');
+                            return { success: true };
+                        }
+                    }
+                    
+                    console.log('✅ Invite sent (no explicit confirmation found)');
+                    return { success: true };
+                    
+                } catch (error) {
+                    console.error('❌ Error in automation:', error.message);
+                    return { success: false, error: 'Connection process failed' };
+                }
+            },
+            args: [customMessage]
+        });
+        
+        // Step 4: Wait for automation to complete and get results
+        console.log('🔄 Step 4: Waiting for automation to complete...');
+        await new Promise(resolve => setTimeout(resolve, 5000)); // Give time for automation to complete
+        
+        // Step 5: Close the background tab
+        console.log('🔄 Step 5: Closing background tab...');
+        try {
+            await chrome.tabs.remove(tab.id);
+            console.log('✅ Background tab closed');
+        } catch (tabError) {
+            console.log('⚠️ Could not close tab (may have been closed already):', tabError.message);
+        }
+        
+        // Get the result from the injected script
+        const automationResult = result[0]?.result;
+        console.log('📊 Automation result:', automationResult);
+        
+        if (automationResult && automationResult.success) {
+            console.log(`✅ INVITATION SUCCESSFULLY SENT to ${profileName}`);
+            return { success: true, message: 'Invitation sent successfully' };
+        } else if (automationResult && automationResult.skipped) {
+            console.log(`⏭️ INVITATION SKIPPED for ${profileName}: ${automationResult.reason}`);
+            return { success: false, skipped: true, reason: automationResult.reason };
+        } else {
+            console.log(`❌ INVITATION FAILED for ${profileName}: ${automationResult?.error || 'Unknown error'}`);
+            return { success: false, error: 'Connection not successfully sent' };
+        }
+        
+    } catch (error) {
+        console.error('❌ Error in handleConnectionInviteRequest:', error.message);
+        return { success: false, error: 'Connection process failed' };
+    }
+};
+
 // Function to keep service worker alive
 const keepServiceWorkerAlive = () => {
     if (keepAliveInterval) {
@@ -2518,7 +2828,7 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
                         
                         if (!connectButton) {
                             console.log('❌ Connect button not found');
-                            return { success: false, error: 'Connect button not found' };
+                            return { success: false, error: 'User not found or connection not available' };
                         }
                         
                         console.log('🖱️ Step 6: Clicking Connect button...');
@@ -2566,7 +2876,7 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
                         
                         if (!sendButton) {
                             console.log('❌ Send button not found');
-                            return { success: false, error: 'Send button not found' };
+                            return { success: false, error: 'Connection not successfully sent' };
                         }
                         
                         console.log('📤 Step 9: Sending invite...');
