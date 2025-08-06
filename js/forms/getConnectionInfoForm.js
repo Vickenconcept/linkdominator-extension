@@ -377,8 +377,8 @@ var connectionInfoForm = `
                 </div -->
 
             </div>
-            <div class="modal-footer" style="background-color: white; border-top: 1px solid #dee2e6; border-bottom-left-radius: 10px; border-bottom-right-radius: 10px;">
-                <button type="button" class="btn btn-primary btn-lg shadow-none connectionInfoAction" style="background-color: #007bff; border-color: #007bff;">Get</button>
+            <div class="modal-footer" style="background-color: white; border-top: 1px solid #dee2e6; border-bottom-left-radius: 10px; border-bottom-right-radius: 10px; position: relative; z-index: 1000;">
+                <button type="button" class="btn btn-primary btn-lg shadow-none connectionInfoAction" onclick="console.log('🔍 Get Connections Info: Button clicked')" style="background-color: #007bff; border-color: #007bff;">Get</button>
                 <button type="button" class="btn btn-outline-secondary btn-lg shadow-none" data-dismiss="modal" style="background-color: white; border-color: #6c757d; color: #6c757d;">Close</button>
             </div>
 
