@@ -35,21 +35,98 @@ $('body').on('click','.addFollowUppAction',function() {
  * Start followup instantly
  */
 $('body').on('click','.startFollowUpAction',function() {
+    console.log('🚀 Follow Up Connections: Starting instant follow-up process...');
     $('.startFollowUpAction').attr('disabled', true)
 
     let data = followupFieldsValidation()
 
     if(data !== false) {
+        console.log('✅ Follow Up Connections: Validation passed', {
+            audienceId: data.audienceId,
+            totalAudience: data.totalAudience,
+            sleepTime: data.sleepTime,
+            messageLength: data.message.length
+        });
+        
         try {
-            getAudience(data.audienceId, data.totalAudience, filterApi, (result) => {
-                if(audienceList.length) sendFollowupMessage(data);
-            })
+            console.log('🔍 Follow Up Connections: Fetching audience data...');
+            console.log('📊 Follow Up Connections: API call parameters:', {
+                audienceId: data.audienceId,
+                totalAudience: data.totalAudience,
+                filterApi: filterApi
+            });
+            
+            // Add timeout to prevent hanging
+            let timeoutId;
+            let callbackCalled = false;
+            
+            const audienceCallback = (result) => {
+                if (callbackCalled) return; // Prevent double execution
+                callbackCalled = true;
+                clearTimeout(timeoutId);
+                
+                console.log('📊 Follow Up Connections: Audience fetch result:', result);
+                console.log('📊 Follow Up Connections: audienceList length:', audienceList ? audienceList.length : 'undefined');
+                console.log('📊 Follow Up Connections: audienceList content:', audienceList);
+                
+                if(audienceList && audienceList.length > 0) {
+                    console.log(`👥 Follow Up Connections: Found ${audienceList.length} connections in audience`);
+                    sendFollowupMessage(data);
+                } else {
+                    console.log('⚠️ Follow Up Connections: No connections found in audience or audienceList is empty');
+                    $('.startFollowUpAction').attr('disabled', false);
+                    $('.message-followup-notice').show();
+                    $('#displayMessageFollowUpStatus').html(`<li style="color: orange;">No connections found in selected audience</li>`);
+                }
+            };
+            
+            // Set timeout for API call
+            timeoutId = setTimeout(() => {
+                if (!callbackCalled) {
+                    callbackCalled = true;
+                    console.error('⏰ Follow Up Connections: API call timed out after 30 seconds');
+                    $('.startFollowUpAction').attr('disabled', false);
+                    $('.message-followup-notice').show();
+                    $('#displayMessageFollowUpStatus').html(`<li style="color: red;">API call timed out. Please try again.</li>`);
+                }
+            }, 30000); // 30 second timeout
+            
+            // Check if required variables are available
+            console.log('🔍 Follow Up Connections: Checking required variables:', {
+                filterApiExists: typeof filterApi !== 'undefined',
+                filterApiValue: filterApi,
+                getAudienceExists: typeof getAudience !== 'undefined',
+                audienceListExists: typeof audienceList !== 'undefined'
+            });
+            
+            if (typeof filterApi === 'undefined') {
+                console.error('❌ Follow Up Connections: filterApi is undefined');
+                $('.startFollowUpAction').attr('disabled', false);
+                $('.message-followup-notice').show();
+                $('#displayMessageFollowUpStatus').html(`<li style="color: red;">System error: API endpoint not available</li>`);
+                return;
+            }
+            
+            if (typeof getAudience === 'undefined') {
+                console.error('❌ Follow Up Connections: getAudience function is undefined');
+                $('.startFollowUpAction').attr('disabled', false);
+                $('.message-followup-notice').show();
+                $('#displayMessageFollowUpStatus').html(`<li style="color: red;">System error: Audience function not available</li>`);
+                return;
+            }
+            
+            getAudience(data.audienceId, data.totalAudience, filterApi, audienceCallback);
+            
         } catch (error) {
+            console.error('❌ Follow Up Connections: Error during audience fetch:', error);
             $('.startFollowUpAction').attr('disabled', false)
             $('.message-followup-notice').show()
-            $('#displayMessageFollowUpStatus').html(`<li>${error}</li>`)
+            $('#displayMessageFollowUpStatus').html(`<li style="color: red;">Error: ${error}</li>`)
             return;
         }
+    } else {
+        console.log('❌ Follow Up Connections: Validation failed');
+        $('.startFollowUpAction').attr('disabled', false);
     }
 })
 
@@ -57,11 +134,21 @@ $('body').on('click','.startFollowUpAction',function() {
  * Validate audience is selected
  */
 const followupFieldsValidation = () => {
+    console.log('🔍 Follow Up Connections: Starting field validation...');
+    
     let audienceId = $('#mfu-selectAudience').val(),
         message = $('#mfu-personalMessage').val(),
         totalAudience = $('#mfu-total').val(),
         sleepTime = $('#mfu-delayTime').val(),
         scheduledTime = $('#mfu-waitDays').val();
+
+    console.log('📋 Follow Up Connections: Field values:', {
+        audienceId: audienceId,
+        messageLength: message ? message.length : 0,
+        totalAudience: totalAudience,
+        sleepTime: sleepTime,
+        scheduledTime: scheduledTime
+    });
 
     let fields = [
         {field: 'Audience', val: audienceId}, 
@@ -74,9 +161,10 @@ const followupFieldsValidation = () => {
 
     for(let field of fields) {
         if (!field.val) {
+            console.log(`❌ Follow Up Connections: Validation failed for field: ${field.field}`);
             $('.startFollowUpAction').attr('disabled', false)
             $('.message-followup-notice').show()
-            $('#displayMessageFollowUpStatus').html(`<li>${field.field} field is required.</li>`)
+            $('#displayMessageFollowUpStatus').html(`<li style="color: red;">${field.field} field is required.</li>`)
             return false;
         }
     }
@@ -109,9 +197,28 @@ const followupFieldsValidation = () => {
  * @param {object} data
  */
 const sendFollowupMessage = async (data) => {
+    console.log('📤 Follow Up Connections: Starting message sending process...', {
+        totalConnections: audienceList.length,
+        delayBetweenMessages: data.sleepTime
+    });
+    
     let getMfuStore = JSON.parse(localStorage.getItem('lkm-mfu'));
+    let successCount = 0;
+    let failureCount = 0;
+    let processedCount = 0;
+
+    // Show initial status
+    $('.message-followup-notice').show();
+    $('#displayMessageFollowUpStatus').html(`
+        <li style="color: blue; font-weight: bold;">🚀 Starting follow-up process...</li>
+        <li style="color: blue;">📊 Total connections to message: ${audienceList.length}</li>
+        <li style="color: blue;">⏱️ Delay between messages: ${data.sleepTime} seconds</li>
+    `);
 
     for(const [i, item] of audienceList.entries()) {
+        console.log(`📧 Follow Up Connections: Processing ${i+1}/${audienceList.length}: ${item.name}`);
+        
+        // Prepare message data
         arConnectionModel.message = data.message
         arConnectionModel.distance = audienceList[i].networkDistance
         arConnectionModel.connectionId = audienceList[i].conId
@@ -121,21 +228,98 @@ const sendFollowupMessage = async (data) => {
         arConnectionModel.conversationUrnId = ''
         arConnectionModel['attachement'] = getMfuStore.uploads.length ? getMfuStore.uploads : []
 
-        sendMessageToConnection(arConnectionModel, (result) => {
+        console.log(`📝 Follow Up Connections: Message details for ${item.name}:`, {
+            connectionId: arConnectionModel.connectionId,
+            networkDistance: arConnectionModel.distance,
+            hasAttachments: arConnectionModel.attachement.length > 0,
+            messagePreview: data.message.substring(0, 50) + (data.message.length > 50 ? '...' : '')
+        });
+
+        // Send message using async/await pattern
+        try {
+            const result = await sendMessageToConnection(arConnectionModel);
+            processedCount++;
+            
             if(result.status == 'successful') {
-                displaySent = `
-                    <li>Message sent to: <b>${arConnectionModel.name}</b></li>
-                    <li>Total message sent: <b>${i +1}</b></li>
+                successCount++;
+                console.log(`✅ Follow Up Connections: Message sent successfully to ${arConnectionModel.name} (${i+1}/${audienceList.length})`);
+                
+                let displaySent = `
+                    <li style="color: green;">✅ Message sent to: <b>${arConnectionModel.name}</b></li>
+                    <li style="color: green;">📊 Success: ${successCount} | Failed: ${failureCount} | Total: ${processedCount}/${audienceList.length}</li>
+                    <li style="color: blue;">⏳ Processing connection ${i+1} of ${audienceList.length}...</li>
                 `;
-                $('.message-followup-notice').show()
-                $('#displayMessageFollowUpStatus').html(displaySent)
-            }else {
-                $('.startFollowUpAction').attr('disabled', false)
-                $('.message-followup-notice').show()
-                $('#displayMessageFollowUpStatus').html(`<li style="color: blue;">Info: ${result.message}</li>`);
+                $('#displayMessageFollowUpStatus').html(displaySent);
+            } else {
+                failureCount++;
+                console.error(`❌ Follow Up Connections: Failed to send message to ${arConnectionModel.name}:`, result);
+                
+                // Enhanced error display with specific error handling
+                let errorReason = result.message || 'Unknown error';
+                let errorColor = 'red';
+                
+                // Handle specific LinkedIn error codes with better messaging
+                if (result.errorCode === 'UNRESPONDED_INMAIL_EXISTS') {
+                    errorReason = 'Previous message awaiting response';
+                    errorColor = 'orange';
+                } else if (result.errorCode === 'NOT_ENOUGH_CREDIT') {
+                    errorReason = 'Insufficient InMail credits';
+                    errorColor = 'red';
+                } else if (result.errorCode === 'INVALID_RECIPIENT') {
+                    errorReason = 'Invalid recipient profile';
+                    errorColor = 'red';
+                } else if (result.errorCode === 'MESSAGE_QUOTA_EXCEEDED') {
+                    errorReason = 'Daily message limit reached';
+                    errorColor = 'red';
+                } else if (result.errorCode === 403) {
+                    errorReason = 'Access denied or profile private';
+                    errorColor = 'orange';
+                }
+                
+                let displayError = `
+                    <li style="color: ${errorColor};">❌ Failed to send to: <b>${arConnectionModel.name}</b></li>
+                    <li style="color: ${errorColor};">🔍 Reason: ${errorReason}</li>
+                    <li style="color: green;">📊 Success: ${successCount} | Failed: ${failureCount} | Total: ${processedCount}/${audienceList.length}</li>
+                    <li style="color: blue;">⏳ Processing connection ${i+1} of ${audienceList.length}...</li>
+                `;
+                $('#displayMessageFollowUpStatus').html(displayError);
             }
-        })
-        await sleep(30000)
+        } catch (error) {
+            processedCount++;
+            failureCount++;
+            console.error(`❌ Follow Up Connections: Unexpected error sending message to ${arConnectionModel.name}:`, error);
+            
+            let displayError = `
+                <li style="color: red;">❌ Failed to send to: <b>${arConnectionModel.name}</b></li>
+                <li style="color: red;">🔍 Reason: Unexpected error - ${error.message}</li>
+                <li style="color: green;">📊 Success: ${successCount} | Failed: ${failureCount} | Total: ${processedCount}/${audienceList.length}</li>
+                <li style="color: blue;">⏳ Processing connection ${i+1} of ${audienceList.length}...</li>
+            `;
+            $('#displayMessageFollowUpStatus').html(displayError);
+        }
+
+        // Wait before next message (except for the last one)
+        if (i < audienceList.length - 1) {
+            console.log(`⏳ Follow Up Connections: Waiting ${data.sleepTime} seconds before next message...`);
+            await sleep(data.sleepTime * 1000);
+        }
     }
-    $('.startFollowUpAction').attr('disabled', false)
+
+    // Final summary
+    console.log('🏁 Follow Up Connections: Process completed!', {
+        totalProcessed: processedCount,
+        successful: successCount,
+        failed: failureCount,
+        successRate: `${Math.round((successCount / processedCount) * 100)}%`
+    });
+
+    let finalSummary = `
+        <li style="color: blue; font-weight: bold;">🏁 Follow-up process completed!</li>
+        <li style="color: green;">✅ Successfully sent: ${successCount}</li>
+        <li style="color: red;">❌ Failed: ${failureCount}</li>
+        <li style="color: blue;">📊 Success rate: ${Math.round((successCount / processedCount) * 100)}%</li>
+    `;
+    $('#displayMessageFollowUpStatus').html(finalSummary);
+    
+    $('.startFollowUpAction').attr('disabled', false);
 }

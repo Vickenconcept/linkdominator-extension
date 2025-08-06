@@ -82,6 +82,26 @@ $('body').on('change','.runSwitch',function(ev){
                     console.log('✅ Campaign started successfully:', response);
                 }
             });
+        } else {
+            // If stopping the campaign, notify the service worker
+            console.log('⏹️ Notifying service worker to stop campaign:', campaignId);
+            
+            // Send message to background script to stop the campaign
+            chrome.runtime.sendMessage({
+                action: 'stopCampaign',
+                campaignId: campaignId
+            }, function(response) {
+                if (chrome.runtime.lastError) {
+                    // Handle "Extension context invalidated" error gracefully
+                    if (chrome.runtime.lastError.message && chrome.runtime.lastError.message.includes('Extension context invalidated')) {
+                        console.log('🔄 Extension was reloaded during campaign stop, this is normal behavior');
+                        return;
+                    }
+                    console.error('❌ Error stopping campaign:', chrome.runtime.lastError);
+                } else {
+                    console.log('✅ Campaign stopped successfully:', response);
+                }
+            });
         }
     }).catch(error => {
         console.error('❌ Error updating campaign:', error);

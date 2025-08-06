@@ -15,16 +15,45 @@ var connectionInfoForm = `
                         </div>
                     </div>
                 </div>
-                <div class="form-group">
-                    <label for="gci-audience-select" class="font-weight-bold" style="color:black;">Select an audience</label>
-                    <select class="form-control shadow-none select-dropdown" id="gci-audience-select" style="height: 35px;">
-                        <option value="" disabled selected hidden>Select an audience</option>
-                    </select>
+                
+                <!-- Method Selection Cards -->
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <div class="card method-card selected" id="gci-audience-method-card" style="cursor: pointer; border: 2px solid #007bff;">
+                            <div class="card-body text-center py-3">
+                                <i class="fas fa-users fa-lg mb-2" style="color: #007bff;"></i>
+                                <h6 class="mb-0" style="color: #007bff;">Use Existing Audience</h6>
+                                <small class="text-muted">Select from saved audiences</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card method-card" id="gci-search-method-card" style="cursor: pointer; border: 2px solid #dee2e6;">
+                            <div class="card-body text-center py-3">
+                                <i class="fas fa-search fa-lg mb-2" style="color: #6c757d;"></i>
+                                <h6 class="mb-0" style="color: #6c757d;">Use Search Parameters</h6>
+                                <small class="text-muted">Search with filters & keywords</small>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label for="gci-search-term" class="font-weight-bold" style="color:black;">Search</label>
-                    <input type="text" class="form-control shadow-none" id="gci-search-term" placeholder="Enter your search term">
+
+                <!-- Audience Selection Section -->
+                <div id="gci-audience-section">
+                    <div class="form-group">
+                        <label for="gci-audience-select" class="font-weight-bold" style="color:black;">Select an audience</label>
+                        <select class="form-control shadow-none select-dropdown" id="gci-audience-select" style="height: 35px;">
+                            <option value="" disabled selected hidden>Select an audience</option>
+                        </select>
+                    </div>
                 </div>
+
+                <!-- Search Parameters Section -->
+                <div id="gci-search-section" style="display: none;">
+                    <div class="form-group">
+                        <label for="gci-search-term" class="font-weight-bold" style="color:black;">Search</label>
+                        <input type="text" class="form-control shadow-none" id="gci-search-term" placeholder="Enter your search term">
+                    </div>
                 <div class="row">
                     <div class="col-md-12">
                         <div id="gci-accordion">
@@ -281,6 +310,19 @@ var connectionInfoForm = `
                         </div>
                     </div>
                 </div>
+                </div> <!-- End of gci-search-section -->
+            </div> <!-- End of modal-body content -->
+            
+            <!-- Common Parameters (completely independent) -->
+            <div id="gci-common-parameters" style="padding: 20px; border-top: 1px solid #dee2e6; background-color: #f8f9fa;">
+                <div class="row">
+                    <div class="col-md-12">
+                        <h6 class="font-weight-bold" style="color:black; border-bottom: 1px solid #dee2e6; padding-bottom: 8px;">
+                            <i class="fas fa-cog mr-2"></i>View Settings
+                        </h6>
+                    </div>
+                </div>
+                
                 <div class="row mt-2">
                     <div class="col-lg-4 col-sm-4">
                         <div class="form-group">
@@ -321,6 +363,7 @@ var connectionInfoForm = `
                         <span id="gci-error-notice" style="color:red"></span>
                     </div>
                 </div>
+            </div>
                 <!-- div class="custom-control custom-checkbox custom-control-inline mb-2">
                     <input type="checkbox" class="custom-control-input shadow-none" id="gci-company-data">
                     <label class="custom-control-label" for="gci-company-data" style="color:black;font-weight:bold;">
@@ -334,9 +377,9 @@ var connectionInfoForm = `
                 </div -->
 
             </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-primary btn-lg shadow-none connectionInfoAction">Get</button>
-                <button type="button" class="btn btn-outline-secondary btn-lg shadow-none" data-dismiss="modal">Close</button>
+            <div class="modal-footer" style="background-color: white; border-top: 1px solid #dee2e6; border-bottom-left-radius: 10px; border-bottom-right-radius: 10px;">
+                <button type="button" class="btn btn-primary btn-lg shadow-none connectionInfoAction" style="background-color: #007bff; border-color: #007bff;">Get</button>
+                <button type="button" class="btn btn-outline-secondary btn-lg shadow-none" data-dismiss="modal" style="background-color: white; border-color: #6c757d; color: #6c757d;">Close</button>
             </div>
 
         </div>
@@ -345,10 +388,71 @@ var connectionInfoForm = `
 `;
 
 $('body').append(connectionInfoForm)
+
+// Handle method selection for Get Connection Info
+$('#gci-audience-method-card').click(function(){
+    console.log('🔍 Get Connections Info: Audience method selected');
+    
+    // Update visual styles
+    $(this).addClass('selected').css({
+        'border': '2px solid #007bff'
+    });
+    $(this).find('i').css('color', '#007bff');
+    $(this).find('h6').css('color', '#007bff');
+    
+    $('#gci-search-method-card').removeClass('selected').css({
+        'border': '2px solid #dee2e6'
+    });
+    $('#gci-search-method-card').find('i').css('color', '#6c757d');
+    $('#gci-search-method-card').find('h6').css('color', '#6c757d');
+    
+    // Show/hide sections
+    $('#gci-audience-section').show();
+    $('#gci-search-section').hide();
+    
+    // Clear error messages
+    $('#gci-error-notice').html('');
+});
+
+$('#gci-search-method-card').click(function(){
+    console.log('🔍 Get Connections Info: Search method selected');
+    
+    // Update visual styles
+    $(this).addClass('selected').css({
+        'border': '2px solid #007bff'
+    });
+    $(this).find('i').css('color', '#007bff');
+    $(this).find('h6').css('color', '#007bff');
+    
+    $('#gci-audience-method-card').removeClass('selected').css({
+        'border': '2px solid #dee2e6'
+    });
+    $('#gci-audience-method-card').find('i').css('color', '#6c757d');
+    $('#gci-audience-method-card').find('h6').css('color', '#6c757d');
+    
+    // Show/hide sections
+    $('#gci-audience-section').hide();
+    $('#gci-search-section').show();
+    
+    // Clear error messages
+    $('#gci-error-notice').html('');
+});
+
+// Clear error when audience is selected
+$('#gci-audience-select').change(function(){
+    if($(this).val() && $(this).val() !== '') {
+        $('#gci-error-notice').html('');
+    }
+});
+
 $('#connection-info-menu-click').click(function(){
     implementPermission('connectionInfoAction')
     let fieldId = 'gci-audience-select';
     getAudienceList(fieldId)
     $('#gci-connFirstCheck').prop('checked', true)
+    
+    // Reset to audience method by default
+    $('#gci-audience-method-card').click();
+    
     $('#connectionInfoForm').modal({backdrop:'static', keyboard:false, show:true})
 })

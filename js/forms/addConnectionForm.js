@@ -55,20 +55,20 @@ var addConnectionForm = `
                         <i class="fas fa-info-circle"></i>
                         <strong>Audience Method Selected:</strong> You'll be connecting with people from your selected audience.
                     </div>
-                    <div class="form-group">
-                        <label for="audience-select" class="font-weight-bold c-header">Select an audience</label>
-                        <div class="input-group">
-                            <select class="form-control shadow-none select-dropdown" id="addc-audience-select" style="height: 35px;">
-                                <option value="">Select an audience</option>
-                            </select>
-                            <div class="input-group-append">
-                                <button type="button" class="btn btn-outline-secondary" id="addc-refresh-audiences" title="Refresh audiences">
-                                    <i class="fas fa-sync-alt"></i>
-                                </button>
-                            </div>
+                <div class="form-group">
+                    <label for="audience-select" class="font-weight-bold c-header">Select an audience</label>
+                    <div class="input-group">
+                        <select class="form-control shadow-none select-dropdown" id="addc-audience-select" style="height: 35px;">
+                            <option value="">Select an audience</option>
+                        </select>
+                        <div class="input-group-append">
+                            <button type="button" class="btn btn-outline-secondary" id="addc-refresh-audiences" title="Refresh audiences">
+                                <i class="fas fa-sync-alt"></i>
+                            </button>
                         </div>
-                        <small class="text-muted">Having trouble? Click the refresh button or check the console for details.</small>
                     </div>
+                    <small class="text-muted">Having trouble? Click the refresh button or check the console for details.</small>
+                </div>
                 </div>
 
                 <!-- Search Parameters Section -->
@@ -91,291 +91,269 @@ var addConnectionForm = `
                         </div>
                         <small class="text-muted">Having trouble? Click the refresh button or check the console for details.</small>
                     </div>
-                    <div class="form-group">
-                        <label for="addc-search-term" class="font-weight-bold c-header">Search</label>
-                        <input type="text" class="form-control shadow-none" id="addc-search-term" placeholder="Enter your search term">
-                    </div>
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div id="addc-accordion">
-                                <div class="card">
-                                    <a class="card-link card-header c-header" data-toggle="collapse" href="#addc-collapseConnectionStage">
-                                        Connections 
-                                        <div class="juez-tooltip">
-                                            <i class="fa fa-exclamation-circle"></i>
-                                            <span class="juez-tooltiptext">It is recommended to send invitation to 2nd degree connections only.</span>
-                                        </div>
-                                        <span class="float-right dropdown-toggle"></span>
-                                    </a>
-                                    <div id="addc-collapseConnectionStage" class="collapse" data-parent="#addc-accordion">
-                                        <div class="card-body addc-conn-degree d-flex">
-                                            <div class="mr-4">
-                                                <input type="checkbox" class="shadow-none" id="addc-connSecondCheck" name="second_check" value="S">
-                                                <label class="" for="addc-connSecondCheck">2nd</label>
-                                            </div>
-                                            <div class="">
-                                                <input type="checkbox" class="shadow-none" id="addc-connThirdCheck" name="third_check" value="O">
-                                                <label class="" for="addc-connThirdCheck">3rd+</label>
-                                            </div>
-                                        </div>
+                <div class="form-group">
+                    <label for="addc-search-term" class="font-weight-bold c-header">Search</label>
+                    <input type="text" class="form-control shadow-none" id="addc-search-term" placeholder="Enter your search term">
+                </div>
+                <div class="row">
+                    <div class="col-md-6">
+                        <div id="addc-accordion">
+                            <div class="card">
+                                <a class="card-link card-header c-header" data-toggle="collapse" href="#addc-collapseConnectionStage">
+                                    Connections 
+                                    <div class="juez-tooltip">
+                                        <i class="fa fa-exclamation-circle"></i>
+                                        <span class="juez-tooltiptext">It is recommended to send invitation to 2nd degree connections only.</span>
                                     </div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div id="addc-accordionKeywords">
-                                <div class="card">
-                                    <a class="card-link card-header c-header" data-toggle="collapse" href="#addc-collapseKeywords"
-                                        style="color:black">
-                                        Keywords <span class="float-right dropdown-toggle"></span>
-                                    </a>
-                                    <div id="addc-collapseKeywords" class="collapse" data-parent="#addc-accordionKeywords">
-                                        <div class="card-body">
-                                            <div class="form-group">
-                                                <input type="text" class="form-control shadow-none" id="addc-firstName" placeholder="First name">
-                                            </div>
-                                            <div class="form-group">
-                                                <input type="text" class="form-control shadow-none" id="addc-lastName" placeholder="Last name">
-                                            </div>
-                                            <div class="form-group">
-                                                <input type="text" class="form-control shadow-none" id="addc-title" placeholder="Title">
-                                            </div>
-                                            <div class="form-group">
-                                                <input type="text" class="form-control shadow-none" id="addc-company" placeholder="Company">
-                                            </div>
-                                            <div class="form-group">
-                                                <input type="text" class="form-control shadow-none" id="addc-school" placeholder="School">
-                                            </div>
+                                    <span class="float-right dropdown-toggle"></span>
+                                </a>
+                                <div id="addc-collapseConnectionStage" class="collapse" data-parent="#addc-accordion">
+                                    <div class="card-body addc-conn-degree d-flex">
+                                        <div class="mr-4">
+                                            <input type="checkbox" class="shadow-none" id="addc-connSecondCheck" name="second_check" value="S">
+                                            <label class="" for="addc-connSecondCheck">2nd</label>
+                                        </div>
+                                        <div class="">
+                                            <input type="checkbox" class="shadow-none" id="addc-connThirdCheck" name="third_check" value="O">
+                                            <label class="" for="addc-connThirdCheck">3rd+</label>
                                         </div>
                                     </div>
                                 </div>
                             </div>
                         </div>
                     </div>
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div id="addc-accordion1">
-                                <div class="card">
-                                    <a class="card-link card-header c-header" data-toggle="collapse" href="#addc-collapseConnectionOf"
-                                        style="color:black">
-                                        Connections Of <span class="float-right dropdown-toggle"></span>
-                                    </a>
-                                    <div id="addc-collapseConnectionOf" class="collapse" data-parent="#addc-accordion1">
-                                        <div class="card-body">
-                                            <div class="form-group mb-0">
-                                                <div class="input-group">
-                                                    <input type="text" class="form-control shadow-none" 
-                                                        id="addc-connectionOf" placeholder="Type connection name and click search">
-                                                    <div class="input-group-append">
-                                                        <span class="input-group-text addc-searchCon" style="cursor:pointer">
-                                                            <i class="fa fa-search"></i>
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                                <ul id="addc-resultConnectOf"></ul>
-                                                <ul class="list-group" id="addc-selectedConnectOf"></ul>
-                                            </div>
+                    <div class="col-md-6">
+                        <div id="addc-accordionKeywords">
+                            <div class="card">
+                                <a class="card-link card-header c-header" data-toggle="collapse" href="#addc-collapseKeywords"
+                                    style="color:black">
+                                    Keywords <span class="float-right dropdown-toggle"></span>
+                                </a>
+                                <div id="addc-collapseKeywords" class="collapse" data-parent="#addc-accordionKeywords">
+                                    <div class="card-body">
+                                        <div class="form-group">
+                                            <input type="text" class="form-control shadow-none" id="addc-firstName" placeholder="First name">
                                         </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div id="addc-accordion2">
-                                <div class="card">                  
-                                    <a class="card-link card-header c-header" data-toggle="collapse" href="#addc-collapseLocation"   style="color:black">
-                                        Locations<span class="float-right dropdown-toggle"></span>
-                                    </a>
-                                    <div id="addc-collapseLocation" class="collapse" data-parent="#addc-accordion2">
-                                        <div class="card-body">
-                                            <div class="form-group mb-0">
-                                                <div class="input-group">
-                                                    <input type="text" class="form-control shadow-none" 
-                                                        id="addc-location" placeholder="Type location name and click search">
-                                                    <div class="input-group-append">
-                                                        <span class="input-group-text addc-searchLoc" style="cursor:pointer">
-                                                            <i class="fa fa-search"></i>
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                                <ul id="addc-resultLocation"></ul>
-                                                <ul class="list-group" id="addc-selectedLocation"></ul>
-                                            </div>
+                                        <div class="form-group">
+                                            <input type="text" class="form-control shadow-none" id="addc-lastName" placeholder="Last name">
+                                        </div>
+                                        <div class="form-group">
+                                            <input type="text" class="form-control shadow-none" id="addc-title" placeholder="Title">
+                                        </div>
+                                        <div class="form-group">
+                                            <input type="text" class="form-control shadow-none" id="addc-company" placeholder="Company">
+                                        </div>
+                                        <div class="form-group">
+                                            <input type="text" class="form-control shadow-none" id="addc-school" placeholder="School">
                                         </div>
                                     </div>
                                 </div>
                             </div>
                         </div>
                     </div>
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div id="addc-accordion3">
-                                <div class="card">
-                                    <a class="card-link card-header c-header" data-toggle="collapse" href="#addc-collapseCurrComp"  style="color:black">
-                                        Current companies<span class="float-right dropdown-toggle"></span>
-                                    </a>
-                                    <div id="addc-collapseCurrComp" class="collapse" data-parent="#addc-accordion3">
-                                        <div class="card-body">
-                                            <div class="form-group mb-0">
-                                                <div class="input-group">
-                                                    <input type="text" class="form-control shadow-none" 
-                                                        id="addc-currComp" placeholder="Type company name and click search">
-                                                    <div class="input-group-append">
-                                                        <span class="input-group-text addc-searchCurrComp" style="cursor:pointer">
-                                                            <i class="fa fa-search"></i>
-                                                        </span>
-                                                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-6">
+                        <div id="addc-accordion1">
+                            <div class="card">
+                                <a class="card-link card-header c-header" data-toggle="collapse" href="#addc-collapseConnectionOf"
+                                    style="color:black">
+                                    Connections Of <span class="float-right dropdown-toggle"></span>
+                                </a>
+                                <div id="addc-collapseConnectionOf" class="collapse" data-parent="#addc-accordion1">
+                                    <div class="card-body">
+                                        <div class="form-group mb-0">
+                                            <div class="input-group">
+                                                <input type="text" class="form-control shadow-none" 
+                                                    id="addc-connectionOf" placeholder="Type connection name and click search">
+                                                <div class="input-group-append">
+                                                    <span class="input-group-text addc-searchCon" style="cursor:pointer">
+                                                        <i class="fa fa-search"></i>
+                                                    </span>
                                                 </div>
-                                                <ul id="addc-resultCurrComp"></ul>
-                                                <ul class="list-group" id="addc-selectedCurrComp"></ul>
                                             </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div id="addc-accordion4">
-                                <div class="card">
-                                    <a class="card-link card-header c-header" data-toggle="collapse" href="#addc-collapsePastComp" style="color:black">
-                                        Past companies<span class="float-right dropdown-toggle"></span>
-                                    </a>
-                                    <div id="addc-collapsePastComp" class="collapse" data-parent="#addc-accordion4">
-                                        <div class="card-body">
-                                            <div class="form-group mb-0">
-                                                <div class="input-group">
-                                                    <input type="text" class="form-control shadow-none" 
-                                                        id="addc-pastComp" placeholder="Type company name and click search">
-                                                    <div class="input-group-append">
-                                                        <span class="input-group-text addc-searchPastComp" style="cursor:pointer">
-                                                            <i class="fa fa-search"></i>
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                                <ul id="addc-resultPastComp"></ul>
-                                                <ul class="list-group" id="addc-selectedPastComp"></ul>
-                                            </div>
+                                            <ul id="addc-resultConnectOf"></ul>
+                                            <ul class="list-group" id="addc-selectedConnectOf"></ul>
                                         </div>
                                     </div>
                                 </div>
                             </div>
                         </div>
                     </div>
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div id="addc-accordion5">
-                                <div class="card">
-                                    <a class="card-link card-header c-header" data-toggle="collapse" href="#addc-collapseIndustry" style="color:black">
-                                        Industry<span class="float-right dropdown-toggle"></span>
-                                    </a>
-                                    <div id="addc-collapseIndustry" class="collapse" data-parent="#addc-accordion5">
-                                        <div class="card-body">
-                                            <div class="form-group mb-0">
-                                                <div class="input-group">
-                                                    <input type="text" class="form-control shadow-none" 
-                                                        id="addc-industy" placeholder="Type industy name and click search">
-                                                    <div class="input-group-append">
-                                                        <span class="input-group-text addc-searchIndustry" style="cursor:pointer">
-                                                            <i class="fa fa-search"></i>
-                                                        </span>
-                                                    </div>
+                    <div class="col-md-6">
+                        <div id="addc-accordion2">
+                            <div class="card">                  
+                                <a class="card-link card-header c-header" data-toggle="collapse" href="#addc-collapseLocation"   style="color:black">
+                                    Locations<span class="float-right dropdown-toggle"></span>
+                                </a>
+                                <div id="addc-collapseLocation" class="collapse" data-parent="#addc-accordion2">
+                                    <div class="card-body">
+                                        <div class="form-group mb-0">
+                                            <div class="input-group">
+                                                <input type="text" class="form-control shadow-none" 
+                                                    id="addc-location" placeholder="Type location name and click search">
+                                                <div class="input-group-append">
+                                                    <span class="input-group-text addc-searchLoc" style="cursor:pointer">
+                                                        <i class="fa fa-search"></i>
+                                                    </span>
                                                 </div>
-                                                <ul id="addc-resultIndustry"></ul>
-                                                <ul class="list-group" id="addc-selectedIndustry"></ul>
                                             </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div id="addc-accordion6">
-                                <div class="card">
-                                    <a class="card-link card-header c-header" data-toggle="collapse" href="#addc-collapseSchool" style="color:black">
-                                        School<span class="float-right dropdown-toggle"></span>
-                                    </a>
-                                    <div id="addc-collapseSchool" class="collapse" data-parent="#addc-accordion6">
-                                        <div class="card-body">
-                                            <div class="form-group mb-0">
-                                                <div class="input-group">
-                                                    <input type="text" class="form-control shadow-none" 
-                                                        id="addc-school-search" placeholder="Type school name and click search">
-                                                    <div class="input-group-append">
-                                                        <span class="input-group-text addc-searchSchool" style="cursor:pointer">
-                                                            <i class="fa fa-search"></i>
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                                <ul id="addc-resultSchool"></ul>
-                                                <ul class="list-group" id="addc-selectedSchool"></ul>
-                                            </div>
+                                            <ul id="addc-resultLocation"></ul>
+                                            <ul class="list-group" id="addc-selectedLocation"></ul>
                                         </div>
                                     </div>
                                 </div>
                             </div>
                         </div>
                     </div>
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div id="addc-accordion7">
-                                <div class="card">
-                                    <a class="card-link card-header c-header" data-toggle="collapse" href="#addc-collapseLanguage"  style="color:black">
-                                        Profile Language<span class="float-right dropdown-toggle"></span>
-                                    </a>
-                                    <div id="addc-collapseLanguage" class="collapse" data-parent="#addc-accordion7">
-                                        <div class="card-body">
-                                            <div class="form-group mb-0">
-                                                <div class="input-group">
-                                                    <input type="text" class="form-control shadow-none" 
-                                                        id="addc-language" placeholder="Type language name and click search">
-                                                    <div class="input-group-append">
-                                                        <span class="input-group-text addc-search-lang" id="addc-search-lang" style="cursor:pointer">
-                                                            <i class="fa fa-search"></i>
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                                <ul id="addc-resultLanga"></ul>
-                                                <ul class="list-group" id="addc-selectedLanguage"></ul>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div id="addc-accordion8">
-                                <div class="card">
-                                    <a class="card-link card-header c-header" data-toggle="collapse" href="#addc-collapseExcludeKeyword"  style="color:black">
-                                        Exclude Keywords <span class="float-right dropdown-toggle"></span>
-                                    </a>
-                                    <div id="addc-collapseExcludeKeyword" class="collapse" data-parent="#addc-accordion8">
-                                        <div class="card-body">
-                                            <div class="form-group mb-0">
-                                                <div class="input-group">
-                                                    <textarea class="form-control shadow-none text-area-size" rows="3" id="addc-excludeKeywords" 
-                                                        placeholder="Ex: Marketing, Manager, Jane Doe"></textarea>
+                </div>
+                <div class="row">
+                    <div class="col-md-6">
+                        <div id="addc-accordion3">
+                            <div class="card">
+                                <a class="card-link card-header c-header" data-toggle="collapse" href="#addc-collapseCurrComp"  style="color:black">
+                                    Current companies<span class="float-right dropdown-toggle"></span>
+                                </a>
+                                <div id="addc-collapseCurrComp" class="collapse" data-parent="#addc-accordion3">
+                                    <div class="card-body">
+                                        <div class="form-group mb-0">
+                                            <div class="input-group">
+                                                <input type="text" class="form-control shadow-none" 
+                                                    id="addc-currComp" placeholder="Type company name and click search">
+                                                <div class="input-group-append">
+                                                    <span class="input-group-text addc-searchCurrComp" style="cursor:pointer">
+                                                        <i class="fa fa-search"></i>
+                                                    </span>
                                                 </div>
                                             </div>
+                                            <ul id="addc-resultCurrComp"></ul>
+                                            <ul class="list-group" id="addc-selectedCurrComp"></ul>
                                         </div>
                                     </div>
                                 </div>
                             </div>
                         </div>
                     </div>
-                    <div class="row">
-                        <div class="col-md-12">
-                            <div id="addc-accordion9">
-                                <div class="card">
-                                    <a class="card-link card-header c-header" data-toggle="collapse" href="#addc-collapseKeywordforConnect"  style="color:black">
-                                        Keywords for connecting <span class="float-right dropdown-toggle"></span>
-                                    </a>
-                                    <div id="addc-collapseKeywordforConnect" class="collapse" data-parent="#addc-accordion9">
-                                        <div class="card-body">
-                                            <div class="form-group mb-0">
-                                                <div class="input-group">
-                                                    <textarea class="form-control shadow-none text-area-size" rows="3" id="addc-keywordsForConnect" 
-                                                        placeholder="Ex: Network, Security, Consultant, Senior Engineer"></textarea>
+                    <div class="col-md-6">
+                        <div id="addc-accordion4">
+                            <div class="card">
+                                <a class="card-link card-header c-header" data-toggle="collapse" href="#addc-collapsePastComp" style="color:black">
+                                    Past companies<span class="float-right dropdown-toggle"></span>
+                                </a>
+                                <div id="addc-collapsePastComp" class="collapse" data-parent="#addc-accordion4">
+                                    <div class="card-body">
+                                        <div class="form-group mb-0">
+                                            <div class="input-group">
+                                                <input type="text" class="form-control shadow-none" 
+                                                    id="addc-pastComp" placeholder="Type company name and click search">
+                                                <div class="input-group-append">
+                                                    <span class="input-group-text addc-searchPastComp" style="cursor:pointer">
+                                                        <i class="fa fa-search"></i>
+                                                    </span>
                                                 </div>
+                                            </div>
+                                            <ul id="addc-resultPastComp"></ul>
+                                            <ul class="list-group" id="addc-selectedPastComp"></ul>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-6">
+                        <div id="addc-accordion5">
+                            <div class="card">
+                                <a class="card-link card-header c-header" data-toggle="collapse" href="#addc-collapseIndustry" style="color:black">
+                                    Industry<span class="float-right dropdown-toggle"></span>
+                                </a>
+                                <div id="addc-collapseIndustry" class="collapse" data-parent="#addc-accordion5">
+                                    <div class="card-body">
+                                        <div class="form-group mb-0">
+                                            <div class="input-group">
+                                                <input type="text" class="form-control shadow-none" 
+                                                    id="addc-industy" placeholder="Type industy name and click search">
+                                                <div class="input-group-append">
+                                                    <span class="input-group-text addc-searchIndustry" style="cursor:pointer">
+                                                        <i class="fa fa-search"></i>
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            <ul id="addc-resultIndustry"></ul>
+                                            <ul class="list-group" id="addc-selectedIndustry"></ul>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div id="addc-accordion6">
+                            <div class="card">
+                                <a class="card-link card-header c-header" data-toggle="collapse" href="#addc-collapseSchool" style="color:black">
+                                    School<span class="float-right dropdown-toggle"></span>
+                                </a>
+                                <div id="addc-collapseSchool" class="collapse" data-parent="#addc-accordion6">
+                                    <div class="card-body">
+                                        <div class="form-group mb-0">
+                                            <div class="input-group">
+                                                <input type="text" class="form-control shadow-none" 
+                                                    id="addc-school-search" placeholder="Type school name and click search">
+                                                <div class="input-group-append">
+                                                    <span class="input-group-text addc-searchSchool" style="cursor:pointer">
+                                                        <i class="fa fa-search"></i>
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            <ul id="addc-resultSchool"></ul>
+                                            <ul class="list-group" id="addc-selectedSchool"></ul>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-6">
+                        <div id="addc-accordion7">
+                            <div class="card">
+                                <a class="card-link card-header c-header" data-toggle="collapse" href="#addc-collapseLanguage"  style="color:black">
+                                    Profile Language<span class="float-right dropdown-toggle"></span>
+                                </a>
+                                <div id="addc-collapseLanguage" class="collapse" data-parent="#addc-accordion7">
+                                    <div class="card-body">
+                                        <div class="form-group mb-0">
+                                            <div class="input-group">
+                                                <input type="text" class="form-control shadow-none" 
+                                                    id="addc-language" placeholder="Type language name and click search">
+                                                <div class="input-group-append">
+                                                    <span class="input-group-text addc-search-lang" id="addc-search-lang" style="cursor:pointer">
+                                                        <i class="fa fa-search"></i>
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            <ul id="addc-resultLanga"></ul>
+                                            <ul class="list-group" id="addc-selectedLanguage"></ul>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div id="addc-accordion8">
+                            <div class="card">
+                                <a class="card-link card-header c-header" data-toggle="collapse" href="#addc-collapseExcludeKeyword"  style="color:black">
+                                    Exclude Keywords <span class="float-right dropdown-toggle"></span>
+                                </a>
+                                <div id="addc-collapseExcludeKeyword" class="collapse" data-parent="#addc-accordion8">
+                                    <div class="card-body">
+                                        <div class="form-group mb-0">
+                                            <div class="input-group">
+                                                <textarea class="form-control shadow-none text-area-size" rows="3" id="addc-excludeKeywords" 
+                                                    placeholder="Ex: Marketing, Manager, Jane Doe"></textarea>
                                             </div>
                                         </div>
                                     </div>
@@ -383,76 +361,98 @@ var addConnectionForm = `
                             </div>
                         </div>
                     </div>
-                    <div class="row mt-2">
-                        <div class="col-md-12">
-                            <div class="form-group">
-                                <label class="font-weight-bold c-header">Connect with users who liked</label>
-                                <div class="custom-control custom-radio custom-control-inline">
-                                    <input type="radio" class="custom-control-input addc-liked-check"
-                                        id="addc-liked-none" name="user_liked" value="none">
-                                    <label class="custom-control-label" for="addc-liked-none">None</label>
+                </div>
+                <div class="row">
+                    <div class="col-md-12">
+                        <div id="addc-accordion9">
+                            <div class="card">
+                                <a class="card-link card-header c-header" data-toggle="collapse" href="#addc-collapseKeywordforConnect"  style="color:black">
+                                    Keywords for connecting <span class="float-right dropdown-toggle"></span>
+                                </a>
+                                <div id="addc-collapseKeywordforConnect" class="collapse" data-parent="#addc-accordion9">
+                                    <div class="card-body">
+                                        <div class="form-group mb-0">
+                                            <div class="input-group">
+                                                <textarea class="form-control shadow-none text-area-size" rows="3" id="addc-keywordsForConnect" 
+                                                    placeholder="Ex: Network, Security, Consultant, Senior Engineer"></textarea>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
-                                <div class="custom-control custom-radio custom-control-inline">
-                                    <input type="radio" class="custom-control-input addc-liked-check" 
-                                        id="addc-liked-post" name="user_liked" value="post">
-                                    <label class="custom-control-label" for="addc-liked-post">Post</label>
-                                </div>
-                                <div class="custom-control custom-radio custom-control-inline">
-                                    <input type="radio" class="custom-control-input addc-liked-check" 
-                                        id="addc-liked-article" name="user_liked" value="article">
-                                    <label class="custom-control-label" for="addc-liked-article">Article</label>
-                                </div>
-                                <div class="custom-control custom-radio custom-control-inline">
-                                    <input type="radio" class="custom-control-input addc-liked-check" 
-                                        id="addc-liked-video" name="user_liked" value="video">
-                                    <label class="custom-control-label" for="addc-liked-video">Video</label>
-                                </div>
-                            </div>
-                            <div class="form-group">
-                                <input type="number" class="form-control addc-user-like" id="addc-liked-postid" 
-                                    placeholder="Enter post ID... Ex: 6361143641800568832">
-                                <input type="number" class="form-control addc-user-like" id="addc-liked-articleid" 
-                                    placeholder="Enter article ID... Ex: 8936076462107920273">
-                                <input type="number" class="form-control addc-user-like" id="addc-liked-videoid" 
-                                    placeholder="Enter video ID... Ex: 6362398753827098625">
                             </div>
                         </div>
                     </div>
-                    <div class="row mt-2">
-                        <div class="col-md-12">
-                            <div class="form-group">
-                                <label class="font-weight-bold c-header">Connect with users who commented on</label>
-                                <div class="custom-control custom-radio custom-control-inline">
-                                    <input type="radio" class="custom-control-input addc-commented-check" 
-                                        id="addc-commented-none" name="user_commented" value="none">
-                                    <label class="custom-control-label" for="addc-commented-none">None</label>
-                                </div>
-                                <div class="custom-control custom-radio custom-control-inline">
-                                    <input type="radio" class="custom-control-input addc-commented-check" 
-                                        id="addc-commented-post" name="user_commented" value="post">
-                                    <label class="custom-control-label" for="addc-commented-post">Post</label>
-                                </div>
-                                <div class="custom-control custom-radio custom-control-inline">
-                                    <input type="radio" class="custom-control-input addc-commented-check" 
-                                        id="addc-commented-article" name="user_commented" value="article">
-                                    <label class="custom-control-label" for="addc-commented-article">Article</label>
-                                </div>
-                                <div class="custom-control custom-radio custom-control-inline">
-                                    <input type="radio" class="custom-control-input addc-commented-check" 
-                                        id="addc-commented-video" name="user_commented" value="video">
-                                    <label class="custom-control-label" for="addc-commented-video">Video</label>
-                                </div>
+                </div>
+                <div class="row mt-2">
+                    <div class="col-md-12">
+                        <div class="form-group">
+                            <label class="font-weight-bold c-header">Connect with users who liked</label>
+                            <div class="custom-control custom-radio custom-control-inline">
+                                <input type="radio" class="custom-control-input addc-liked-check"
+                                    id="addc-liked-none" name="user_liked" value="none">
+                                <label class="custom-control-label" for="addc-liked-none">None</label>
                             </div>
-                            <div class="form-group">
-                                <input type="number" class="form-control addc-user-commented" id="addc-commented-postid" 
-                                    placeholder="Enter post ID... Ex: 6361143641800568832">
-                                <input type="number" class="form-control addc-user-commented" id="addc-commented-articleid" 
-                                    placeholder="Enter article ID... Ex: 8936076462107920273">
-                                <input type="number" class="form-control addc-user-commented" id="addc-commented-videoid" 
-                                    placeholder="Enter video ID... Ex: 6362398753827098625">
+                            <div class="custom-control custom-radio custom-control-inline">
+                                <input type="radio" class="custom-control-input addc-liked-check" 
+                                    id="addc-liked-post" name="user_liked" value="post">
+                                <label class="custom-control-label" for="addc-liked-post">Post</label>
+                            </div>
+                            <div class="custom-control custom-radio custom-control-inline">
+                                <input type="radio" class="custom-control-input addc-liked-check" 
+                                    id="addc-liked-article" name="user_liked" value="article">
+                                <label class="custom-control-label" for="addc-liked-article">Article</label>
+                            </div>
+                            <div class="custom-control custom-radio custom-control-inline">
+                                <input type="radio" class="custom-control-input addc-liked-check" 
+                                    id="addc-liked-video" name="user_liked" value="video">
+                                <label class="custom-control-label" for="addc-liked-video">Video</label>
                             </div>
                         </div>
+                        <div class="form-group">
+                            <input type="number" class="form-control addc-user-like" id="addc-liked-postid" 
+                                placeholder="Enter post ID... Ex: 6361143641800568832">
+                            <input type="number" class="form-control addc-user-like" id="addc-liked-articleid" 
+                                placeholder="Enter article ID... Ex: 8936076462107920273">
+                            <input type="number" class="form-control addc-user-like" id="addc-liked-videoid" 
+                                placeholder="Enter video ID... Ex: 6362398753827098625">
+                        </div>
                     </div>
+                </div>
+                <div class="row mt-2">
+                    <div class="col-md-12">
+                        <div class="form-group">
+                            <label class="font-weight-bold c-header">Connect with users who commented on</label>
+                            <div class="custom-control custom-radio custom-control-inline">
+                                <input type="radio" class="custom-control-input addc-commented-check" 
+                                    id="addc-commented-none" name="user_commented" value="none">
+                                <label class="custom-control-label" for="addc-commented-none">None</label>
+                            </div>
+                            <div class="custom-control custom-radio custom-control-inline">
+                                <input type="radio" class="custom-control-input addc-commented-check" 
+                                    id="addc-commented-post" name="user_commented" value="post">
+                                <label class="custom-control-label" for="addc-commented-post">Post</label>
+                            </div>
+                            <div class="custom-control custom-radio custom-control-inline">
+                                <input type="radio" class="custom-control-input addc-commented-check" 
+                                    id="addc-commented-article" name="user_commented" value="article">
+                                <label class="custom-control-label" for="addc-commented-article">Article</label>
+                            </div>
+                            <div class="custom-control custom-radio custom-control-inline">
+                                <input type="radio" class="custom-control-input addc-commented-check" 
+                                    id="addc-commented-video" name="user_commented" value="video">
+                                <label class="custom-control-label" for="addc-commented-video">Video</label>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <input type="number" class="form-control addc-user-commented" id="addc-commented-postid" 
+                                placeholder="Enter post ID... Ex: 6361143641800568832">
+                            <input type="number" class="form-control addc-user-commented" id="addc-commented-articleid" 
+                                placeholder="Enter article ID... Ex: 8936076462107920273">
+                            <input type="number" class="form-control addc-user-commented" id="addc-commented-videoid" 
+                                placeholder="Enter video ID... Ex: 6362398753827098625">
+                        </div>
+                    </div>
+                </div>
                     <div class="row mt-2">
                         <div class="col-md-6">
                             <div class="custom-control custom-checkbox custom-control-inline mb-2">
@@ -539,44 +539,44 @@ var addConnectionForm = `
                             </div>
                         </div>
                     </div>
-                    <div class="row mt-2">
-                        <div class="col-lg-4 col-sm-4">
-                            <div class="form-group">
-                                <label for="addc-startPosition" style="color:black;font-weight:bold;">Start position 
-                                    <div class="juez-tooltip">
-                                        <i class="fa fa-exclamation-circle"></i>
-                                        <span class="juez-tooltiptext">Start position 0 is the most recently added connection.</span>
-                                    </div>
-                                </label>
-                                <input type="number" class="form-control shadow-none" id="addc-startPosition" placeholder="Ex: 0">
-                            </div>
-                        </div>
-                        <div class="col-lg-4 col-sm-4">
-                            <div class="form-group">
-                                <label for="addc-totalFollow" style="color:black;font-weight:bold;">Total 
-                                    <div class="juez-tooltip">
-                                        <i class="fa fa-exclamation-circle"></i>
-                                        <span class="juez-tooltiptext">Total number of people you want to follow.</span>
-                                    </div>
-                                </label>
-                                <input type="number" class="form-control shadow-none" id="addc-totalFollow" placeholder="Ex: 10">
-                            </div>
-                        </div>
-                        <div class="col-lg-4 col-sm-4">
-                            <div class="form-group">
-                                <label for="addc-delayFollowTime" style="color:black;font-weight:bold;">Delay 
-                                    <div class="juez-tooltip">
-                                        <i class="fa fa-exclamation-circle"></i>
-                                        <span class="juez-tooltiptext">Delay between each follow in seconds.</span>
-                                    </div>
-                                </label>
-                                <input type="number" class="form-control shadow-none" id="addc-delayFollowTime" placeholder="Ex: 30">
-                            </div>
+                <div class="row mt-2">
+                    <div class="col-lg-4 col-sm-4">
+                        <div class="form-group">
+                            <label for="addc-startPosition" style="color:black;font-weight:bold;">Start position 
+                                <div class="juez-tooltip">
+                                    <i class="fa fa-exclamation-circle"></i>
+                                    <span class="juez-tooltiptext">Start position 0 is the most recently added connection.</span>
+                                </div>
+                            </label>
+                            <input type="number" class="form-control shadow-none" id="addc-startPosition" placeholder="Ex: 0">
                         </div>
                     </div>
-                    <div class="row">
-                        <div class="col-md-12">
-                            <span id="addc-error-notice" style="color:red"></span>
+                    <div class="col-lg-4 col-sm-4">
+                        <div class="form-group">
+                            <label for="addc-totalFollow" style="color:black;font-weight:bold;">Total 
+                                <div class="juez-tooltip">
+                                    <i class="fa fa-exclamation-circle"></i>
+                                    <span class="juez-tooltiptext">Total number of people you want to follow.</span>
+                                </div>
+                            </label>
+                            <input type="number" class="form-control shadow-none" id="addc-totalFollow" placeholder="Ex: 10">
+                        </div>
+                    </div>
+                    <div class="col-lg-4 col-sm-4">
+                        <div class="form-group">
+                            <label for="addc-delayFollowTime" style="color:black;font-weight:bold;">Delay 
+                                <div class="juez-tooltip">
+                                    <i class="fa fa-exclamation-circle"></i>
+                                    <span class="juez-tooltiptext">Delay between each follow in seconds.</span>
+                                </div>
+                            </label>
+                            <input type="number" class="form-control shadow-none" id="addc-delayFollowTime" placeholder="Ex: 30">
+                        </div>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-12">
+                        <span id="addc-error-notice" style="color:red"></span>
                         </div>
                     </div>
                 </div>

@@ -8,49 +8,90 @@ let attachements = []
  * @param {integer} total 
  */
 const getAudience = (audienceId, total, filterApi, callback) => {
-    fetch(`${filterApi}/audience/list?audienceId=${audienceId}&totalCount=${total}`)
-        .then(res => res.json() )
-        .then(res => {
-            if(res.length > 0) {
-                let dataPath = res[0].audience
-                let netDistance;
-                let targetIdd;
+    console.log('🔍 getAudience: Starting API call with params:', {
+        audienceId: audienceId,
+        total: total,
+        filterApi: filterApi,
+        url: `${filterApi}/audience/list?audienceId=${audienceId}&totalCount=${total}`
+    });
     
-                if(dataPath.length > 0) {
-                    audienceList = []
-                    
-                    for(let i=0; i<dataPath.length; i++){
-        
-                        if(dataPath[i].con_distance != null){
-                            netDistance = dataPath[i].con_distance.split("_")
-                        }
+    fetch(`${filterApi}/audience/list?audienceId=${audienceId}&totalCount=${total}`)
+        .then(res => {
+            console.log('📡 getAudience: API response status:', res.status);
+            if (!res.ok) {
+                throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+            }
+            return res.json();
+        })
+        .then(res => {
+            console.log('📊 getAudience: API response data:', res);
             
-                        if(dataPath[i].con_member_urn.includes('urn:li:member:')){
-                            targetIdd = dataPath[i].con_member_urn.replace('urn:li:member:','') 
-                        }
+            let dataPath = null;
             
-                        audienceList.push({
-                            name: dataPath[i].con_first_name+' '+dataPath[i].con_last_name,
-                            firstName: dataPath[i].con_first_name,
-                            lastName: dataPath[i].con_last_name,
-                            title: dataPath[i].con_job_title,
-                            conId: dataPath[i].con_id,
-                            totalResultCount: dataPath.length,
-                            publicIdentifier: dataPath[i].con_public_identifier, 
-                            memberUrn: dataPath[i].con_member_urn,
-                            networkDistance: parseInt(netDistance[1]),
-                            trackingId: dataPath[i].con_tracking_id, 
-                            navigationUrl: `${LINKEDIN_URL}/in/${dataPath[i].con_public_identifier}`, 
-                            targetId: parseInt(targetIdd),
-                            netDistance: parseInt(netDistance[1]),
-                        })
+            // Handle different API response formats
+            if (res && res.audience && Array.isArray(res.audience)) {
+                // New format: {audience: Array}
+                console.log('✅ getAudience: Found direct audience array');
+                dataPath = res.audience;
+            } else if (res && Array.isArray(res) && res.length > 0 && res[0].audience) {
+                // Old format: [{audience: Array}]
+                console.log('✅ getAudience: Found audience in array format');
+                dataPath = res[0].audience;
+            } else if (res && Array.isArray(res)) {
+                // Direct array format: [connection1, connection2, ...]
+                console.log('✅ getAudience: Found direct connection array');
+                dataPath = res;
+            }
+            
+            if(dataPath && dataPath.length > 0) {
+                console.log(`👥 getAudience: Found ${dataPath.length} connections in audience data`);
+                audienceList = []
+                
+                for(let i=0; i<dataPath.length; i++){
+                    let netDistance = null;
+                    let targetIdd = null;
+    
+                    if(dataPath[i].con_distance != null){
+                        netDistance = dataPath[i].con_distance.split("_")
                     }
+        
+                    if(dataPath[i].con_member_urn && dataPath[i].con_member_urn.includes('urn:li:member:')){
+                        targetIdd = dataPath[i].con_member_urn.replace('urn:li:member:','') 
+                    }
+        
+                    audienceList.push({
+                        name: dataPath[i].con_first_name+' '+dataPath[i].con_last_name,
+                        firstName: dataPath[i].con_first_name,
+                        lastName: dataPath[i].con_last_name,
+                        title: dataPath[i].con_job_title,
+                        conId: dataPath[i].con_id,
+                        totalResultCount: dataPath.length,
+                        publicIdentifier: dataPath[i].con_public_identifier, 
+                        memberUrn: dataPath[i].con_member_urn,
+                        networkDistance: netDistance ? parseInt(netDistance[1]) || 1 : 1,
+                        trackingId: dataPath[i].con_tracking_id, 
+                        navigationUrl: `${LINKEDIN_URL}/in/${dataPath[i].con_public_identifier}`, 
+                        targetId: targetIdd ? parseInt(targetIdd) : null,
+                        netDistance: netDistance ? parseInt(netDistance[1]) || 1 : 1,
+                    })
                 }
-                callback({'status':'successful'})
+                console.log(`✅ getAudience: Successfully processed ${audienceList.length} connections`);
+                callback({'status':'successful', 'count': audienceList.length})
+            } else {
+                console.log('⚠️ getAudience: No audience data found in response');
+                console.log('🔍 getAudience: Response structure:', {
+                    isArray: Array.isArray(res),
+                    hasAudienceProperty: res && res.hasOwnProperty('audience'),
+                    audienceType: res && res.audience ? typeof res.audience : 'undefined',
+                    responseKeys: res ? Object.keys(res) : 'null'
+                });
+                audienceList = [];
+                callback({'status':'successful', 'count': 0, 'message': 'No connections found in audience'})
             }
         })
-        .catch((err, textStatus, responseText) => {
-            // console.log(err)
+        .catch((err) => {
+            console.error('❌ getAudience: API call failed:', err);
+            audienceList = [];
             callback({'status':'failed', 'message': err.toString()})
         })
 }
@@ -263,22 +304,52 @@ const sendMessageToConnection = async (params) => {
         }
 
         const data = await response.json();
+        console.log('📋 LinkedIn API response data:', data);
+        console.log('🔍 Response structure check:', {
+            hasValue: !!data.value,
+            hasCreatedAt: !!(data.value?.createdAt),
+            dataKeys: Object.keys(data),
+            valueKeys: data.value ? Object.keys(data.value) : 'no value property'
+        });
         
         if (!data.value?.createdAt) {
-            console.error('❌ Message not created:', data);
-            return {
-                status: 'failed',
-                message: 'Message not sent - no creation timestamp'
-            };
+            console.error('❌ Message not created - missing createdAt:', data);
+            
+            // Check if message was actually sent despite missing createdAt
+            if (data.value && (data.value.backendEventUrn || data.value.conversationId)) {
+                console.log('✅ Message may have been sent despite missing createdAt, proceeding...');
+            } else {
+                return {
+                    status: 'failed',
+                    message: 'Message not sent - no creation timestamp or conversation ID'
+                };
+            }
         }
 
         // Extract conversation ID and send delivery acknowledgement
-        const conversationUrnId = data.value.backendEventUrn.replace('urn:li:messagingMessage:', '');
-        console.log('✅ Message sent successfully, conversation ID:', conversationUrnId);
+        let conversationUrnId = null;
+        
+        if (data.value?.backendEventUrn) {
+            conversationUrnId = data.value.backendEventUrn.replace('urn:li:messagingMessage:', '');
+            console.log('✅ Message sent successfully, conversation ID from backendEventUrn:', conversationUrnId);
+        } else if (data.value?.conversationId) {
+            conversationUrnId = data.value.conversationId;
+            console.log('✅ Message sent successfully, conversation ID from conversationId:', conversationUrnId);
+        } else if (data.conversationId) {
+            conversationUrnId = data.conversationId;
+            console.log('✅ Message sent successfully, conversation ID from root:', conversationUrnId);
+        } else {
+            console.warn('⚠️ Message sent but no conversation ID found in response');
+            // Still consider it successful if we got this far
+        }
         
         try {
-            await sendDeliveryAcknowledgement(conversationUrnId);
-            console.log('✅ Delivery acknowledgement sent');
+            if (conversationUrnId) {
+                await sendDeliveryAcknowledgement(conversationUrnId);
+                console.log('✅ Delivery acknowledgement sent');
+            } else {
+                console.log('⏩ Skipping delivery acknowledgement - no conversation ID');
+            }
         } catch (ackError) {
             console.warn('⚠️ Failed to send delivery acknowledgement:', ackError);
             // Don't fail the whole operation if this fails

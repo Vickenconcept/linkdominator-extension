@@ -8,13 +8,28 @@ var messageFollowupForm = `
                 <button type="button" class="close" data-dismiss="modal">&times;</button>
             </div>
             <div class="modal-body">
-                <div class="row message-followup-notice" style="display: none;">
+                <div class="row">
                     <div class="col-md-12">
-                        <div class="card card-body" style="background: #F3F6F8;">
-                            <ul id="displayMessageFollowUpStatus" style="list-style: none"></ul>
-                        </div>
+                        <ul class="nav nav-tabs" id="followUpTabs">
+                            <li class="nav-item">
+                                <a class="nav-link active" id="new-campaign-tab" data-toggle="tab" href="#new-campaign">New Campaign</a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link" id="campaign-results-tab" data-toggle="tab" href="#campaign-results">Campaign Results</a>
+                            </li>
+                        </ul>
                     </div>
                 </div>
+                
+                <div class="tab-content" id="followUpTabContent">
+                    <div class="tab-pane fade show active" id="new-campaign" role="tabpanel">
+                        <div class="row message-followup-notice" style="display: none; margin-top: 15px;">
+                            <div class="col-md-12">
+                                <div class="card card-body" style="background: #F3F6F8;">
+                                    <ul id="displayMessageFollowUpStatus" style="list-style: none"></ul>
+                                </div>
+                            </div>
+                        </div>
                 <div class="form-group">
                     <label for="mfu-selectAudience" class="font-weight-bold c-header">Select an audience</label>
                     <select class="form-control shadow-none select-dropdown" style="height: 35px;" id="mfu-selectAudience">
@@ -137,11 +152,40 @@ var messageFollowupForm = `
                     </div>
                 </div>
                 <ul class="list-group" id="lkm-mfu-file-uploads"></ul>
+                    </div>
+                    
+                    <div class="tab-pane fade" id="campaign-results" role="tabpanel">
+                        <div style="margin-top: 15px;">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <h6 class="mb-0">Recent Campaign Results</h6>
+                                <div>
+                                    <button type="button" class="btn btn-sm btn-outline-primary" id="refreshCampaignResults">
+                                        <i class="fas fa-sync-alt"></i> Refresh
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-outline-info ml-2" id="testNotification">
+                                        <i class="fas fa-bell"></i> Test Notification
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-outline-danger ml-2" id="clearAllCampaignResults">
+                                        <i class="fas fa-trash"></i> Clear All
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <div id="campaignResultsContainer">
+                                <div class="text-center py-4">
+                                    <i class="fas fa-spinner fa-spin"></i> Loading campaign results...
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
 
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-primary btn-lg shadow-none addFollowUppAction">Add</button>
-                <button type="button" class="btn btn-outline-primary btn-lg shadow-none startFollowUpAction">Start</button>
+                <div id="campaign-action-buttons">
+                    <button type="button" class="btn btn-primary btn-lg shadow-none addFollowUppAction">Add</button>
+                    <button type="button" class="btn btn-outline-primary btn-lg shadow-none startFollowUpAction">Start</button>
+                </div>
                 <button type="button" class="btn btn-outline-secondary btn-lg shadow-none" data-dismiss="modal">Close</button>
             </div>
 
@@ -151,6 +195,197 @@ var messageFollowupForm = `
 `;
 
 $('body').append(messageFollowupForm)
+
+// Load campaign results when tab is clicked
+$('#campaign-results-tab').on('click', function() {
+    loadCampaignResults();
+    // Hide action buttons when on Campaign Results tab
+    $('#campaign-action-buttons').hide();
+});
+
+// Show action buttons when on New Campaign tab
+$('#new-campaign-tab').on('click', function() {
+    $('#campaign-action-buttons').show();
+});
+
+// Refresh button functionality
+$('#refreshCampaignResults').on('click', function() {
+    loadCampaignResults();
+});
+
+// Test notification functionality
+$('#testNotification').on('click', function() {
+    console.log('🔔 Testing desktop notification...');
+    
+    // Send message to background script to create test notification
+    chrome.runtime.sendMessage({
+        action: 'testNotification',
+        data: {
+            title: 'LinkDominator Test',
+            message: 'This is a test notification to check if notifications are working properly.'
+        }
+    }, function(response) {
+        if (chrome.runtime.lastError) {
+            console.error('❌ Test notification request failed:', chrome.runtime.lastError);
+            alert('Failed to send test notification request. Check console for details.');
+        } else {
+            console.log('✅ Test notification request sent:', response);
+        }
+    });
+});
+
+// Clear all campaigns functionality
+$('#clearAllCampaignResults').on('click', function() {
+    if (confirm('Are you sure you want to delete all campaign results? This action cannot be undone.')) {
+        chrome.storage.local.set({ followupCampaignResults: [] }).then(() => {
+            console.log('🗑️ All campaign results cleared');
+            loadCampaignResults();
+        });
+    }
+});
+
+// Delete individual campaign functionality
+$(document).on('click', '.delete-campaign', function() {
+    const index = $(this).data('campaign-index');
+    
+    if (confirm('Are you sure you want to delete this campaign result? This action cannot be undone.')) {
+        chrome.storage.local.get(['followupCampaignResults']).then((result) => {
+            let campaigns = result.followupCampaignResults || [];
+            campaigns.splice(index, 1); // Remove the campaign at the specified index
+            
+            chrome.storage.local.set({ followupCampaignResults: campaigns }).then(() => {
+                console.log('🗑️ Campaign result deleted');
+                loadCampaignResults();
+            });
+        });
+    }
+});
+
+// Function to load campaign results from storage
+const loadCampaignResults = () => {
+    $('#campaignResultsContainer').html(`
+        <div class="text-center py-4">
+            <i class="fas fa-spinner fa-spin"></i> Loading campaign results...
+        </div>
+    `);
+    
+    chrome.storage.local.get(['followupCampaignResults']).then((result) => {
+        const campaigns = result.followupCampaignResults || [];
+        
+        if (campaigns.length === 0) {
+            $('#campaignResultsContainer').html(`
+                <div class="text-center py-4">
+                    <i class="fas fa-info-circle text-muted"></i>
+                    <p class="text-muted mt-2">No campaign results found.<br>Run a scheduled campaign to see results here.</p>
+                </div>
+            `);
+            return;
+        }
+        
+        let html = '';
+        campaigns.forEach((campaign, index) => {
+            const successRate = campaign.summary?.successRate || '0%';
+            const successful = campaign.summary?.successful || 0;
+            const failed = campaign.summary?.failed || 0;
+            const total = campaign.summary?.totalProcessed || 0;
+            
+            // Determine status color
+            let statusColor = 'success';
+            if (failed > 0 && successful === 0) statusColor = 'danger';
+            else if (failed > 0) statusColor = 'warning';
+            
+            html += `
+                <div class="card mb-3">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h6 class="mb-0">
+                            <i class="fas fa-comments"></i> 
+                            Campaign ${campaign.campaignId.split('_')[1]}
+                        </h6>
+                        <small class="text-muted">${campaign.startTime}</small>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-8">
+                                <div class="d-flex align-items-center mb-2">
+                                    <span class="badge badge-${statusColor} mr-2">${successRate}</span>
+                                    <span class="text-muted">
+                                        ${successful} sent, ${failed} failed (${total} total)
+                                    </span>
+                                </div>
+                                <small class="text-muted">
+                                    Duration: ${campaign.startTime} - ${campaign.endTime}
+                                </small>
+                            </div>
+                            <div class="col-md-4 text-right">
+                                <button class="btn btn-sm btn-outline-info toggle-campaign-details" data-campaign-index="${index}">
+                                    <i class="fas fa-eye"></i> Details
+                                </button>
+                                <button class="btn btn-sm btn-outline-danger ml-1 delete-campaign" data-campaign-index="${index}" title="Delete this campaign">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div id="campaign-details-${index}" style="display: none;" class="mt-3">
+                            <hr>
+                            <h6>Results by Contact:</h6>
+                            <div style="max-height: 200px; overflow-y: auto;">
+            `;
+            
+            campaign.results?.forEach(result => {
+                const icon = result.status === 'success' ? 
+                    '<i class="fas fa-check-circle text-success"></i>' : 
+                    '<i class="fas fa-times-circle text-danger"></i>';
+                
+                html += `
+                    <div class="d-flex justify-content-between align-items-center py-1">
+                        <span>${icon} ${result.name}</span>
+                        <small class="text-muted">
+                            ${result.status === 'success' ? 'Sent' : result.error || 'Failed'}
+                        </small>
+                    </div>
+                `;
+            });
+            
+            if (campaign.errors && campaign.errors.length > 0) {
+                html += `
+                    <div class="mt-2">
+                        <h6 class="text-danger">Common Issues:</h6>
+                        ${campaign.errors.slice(0, 3).map(error => 
+                            `<small class="text-danger d-block">• ${error}</small>`
+                        ).join('')}
+                        ${campaign.errors.length > 3 ? `<small class="text-muted">... and ${campaign.errors.length - 3} more</small>` : ''}
+                    </div>
+                `;
+            }
+            
+            html += `
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+        
+        $('#campaignResultsContainer').html(html);
+    });
+};
+
+// Event handler for toggle campaign details buttons
+$(document).on('click', '.toggle-campaign-details', function() {
+    const index = $(this).data('campaign-index');
+    const detailsElement = $(`#campaign-details-${index}`);
+    const isVisible = detailsElement.is(':visible');
+    const button = $(this);
+    
+    if (isVisible) {
+        detailsElement.slideUp();
+        button.html('<i class="fas fa-eye"></i> Details');
+    } else {
+        detailsElement.slideDown();
+        button.html('<i class="fas fa-eye-slash"></i> Hide Details');
+    }
+});
 $('body').on('click','#message-followup-menu-click',function() {
     implementPermission('addFollowUppAction')
     getAudienceList('mfu-selectAudience')

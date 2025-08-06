@@ -1,4 +1,5 @@
 $('.connectionInfoAction').click(function(){
+    console.log('🔍 Get Connections Info: Starting process...');
     $('#displayGetConnectInfoStatus').empty()
     var gciStartP = $('#gci-startPosition'),
         gciTotal = $('#gci-totalScrape'),
@@ -15,16 +16,28 @@ $('.connectionInfoAction').click(function(){
 
     var queryParams = '';
 
+    console.log('📋 Get Connections Info: Form values:', {
+        audienceSelected: $('#gci-audience-select').val(),
+        searchTerm: $('#gci-search-term').val(),
+        startPosition: gciStartP.val(),
+        totalToScrape: gciTotal.val(),
+        delayBetweenScrapes: gciDelay.val()
+    });
+
     // validate fields
     if(gciTotal.val() =='' || gciDelay.val() =='' ){
+        console.log('❌ Get Connections Info: Validation failed - missing required fields');
         for(var i=0;i<gciControlFiels.length;i++){
             if(gciControlFiels[i].val() == ''){
+                console.log(`❌ Get Connections Info: Missing field: ${gciControlFiels[i].data('name')}`);
                 $('#gci-error-notice').html(`${gciControlFiels[i].data('name')} field cannot be empty`)
             }
         }
     }else if(gciDelay.val() < 30){
+        console.log('❌ Get Connections Info: Validation failed - delay too low:', gciDelay.val());
         $('#gci-error-notice').html(`Delay minimum is 30`)
     }else{
+        console.log('✅ Get Connections Info: Validation passed');
         $('#gci-error-notice').html(``)
 
         // check if value exists in accordion list dropdown
@@ -83,16 +96,39 @@ $('.connectionInfoAction').click(function(){
 
         $(this).attr('disabled', true)  
 
-        if ($('#gci-audience-select').val() != '') {
+        // Check which method is selected
+        let audienceMethodSelected = $('#gci-audience-method-card').hasClass('selected');
+        let searchMethodSelected = $('#gci-search-method-card').hasClass('selected');
+        let audienceSelected = $('#gci-audience-select').val() != '';
+        let searchTermEntered = $('#gci-search-term').val() != '';
+        
+        console.log('📊 Get Connections Info: Method selection:', {
+            audienceMethodSelected: audienceMethodSelected,
+            searchMethodSelected: searchMethodSelected,
+            audienceSelected: audienceSelected,
+            searchTermEntered: searchTermEntered
+        });
+        
+        // Determine method based on both class and actual form state
+        if (audienceSelected) {
+            console.log('📊 Get Connections Info: Using selected audience:', $('#gci-audience-select').val());
             gciAudienceList($('#gci-totalScrape').val(), gciDelay.val(), $('#gci-audience-select').val())
-        }else {
+        } else if (searchTermEntered || queryParams != '') {
+            console.log('🔍 Get Connections Info: Using search parameters');
+            console.log('🔧 Get Connections Info: Built query parameters:', queryParams);
+            
             if($('#gci-search-term').val())
                 query = `(keywords:${encodeURIComponent($('#gci-search-term').val())},flagshipSearchIntent:SEARCH_SRP,queryParameters:(${queryParams}resultType:List(PEOPLE)),includeFiltersInResponse:false)`
             else
                 query = `(flagshipSearchIntent:SEARCH_SRP,queryParameters:(${queryParams}resultType:List(PEOPLE)),includeFiltersInResponse:false)`;
-                
+            
+            console.log('🔍 Get Connections Info: Final LinkedIn search query:', query);
             gciGetConnections(query,gciStartP,gciTotal,gciDelay.val())
-    
+        } else {
+            console.log('❌ Get Connections Info: No method properly selected');
+            $('#gci-error-notice').html('Please select a method: either choose an audience or use search parameters');
+            $('.connectionInfoAction').attr('disabled', false);
+            return;
         }    
     }
 })
@@ -118,43 +154,72 @@ const gciGetConnections = async (queryParams,gciStartP,gciTotal,gciDelay) => {
                 },
                 url: `${voyagerBlockSearchUrl}&query=${queryParams}&start=${gciStartP}`,
                 success: function(data) {
+                    console.log('🔍 Get Connections Info: LinkedIn search API response:', data);
                     let res = {'data': data}
                     let elements = res['data'].data.elements
 
-                    if(elements.length) {
+                    console.log('📊 Get Connections Info: Elements structure:', {
+                        elementsLength: elements.length,
+                        elementsContent: elements
+                    });
+
+                    if(elements && elements.length) {
                         if(totalResultCount == 0)
                             totalResultCount = res['data'].data.metadata.totalResultCount
 
-                        if(elements[1].items.length) {
-                            for(let item of elements[1].items) {
+                        console.log(`📈 Get Connections Info: Total results available: ${totalResultCount}`);
+
+                        // Find the element that contains the search results
+                        let searchResultElement = null;
+                        for(let i = 0; i < elements.length; i++) {
+                            if(elements[i] && elements[i].items && elements[i].items.length > 0) {
+                                console.log(`✅ Get Connections Info: Found search results in elements[${i}]`);
+                                searchResultElement = elements[i];
+                                break;
+                            }
+                        }
+
+                        if(searchResultElement && searchResultElement.items.length) {
+                            console.log(`👥 Get Connections Info: Found ${searchResultElement.items.length} connections in this batch`);
+                            
+                            for(let item of searchResultElement.items) {
                                 connectionItems.push(item)
                             }
+
+                            console.log(`📊 Get Connections Info: Total connections collected: ${connectionItems.length}/${gciTotal}`);
 
                             if(connectionItems.length < gciTotal) {
                                 gciStartP = parseInt(gciStartP) + 11
                                 $('#gci-startPosition').val(gciStartP)
+                                console.log(`🔄 Get Connections Info: Getting more results, new start position: ${gciStartP}`);
                                 getConnectionsLooper()
                             }else {
+                                console.log('✅ Get Connections Info: Collected enough connections, starting data extraction...');
                                 gciCleanConnectionsData(connectionItems, totalResultCount, gciDelay)
                             }
 
                         }else {
+                            console.log('⚠️ Get Connections Info: No connection items found in any elements');
                             $('#displayGetConnectInfoStatus').empty()
                             $('#displayGetConnectInfoStatus').html('No result found, change your search criteria and try again!')
                             $('.connectionInfoAction').attr('disabled', false)
                         }
                     }else if(connectionItems.length) {
+                        console.log(`✅ Get Connections Info: No more results from API, but have ${connectionItems.length} connections to process`);
                         $('#displayGetConnectInfoStatus').empty()
                         $('#displayGetConnectInfoStatus').html(`Found ${connectionItems.length}. Getting Info...`)
                         gciCleanConnectionsData(connectionItems, totalResultCount, gciDelay)
                     }else {
+                        console.log('❌ Get Connections Info: No results found at all');
                         $('#displayGetConnectInfoStatus').empty()
                         $('#displayGetConnectInfoStatus').html('No result found, change your search criteria and try again!')
                         $('.connectionInfoAction').attr('disabled', false)
                     }
                 },
                 error: function(error) {
-                    console.log(error)
+                    console.error('❌ Get Connections Info: LinkedIn search API error:', error);
+                    $('#displayGetConnectInfoStatus').empty()
+                    $('#displayGetConnectInfoStatus').html('Error searching LinkedIn. Please try again or check console for details.')
                     $('.connectionInfoAction').attr('disabled', false)
                 }
             })
@@ -166,66 +231,149 @@ const gciGetConnections = async (queryParams,gciStartP,gciTotal,gciDelay) => {
 
 
 const gciCleanConnectionsData = (connectionItems, totalResultCount, gciDelay) => {
+    console.log('🔧 Get Connections Info: Starting data extraction...', {
+        totalItems: connectionItems.length,
+        sampleItem: connectionItems[0]
+    });
+    
     let conArr = [];
     let dataToScrape = [];
     let profileUrn;
+    let processedCount = 0;
+    let validCount = 0;
 
     for(let item of connectionItems) {
-        profileUrn = item.itemUnion['*entityResult']
+        processedCount++;
+        console.log(`🔍 Get Connections Info: Processing item ${processedCount}/${connectionItems.length}:`, item);
+        
+        if(item && item.itemUnion && item.itemUnion['*entityResult']) {
+            profileUrn = item.itemUnion['*entityResult'];
+            console.log(`📝 Get Connections Info: Found profileUrn: ${profileUrn}`);
+            
+            if(profileUrn && typeof profileUrn === 'string' && 
+               profileUrn.includes('urn:li:fsd_entityResultViewModel:(urn:li:fsd_profile:') && 
+               profileUrn.includes(',SEARCH_SRP,DEFAULT)')) {
 
-        if(profileUrn.includes('urn:li:fsd_entityResultViewModel:(urn:li:fsd_profile:') && 
-            profileUrn.includes(',SEARCH_SRP,DEFAULT)')) {
+                profileUrn = profileUrn.replace('urn:li:fsd_entityResultViewModel:(urn:li:fsd_profile:','')
+                profileUrn = profileUrn.replace(',SEARCH_SRP,DEFAULT)','')
 
-            profileUrn = profileUrn.replace('urn:li:fsd_entityResultViewModel:(urn:li:fsd_profile:','')
-            profileUrn = profileUrn.replace(',SEARCH_SRP,DEFAULT)','')
-
-            conArr.push({
-                conId: profileUrn,
-                totalResultCount: totalResultCount,
-            })			
+                conArr.push({
+                    conId: profileUrn,
+                    totalResultCount: totalResultCount,
+                });
+                
+                validCount++;
+                console.log(`✅ Get Connections Info: Valid profile extracted: ${profileUrn} (${validCount} total)`);
+            } else {
+                console.log(`⚠️ Get Connections Info: Invalid profileUrn format: ${profileUrn}`);
+            }
+        } else {
+            console.log(`⚠️ Get Connections Info: Item missing required structure:`, {
+                hasItem: !!item,
+                hasItemUnion: !!(item && item.itemUnion),
+                hasEntityResult: !!(item && item.itemUnion && item.itemUnion['*entityResult'])
+            });
         }
     }
+    
+    console.log(`📊 Get Connections Info: Extraction summary: ${validCount}/${processedCount} valid profiles found`);
 
     // get only user defined total
+    let requestedTotal = $('#gci-totalScrape').val();
     for(let z=0; z < conArr.length; z++) {
-        if(z < $('#gci-totalScrape').val())
+        if(z < requestedTotal)
             dataToScrape.push(conArr[z])
         else
             break;
     }
-    gciGetConnectionInfo(dataToScrape, gciDelay)
+    
+    console.log(`🎯 Get Connections Info: Final data ready for scraping:`, {
+        availableProfiles: conArr.length,
+        requestedTotal: requestedTotal,
+        willScrape: dataToScrape.length,
+        profiles: dataToScrape
+    });
+    
+    if(dataToScrape.length > 0) {
+        gciGetConnectionInfo(dataToScrape, gciDelay);
+    } else {
+        console.log('❌ Get Connections Info: No valid profiles found to scrape');
+        $('#displayGetConnectInfoStatus').empty();
+        $('#displayGetConnectInfoStatus').html('No valid profiles found in search results. Try different search criteria.');
+        $('.connectionInfoAction').attr('disabled', false);
+    }
 }
 
 const gciAudienceList = async (gciTotal, gciDelay, audienceId) => {
+    console.log('📊 Get Connections Info: Fetching audience data...', {
+        audienceId: audienceId,
+        totalRequested: gciTotal,
+        url: `${filterApi}/audience/list?audienceId=${audienceId}&totalCount=${gciTotal}`
+    });
+    
     var dataToScrape = [];
 
     await $.ajax({
         method: 'get',
         url: `${filterApi}/audience/list?audienceId=${audienceId}&totalCount=${gciTotal}`,
         success: function(data){
-            if(data.length > 0){
-                var dataPath = data[0].audience;
-                if(dataPath.length > 0){
-                    for(let i=0; i<dataPath.length; i++){
-                        dataToScrape.push({connectionId: dataPath[i].con_id, publicIdentifier: dataPath[i].con_public_identifier})
-                    }
-                }else{
-                    $('.getConnectInfo').show()
-                    $('#displayGetConnectInfoStatus').empty()
-                    $('#displayGetConnectInfoStatus').html('No contact on audeince list!')
-                    $('.connectionInfoAction').attr('disabled', false)
+            console.log('📊 Get Connections Info: Audience API response:', data);
+            
+            // Handle different API response formats (same fix as other functions)
+            let dataPath = null;
+            
+            if (data && data.audience && Array.isArray(data.audience)) {
+                // New format: {audience: Array}
+                console.log('✅ Get Connections Info: Found direct audience array');
+                dataPath = data.audience;
+            } else if (data && Array.isArray(data) && data.length > 0 && data[0].audience) {
+                // Old format: [{audience: Array}]
+                console.log('✅ Get Connections Info: Found audience in array format');
+                dataPath = data[0].audience;
+            } else if (data && Array.isArray(data)) {
+                // Direct array format: [connection1, connection2, ...]
+                console.log('✅ Get Connections Info: Found direct connection array');
+                dataPath = data;
+            }
+            
+            if(dataPath && dataPath.length > 0){
+                console.log(`👥 Get Connections Info: Found ${dataPath.length} connections in audience`);
+                for(let i=0; i<dataPath.length; i++){
+                    dataToScrape.push({connectionId: dataPath[i].con_id, publicIdentifier: dataPath[i].con_public_identifier})
                 }
+                console.log(`✅ Get Connections Info: Prepared ${dataToScrape.length} connections for scraping`);
+            }else{
+                console.log('⚠️ Get Connections Info: No connections found in audience');
+                $('.getConnectInfo').show()
+                $('#displayGetConnectInfoStatus').empty()
+                $('#displayGetConnectInfoStatus').html('No contact on audience list!')
+                $('.connectionInfoAction').attr('disabled', false)
+                return;
             }
         },
         error: function (error){
-            console.log(error)
+            console.error('❌ Get Connections Info: Error fetching audience:', error);
+            $('.getConnectInfo').show()
+            $('#displayGetConnectInfoStatus').empty()
+            $('#displayGetConnectInfoStatus').html('Error fetching audience data. Check console for details.')
+            $('.connectionInfoAction').attr('disabled', false)
+            return;
         }
     })
-    gciGetConnectionInfo(dataToScrape, gciDelay)
+    
+    if(dataToScrape.length > 0) {
+        console.log('🚀 Get Connections Info: Starting connection info scraping...');
+        gciGetConnectionInfo(dataToScrape, gciDelay)
+    }
 }
 
 var timeOutGetConnInfo;
 const gciGetConnectionInfo = async (dataToScrape, gciDelay) => {
+    console.log('🚀 Get Connections Info: Starting profile scraping process...', {
+        totalConnections: dataToScrape.length,
+        delayBetweenScrapes: gciDelay
+    });
+    
     var displayLi = '', x = 0, displayAutomationRecord = '';
     var scrapedData = [];
 
@@ -246,6 +394,8 @@ const gciGetConnectionInfo = async (dataToScrape, gciDelay) => {
     $('#automation-list').append(displayAutomationRecord)
 
     for(const [i,v] of dataToScrape.entries()) {
+        console.log(`📧 Get Connections Info: Processing ${i+1}/${dataToScrape.length} - Connection ID: ${dataToScrape[i].connectionId || dataToScrape[i].conId}`);
+        
         $.ajax({
             method: 'get',
             beforeSend: function(request) {
@@ -257,8 +407,9 @@ const gciGetConnectionInfo = async (dataToScrape, gciDelay) => {
                 request.setRequestHeader('x-li-track', JSON.stringify({"clientVersion":"1.10.3070","osName":"web","timezoneOffset":1,"deviceFormFactor":"DESKTOP","mpName":"voyager-web"}));
                 request.setRequestHeader('x-restli-protocol-version', xRestliProtocolVersion);
             },
-            url: `${voyagerApi}/identity/profiles/${dataToScrape[i].conId}/profileContactInfo`,
+            url: `${voyagerApi}/identity/profiles/${dataToScrape[i].connectionId || dataToScrape[i].conId}/profileContactInfo`,
             success: function(data){
+                console.log(`📞 Get Connections Info: Contact info retrieved for connection ${i+1}`);
                 var resp = {'data': data};
 
                 if (resp['data'].data){
@@ -269,14 +420,15 @@ const gciGetConnectionInfo = async (dataToScrape, gciDelay) => {
                             beforeSend: function(request) {
                                 request.setRequestHeader('csrf-token', jsession);
                             },
-                            url: `${voyagerApi}/identity/profiles/${dataToScrape[i].conId}/profileView`,
+                            url: `${voyagerApi}/identity/profiles/${dataToScrape[i].connectionId || dataToScrape[i].conId}/profileView`,
                             success: function(data){
                                 var res = {'data': data}
                                 
                                 if(res['data'].profile.entityUrn){
-
-                                    scrapedData.push({main: res, contact: resp, connectId: res['data'].profile.entityUrn.replace('urn:li:fs_profile:','')})
                                     var name = res['data'].profile.firstName +' '+  res['data'].profile.lastName;
+                                    console.log(`👤 Get Connections Info: Profile data retrieved for ${name} (${i+1}/${dataToScrape.length})`);
+
+                                    scrapedData.push({main: res, contact: resp, connectId: res['data'].profile.entityUrn.replace('urn:li:fs_profile:','')});
             
                                     $('#displayGetConnectInfoStatus').empty()
                                     displayLi = `
@@ -294,7 +446,7 @@ const gciGetConnectionInfo = async (dataToScrape, gciDelay) => {
                                 }
                             },
                             error: function(error){
-                                // console.log(error)
+                                console.error(`❌ Get Connections Info: Error getting profile view for connection ${i+1}:`, error);
                                 $('#displayGetConnectInfoStatus').html('Something went wrong while trying to get profile.')
                             }
                         })
@@ -303,7 +455,7 @@ const gciGetConnectionInfo = async (dataToScrape, gciDelay) => {
                }
             },
             error: function(error){
-                // console.log(error)
+                console.error(`❌ Get Connections Info: Error getting contact info for connection ${i+1}:`, error);
                 $('#displayGetConnectInfoStatus').html('Something went wrong while trying to get profile contact.')
             }
         })
@@ -312,6 +464,12 @@ const gciGetConnectionInfo = async (dataToScrape, gciDelay) => {
     }
 
     $('.connectionInfoAction').attr('disabled', false)
+    
+    console.log('🏁 Get Connections Info: Scraping completed!', {
+        totalScraped: scrapedData.length,
+        totalRequested: dataToScrape.length,
+        successRate: `${Math.round((scrapedData.length / dataToScrape.length) * 100)}%`
+    });
                 
     gciSetExportData(scrapedData);
     sendStats(x, 'Profiles scraped')
@@ -545,6 +703,11 @@ const gciExportData = (dataToExport) => {
     const mtn = date.getMinutes();
     const fileName =  `connection_data_${d}${m}${y}${mtn}.csv`; 
 
+    console.log('📁 Get Connections Info: Preparing CSV export...', {
+        totalRecords: dataToExport.length,
+        fileName: fileName
+    });
+
     if(dataToExport.length > 0){
         const csvRows = [];
         const headers = Object.keys(dataToExport[0]);
@@ -566,6 +729,12 @@ const gciExportData = (dataToExport) => {
         link.href = window.URL.createObjectURL(blob);
         link.download = fileName;
         link.click();
+        
+        console.log('✅ Get Connections Info: CSV file downloaded successfully!', {
+            fileName: fileName,
+            totalRecords: dataToExport.length,
+            headers: Object.keys(dataToExport[0]).length
+        });
     }
 }
 

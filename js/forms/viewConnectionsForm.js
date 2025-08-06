@@ -14,16 +14,45 @@ var viewConnectionsForm = `
                         </div>
                     </div>
                 </div>
-                <div class="form-group">
-                    <label for="vcp-audience-select" class="font-weight-bold" style="color:black;">Select an audience</label>
-                    <select class="form-control shadow-none select-dropdown" id="vcp-audience-select" style="height: 35px;">
-                        <option value="">Select an audience</option>
-                    </select>
+                
+                <!-- Method Selection Cards -->
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <div class="card method-card selected" id="vcp-audience-method-card" style="cursor: pointer; border: 2px solid #007bff;">
+                            <div class="card-body text-center py-3">
+                                <i class="fas fa-users fa-lg mb-2" style="color: #007bff;"></i>
+                                <h6 class="mb-0" style="color: #007bff;">Use Existing Audience</h6>
+                                <small class="text-muted">Select from saved audiences</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card method-card" id="vcp-search-method-card" style="cursor: pointer; border: 2px solid #dee2e6;">
+                            <div class="card-body text-center py-3">
+                                <i class="fas fa-search fa-lg mb-2" style="color: #6c757d;"></i>
+                                <h6 class="mb-0" style="color: #6c757d;">Use Search Parameters</h6>
+                                <small class="text-muted">Search with filters & keywords</small>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label for="vcp-search-term" class="font-weight-bold" style="color:black;">Search</label>
-                    <input type="text" class="form-control shadow-none" id="vcp-search-term" placeholder="Enter your search term">
+
+                <!-- Audience Selection Section -->
+                <div id="vcp-audience-section">
+                    <div class="form-group">
+                        <label for="vcp-audience-select" class="font-weight-bold" style="color:black;">Select an audience</label>
+                        <select class="form-control shadow-none select-dropdown" id="vcp-audience-select" style="height: 35px;">
+                            <option value="">Select an audience</option>
+                        </select>
+                    </div>
                 </div>
+
+                <!-- Search Parameters Section -->
+                <div id="vcp-search-section" style="display: none;">
+                    <div class="form-group">
+                        <label for="vcp-search-term" class="font-weight-bold" style="color:black;">Search</label>
+                        <input type="text" class="form-control shadow-none" id="vcp-search-term" placeholder="Enter your search term">
+                    </div>
                 <div class="row">
                     <div class="col-md-12">
                         <div id="vcp-accordion">
@@ -279,7 +308,19 @@ var viewConnectionsForm = `
                             </div>
                         </div>
                     </div>
+                </div> <!-- End of vcp-search-section -->
+            </div> <!-- End of modal-body content -->
+            
+            <!-- Common Parameters (completely independent) -->
+            <div id="vcp-common-parameters" style="padding: 20px; border-top: 1px solid #dee2e6; background-color: #f8f9fa;">
+                <div class="row">
+                    <div class="col-md-12">
+                        <h6 class="font-weight-bold" style="color:black; border-bottom: 1px solid #dee2e6; padding-bottom: 8px;">
+                            <i class="fas fa-cog mr-2"></i>View Settings
+                        </h6>
+                    </div>
                 </div>
+                
                 <div class="row mt-2">
                     <div class="col-lg-4 col-sm-4">
                         <div class="form-group">
@@ -320,6 +361,7 @@ var viewConnectionsForm = `
                         <span id="vcp-error-notice" style="color:red"></span>
                     </div>
                 </div>
+            </div>
                 
             </div>
             <div class="modal-footer">
@@ -333,10 +375,71 @@ var viewConnectionsForm = `
 `;
 
 $('body').append(viewConnectionsForm)
+
+// Handle method selection for View Connections Profile
+$('#vcp-audience-method-card').click(function(){
+    console.log('👁️ View Connections: Audience method selected');
+    
+    // Update visual styles
+    $(this).addClass('selected').css({
+        'border': '2px solid #007bff'
+    });
+    $(this).find('i').css('color', '#007bff');
+    $(this).find('h6').css('color', '#007bff');
+    
+    $('#vcp-search-method-card').removeClass('selected').css({
+        'border': '2px solid #dee2e6'
+    });
+    $('#vcp-search-method-card').find('i').css('color', '#6c757d');
+    $('#vcp-search-method-card').find('h6').css('color', '#6c757d');
+    
+    // Show/hide sections
+    $('#vcp-audience-section').show();
+    $('#vcp-search-section').hide();
+    
+    // Clear error messages
+    $('#vcp-error-notice').html('');
+});
+
+$('#vcp-search-method-card').click(function(){
+    console.log('👁️ View Connections: Search method selected');
+    
+    // Update visual styles
+    $(this).addClass('selected').css({
+        'border': '2px solid #007bff'
+    });
+    $(this).find('i').css('color', '#007bff');
+    $(this).find('h6').css('color', '#007bff');
+    
+    $('#vcp-audience-method-card').removeClass('selected').css({
+        'border': '2px solid #dee2e6'
+    });
+    $('#vcp-audience-method-card').find('i').css('color', '#6c757d');
+    $('#vcp-audience-method-card').find('h6').css('color', '#6c757d');
+    
+    // Show/hide sections
+    $('#vcp-audience-section').hide();
+    $('#vcp-search-section').show();
+    
+    // Clear error messages
+    $('#vcp-error-notice').html('');
+});
+
+// Clear error when audience is selected
+$('#vcp-audience-select').change(function(){
+    if($(this).val() && $(this).val() !== '') {
+        $('#vcp-error-notice').html('');
+    }
+});
+
 $('body').on('click','#view-connection-menu-click',function(){
     implementPermission('viewConnetionsAction')
     $('#vcp-connSecondCheck').prop('checked', true);
     let fieldId = 'vcp-audience-select';
     getAudienceList(fieldId)
+    
+    // Reset to audience method by default
+    $('#vcp-audience-method-card').click();
+    
     $('#viewConnectionsForm').modal({backdrop:'static', keyboard:false, show:true})
 })
