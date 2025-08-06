@@ -311,10 +311,10 @@ var connectionInfoForm = `
                     </div>
                 </div>
                 </div> <!-- End of gci-search-section -->
+                
+                <!-- Common Parameters (completely independent) -->
+                <div id="gci-common-parameters" style="padding: 20px; border-top: 1px solid #dee2e6; background-color: #f8f9fa; position: relative; z-index: 1;">
             </div> <!-- End of modal-body content -->
-            
-            <!-- Common Parameters (completely independent) -->
-            <div id="gci-common-parameters" style="padding: 20px; border-top: 1px solid #dee2e6; background-color: #f8f9fa;">
                 <div class="row">
                     <div class="col-md-12">
                         <h6 class="font-weight-bold" style="color:black; border-bottom: 1px solid #dee2e6; padding-bottom: 8px;">
@@ -363,6 +363,14 @@ var connectionInfoForm = `
                         <span id="gci-error-notice" style="color:red"></span>
                     </div>
                 </div>
+                
+                <!-- Footer buttons moved inside gci-common-parameters -->
+                <div class="row mt-3" style="border-top: 1px solid #dee2e6; padding-top: 15px; margin-top: 20px;">
+                    <div class="col-md-12 text-right">
+                        <button type="button" class="btn btn-primary btn-lg shadow-none connectionInfoAction" onclick="console.log('🔍 Get Connections Info: Button clicked')" style="background-color: #007bff; border-color: #007bff;">Get</button>
+                        <button type="button" class="btn btn-outline-secondary btn-lg shadow-none" data-dismiss="modal" style="background-color: white; border-color: #6c757d; color: #6c757d;">Close</button>
+                    </div>
+                </div>
             </div>
                 <!-- div class="custom-control custom-checkbox custom-control-inline mb-2">
                     <input type="checkbox" class="custom-control-input shadow-none" id="gci-company-data">
@@ -376,10 +384,6 @@ var connectionInfoForm = `
                     </label>
                 </div -->
 
-            </div>
-            <div class="modal-footer" style="background-color: white; border-top: 1px solid #dee2e6; border-bottom-left-radius: 10px; border-bottom-right-radius: 10px; position: relative; z-index: 1000;">
-                <button type="button" class="btn btn-primary btn-lg shadow-none connectionInfoAction" onclick="console.log('🔍 Get Connections Info: Button clicked')" style="background-color: #007bff; border-color: #007bff;">Get</button>
-                <button type="button" class="btn btn-outline-secondary btn-lg shadow-none" data-dismiss="modal" style="background-color: white; border-color: #6c757d; color: #6c757d;">Close</button>
             </div>
 
         </div>
