@@ -2,11 +2,12 @@ $('.anniversaryGreetingAction').click(function(){
     $('#displayAnniversaryGreetingsStatus').empty()
     var angDelay = $('#ang-delayTime'),
         angMessage = $('#ang-personalMessage'),
+        angPeriod = $('#ang-period'),
         angTotal = 20,
         angStartP = 0;
-    var angControlFields = [angDelay,angMessage];
+    var angControlFields = [angDelay,angMessage,angPeriod];
 
-    if(angDelay.val() =='' || angMessage.val() ==''){
+    if(angDelay.val() =='' || angMessage.val() =='' || angPeriod.val() == ''){
         for(var i=0;i<angControlFields.length;i++){
             if(angControlFields[i].val() == ''){
                 $('#ang-error-notice').html(`${angControlFields[i].data('name')} field cannot be empty`)
@@ -18,11 +19,11 @@ $('.anniversaryGreetingAction').click(function(){
         $('#ang-error-notice').html(``)
 
         $(this).attr('disabled', true)
-        angGetWorkAnniversary(angMessage.val(), angTotal, angStartP, angDelay.val())
+        angGetWorkAnniversary(angMessage.val(), angTotal, angStartP, angDelay.val(), parseInt(angPeriod.val()), 0)
     }
 })
 
-const angGetWorkAnniversary = async (angMessage, angTotal, angStartP, angDelay) => {
+const angGetWorkAnniversary = async (angMessage, angTotal, angStartP, angDelay, angPeriod, angPagesScanned=0) => {
     var segmentUrn = encodeURIComponent('urn:li:fsd_notificationSegment:NEW')
     var params = `decorationId=com.linkedin.voyager.dash.deco.identity.notifications.CardsCollection-59&count=${angTotal}&q=notifications&segmentUrn=${segmentUrn}&start=${angStartP}`;
 
@@ -38,7 +39,7 @@ const angGetWorkAnniversary = async (angMessage, angTotal, angStartP, angDelay) 
         url: `${voyagerApi}/voyagerIdentityDashNotificationCards?${params}`,
         success: function(data){
             var res = {'data': data};
-            angCleanConnectionsData(res, angMessage, angDelay)
+            angCleanConnectionsData(res, angMessage, angDelay, angPeriod, angTotal, angStartP, angPagesScanned)
         },
         error: function(error){
             console.log(error)
@@ -48,7 +49,7 @@ const angGetWorkAnniversary = async (angMessage, angTotal, angStartP, angDelay) 
 
 }
 
-const angCleanConnectionsData = (res, angMessage, angDelay) => {
+const angCleanConnectionsData = (res, angMessage, angDelay, angPeriod, angTotal, angStartP, angPagesScanned) => {
     var connectionResponse = res['data'].elements;
     var connectionIds = [];
     let getAngStore = JSON.parse(localStorage.getItem('lkm-ang'));
@@ -56,13 +57,26 @@ const angCleanConnectionsData = (res, angMessage, angDelay) => {
     if($('#ang-delayTime').val()) {
         getAngStore.delay = parseInt($('#ang-delayTime').val())
     }
+    if($('#ang-period').val()) {
+        getAngStore.period = parseInt($('#ang-period').val())
+    }
     localStorage.setItem('lkm-ang', JSON.stringify(getAngStore))
 
     if(connectionResponse.length > 0){
         $.each(connectionResponse, function(i, item){
             var itemHeadline = item.headline.text.toLowerCase();
+            var includeByPeriod = true;
+            try {
+                if(item.publishedAt){
+                    var now = new Date();
+                    var published = new Date(item.publishedAt);
+                    var diffTime = Math.abs(now - published);
+                    var diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                    includeByPeriod = diffDays > angPeriod;
+                }
+            } catch(e) { includeByPeriod = true; }
 
-            if(itemHeadline.includes('congratulate') && itemHeadline.includes('year')){
+            if(includeByPeriod && itemHeadline.includes('congratulate') && itemHeadline.includes('year')){
                 var headLineArr = itemHeadline.split(" ")
                 for(var i=0; i<headLineArr.length; i++){
                     if(headLineArr[i] == 'year' || headLineArr[i] == 'years'){
@@ -89,10 +103,15 @@ const angCleanConnectionsData = (res, angMessage, angDelay) => {
         if(connectionIds.length > 0){
             angGetUsersProfiles(connectionIds, angMessage, angDelay);
         }else{
-            $('.anniversaryGreetings-notice').show()
-            $('#displayAnniversaryGreetingsStatus').empty()
-            $('#displayAnniversaryGreetingsStatus').html('No anniversary found!')
-            $('.anniversaryGreetingAction').attr('disabled', false)
+            // paginate to search older notifications up to a safe limit
+            if(angPagesScanned < 5){
+                angGetWorkAnniversary(angMessage, angTotal, angStartP + angTotal, angDelay, angPeriod, angPagesScanned + 1)
+            }else{
+                $('.anniversaryGreetings-notice').show()
+                $('#displayAnniversaryGreetingsStatus').empty()
+                $('#displayAnniversaryGreetingsStatus').html('No anniversary found! Try increasing days or come back later.')
+                $('.anniversaryGreetingAction').attr('disabled', false)
+            }
         }
     }else{
         $('.anniversaryGreetings-notice').show()

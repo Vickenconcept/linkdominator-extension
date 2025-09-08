@@ -17,7 +17,7 @@ var withdrawInviteForm = `
                 </div>
                 <div class="form-group">
                     <label for="wsi-period" class="font-weight-bold" style="color:black;">Withdraw invitation older than (Days)</label>
-                    <input type="number" class="form-control shadow-none" id="wsi-period" data-name="Withdraw invitation" placeholder="Enter number of days. Ex: 30">
+                    <input type="number" class="form-control shadow-none" id="wsi-period" data-name="Withdraw invitation" placeholder="Enter number of days. Ex: 10">
                 </div>
                 <div class="row mt-2">
                     <div class="col-lg-4 col-sm-4">

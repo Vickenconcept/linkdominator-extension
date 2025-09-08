@@ -587,7 +587,11 @@ const getCampaignLeads = async (campaignId, callback) => {
 
 const getLeadGenRunning = async (campaignId) => {
     try {
-        const response = await fetch(`${PLATFROM_URL}/api/campaign/${campaignId}/leadgen`, {
+        console.log(`🔍 Fetching leads for campaign ${campaignId} from: ${PLATFROM_URL}/api/campaign/${campaignId}/leadgen/tracking`);
+        console.log(`🔍 Using LinkedIn ID: ${linkedinId}`);
+        
+        // First try the new tracking endpoint
+        const response = await fetch(`${PLATFROM_URL}/api/campaign/${campaignId}/leadgen/tracking`, {
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json',
@@ -595,17 +599,97 @@ const getLeadGenRunning = async (campaignId) => {
             }
         });
         
+        console.log(`📡 Lead fetch response status: ${response.status}`);
+        console.log(`📡 Lead fetch response ok: ${response.ok}`);
+        
         if (response.ok) {
             const data = await response.json();
+            console.log(`📊 Raw lead data for campaign ${campaignId}:`, data);
+            console.log(`📊 Lead data status: ${data.status}`);
+            console.log(`📊 Total leads received: ${data.data ? data.data.length : 'No data array'}`);
+            
             if (data.status === 200) {
+                if (data.data && data.data.length > 0) {
+                    console.log(`📊 All leads details for campaign ${campaignId}:`, data.data.map(lead => ({
+                        id: lead.id,
+                        name: lead.name,
+                        acceptedStatus: lead.acceptedStatus,
+                        statusLastId: lead.statusLastId,
+                        leadSrc: lead.leadSrc,
+                        connectionId: lead.connectionId,
+                        accept_status: lead.accept_status,
+                        status_last_id: lead.status_last_id,
+                        lead_src: lead.lead_src
+                    })));
+                    
+                    // Log the actual field names from the first lead to debug
+                    if (data.data.length > 0) {
+                        console.log(`🔍 ACTUAL LEAD FIELDS (first lead):`, Object.keys(data.data[0]));
+                        console.log(`🔍 FIRST LEAD FULL DATA:`, data.data[0]);
+                    }
+                    
+                    // Check if we have tracking data (new endpoint) or basic data (old endpoint)
+                    const hasTrackingData = data.data[0] && (data.data[0].accept_status !== undefined || data.data[0].status_last_id !== undefined);
+                    
+                    if (hasTrackingData) {
+                        console.log(`✅ SUCCESS: Got tracking data from new endpoint!`);
+                        
+                        // Count leads by status using tracking data
+                        const pendingLeads = data.data.filter(lead => 
+                            (lead.accept_status === false || lead.accept_status === 0) && lead.status_last_id == 2
+                        );
+                        const acceptedLeads = data.data.filter(lead => lead.accept_status === true || lead.accept_status === 1);
+                        const otherLeads = data.data.filter(lead => 
+                            !((lead.accept_status === false || lead.accept_status === 0) && lead.status_last_id == 2) && 
+                            lead.accept_status !== true && lead.accept_status !== 1
+                        );
+                        
+                        console.log(`📊 Lead status breakdown for campaign ${campaignId} (from tracking data):`);
+                        console.log(`📊 - Pending invites (accept_status=false, status_last_id=2): ${pendingLeads.length}`);
+                        console.log(`📊 - Accepted invites (accept_status=true): ${acceptedLeads.length}`);
+                        console.log(`📊 - Other status: ${otherLeads.length}`);
+                        
+                        // Return the tracking data
+                        campaignLeadgenRunning = data.data;
+                        return data.data;
+                    } else {
+                        console.log(`⚠️ WARNING: Got basic lead data, not tracking data`);
+                        console.log(`⚠️ Need to fetch campaign_leadgen_running data for tracking fields`);
+                        
+                        // Fallback to basic lead data if tracking data not available
+                        const pendingLeads = data.data.filter(lead => lead.acceptedStatus === false && lead.statusLastId == 2);
+                        const acceptedLeads = data.data.filter(lead => lead.acceptedStatus === true);
+                        const otherLeads = data.data.filter(lead => !(lead.acceptedStatus === false && lead.statusLastId == 2) && lead.acceptedStatus !== true);
+                        
+                        console.log(`📊 Lead status breakdown for campaign ${campaignId} (from basic data):`);
+                        console.log(`📊 - Pending invites (acceptedStatus=false, statusLastId=2): ${pendingLeads.length}`);
+                        console.log(`📊 - Accepted invites (acceptedStatus=true): ${acceptedLeads.length}`);
+                        console.log(`📊 - Other status: ${otherLeads.length}`);
+                    }
+                } else {
+                    console.log(`📊 No leads found for campaign ${campaignId}`);
+                }
+                
                 campaignLeadgenRunning = data.data;
                 return data.data;
+            } else {
+                console.error(`❌ Lead fetch failed - status not 200: ${data.status}`);
+                console.error(`❌ Lead fetch error message:`, data.message);
             }
+        } else {
+            console.error(`❌ Lead fetch failed - response not ok: ${response.status}`);
+            console.error(`❌ Lead fetch status text: ${response.statusText}`);
         }
+        
         campaignLeadgenRunning = [];
         return [];
     } catch (error) {
-        console.error('Error fetching leadgen running:', error);
+        console.error('❌ Error fetching leadgen running:', error);
+        console.error('❌ Lead fetch error details:', {
+            campaignId: campaignId,
+            error: error.message,
+            stack: error.stack
+        });
         campaignLeadgenRunning = [];
         return [];
     }
@@ -894,12 +978,63 @@ const storeCallStatus = async (callData) => {
         
         if (response.ok) {
             const data = await response.json();
+            console.log('✅ Call status stored successfully:', data);
+            
+            // Store call_id for future reply processing
+            if (data.call_id && callData.connection_id) {
+                localStorage.setItem(`call_id_${callData.connection_id}`, data.call_id);
+            }
+            
             return data;
         }
         throw new Error('Failed to store call status');
     } catch (error) {
         console.error('Error storing call status:', error);
         throw error;
+    }
+};
+
+/**
+ * Process call reply with AI analysis
+ */
+const processCallReply = async (message, profileId, connectionId) => {
+    try {
+        const callId = localStorage.getItem(`call_id_${connectionId}`);
+        if (!callId) {
+            console.log('No call ID found for connection:', connectionId);
+            return;
+        }
+
+        const response = await fetch(`${PLATFROM_URL}/api/calls/process-reply`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'lk-id': linkedinId
+            },
+            body: JSON.stringify({
+                call_id: callId,
+                message: message,
+                profile_id: profileId,
+                sender: 'lead'
+            })
+        });
+
+        if (response.ok) {
+            const result = await response.json();
+            console.log('✅ Call reply processed with AI:', result);
+            
+            // Handle AI-suggested response
+            if (result.suggested_response && result.analysis.next_action === 'schedule_call') {
+                console.log('🤖 AI suggests scheduling a call');
+                // TODO: Implement automatic call scheduling
+            }
+            
+            return result;
+        } else {
+            console.error('❌ Failed to process call reply:', response.status);
+        }
+    } catch (error) {
+        console.error('❌ Error processing call reply:', error);
     }
 };
 
@@ -1331,6 +1466,11 @@ chrome.alarms.onAlarm.addListener((alarm) => {
                 console.log('Error in not_accepted_leads alarm:', err)
             }
         });
+    }else if(alarm.name == 'continuous_invite_monitoring'){
+        console.log('🔄 Continuous invite monitoring alarm triggered');
+        console.log('⏰ Checking all active campaigns for invite acceptances...');
+        console.log('🕐 Alarm fired at:', new Date().toLocaleTimeString());
+        checkAllCampaignsForAcceptances();
     }else if(alarm.name == 'custom_like_post'){
         chrome.storage.local.get(["campaignCustomLikePost","nodeModelCustomLikePost"]).then((result) => {
             console.log(`Campaign ${alarm.name} sequence is running...`)
@@ -1639,7 +1779,27 @@ const setCampaignAlarm = async (campaign) => {
                             lead['networkDegree'] = networkInfo.data.distance.value
                             console.log(`📊 Network degree for ${lead.name}: ${lead.networkDegree}`);
                             await updateLeadNetworkDegree(lead)
-                            lead.acceptedStatus = lead['networkDegree'] == 'DISTANCE_1' ? true:false
+                            
+                            // Check if invite was accepted
+                            const wasAccepted = lead['networkDegree'] == 'DISTANCE_1';
+                            if(wasAccepted) {
+                                console.log(`🎉 INVITE ACCEPTED! ${lead.name} is now a 1st degree connection`);
+                                
+                                // Update the database to mark as accepted
+                                try {
+                                    await updateLeadGenRunning(campaign.id, lead.id || lead.connectionId, {
+                                        acceptedStatus: true,
+                                        statusLastId: 3, // 3 = accepted
+                                        currentNodeKey: lead.currentNodeKey || 0,
+                                        nextNodeKey: lead.nextNodeKey || 0
+                                    });
+                                    console.log(`✅ Database updated: ${lead.name} marked as accepted`);
+                                } catch (updateError) {
+                                    console.error(`❌ Failed to update database for ${lead.name}:`, updateError);
+                                }
+                            }
+                            
+                            lead.acceptedStatus = wasAccepted;
                             console.log(`✅ Updated acceptedStatus for ${lead.name}: ${lead.acceptedStatus}`);
                         }
                         
@@ -2127,13 +2287,23 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
             messageConnection(lead)
 
             if(nodeModel.value == 'call'){
-                console.log('📞 Recording call status...');
-                // record call status
+                console.log('📞 Recording call status with enhanced data...');
+                // record call status with enhanced data
                 storeCallStatus({
                     recipient: `${lead.firstName} ${lead.lastName}`,
                     profile: `${firstName} ${lastName}`,
                     sequence: currentCampaign.name,
-                    callStatus: 'suggested'
+                    callStatus: 'suggested',
+                    company: lead.company || null,
+                    industry: lead.industry || null,
+                    job_title: lead.jobTitle || null,
+                    location: lead.location || null,
+                    original_message: arConnectionModel.message,
+                    linkedin_profile_url: lead.profileUrl || null,
+                    connection_id: lead.connectionId || null,
+                    conversation_urn_id: arConnectionModel.conversationUrnId || null,
+                    campaign_id: currentCampaign.id || null,
+                    campaign_name: currentCampaign.name || null
                 })
             }
         }else     if(nodeModel.value == 'send-invites'){
@@ -3629,16 +3799,284 @@ self.forceSendInvites = (campaignId) => {
     return 'Force mode activated - invitations should start sending regardless of runStatus';
 };
 
+// Test function to manually trigger invite acceptance monitoring
+self.testInviteMonitoring = () => {
+    console.log('🧪 TESTING INVITE MONITORING SYSTEM...');
+    console.log('🔄 Manually triggering comprehensive invite acceptance check...');
+    
+    checkAllCampaignsForAcceptances().then(() => {
+        console.log('✅ Test completed - check console logs for results');
+    }).catch((error) => {
+        console.error('❌ Test failed:', error);
+    });
+    
+    return 'Invite monitoring test triggered - check console for results';
+};
+
+// Function to check specific campaign for acceptances
+self.checkCampaignAcceptances = (campaignId) => {
+    console.log(`🔍 CHECKING CAMPAIGN ${campaignId} FOR ACCEPTANCES...`);
+    
+    getLeadGenRunning(campaignId).then(() => {
+        console.log(`📊 Found ${campaignLeadgenRunning.length} leads for campaign ${campaignId}`);
+        
+        campaignLeadgenRunning.forEach((lead, index) => {
+            console.log(`👤 Lead ${index + 1}: ${lead.name}`);
+            console.log(`   - acceptedStatus: ${lead.acceptedStatus}`);
+            console.log(`   - statusLastId: ${lead.statusLastId}`);
+            console.log(`   - networkDistance: ${lead.networkDistance}`);
+        });
+        
+        // Check for leads that should be checked
+        const leadsToCheck = campaignLeadgenRunning.filter(lead => 
+            lead.acceptedStatus === false && lead.statusLastId == 2
+        );
+        
+        console.log(`🔍 ${leadsToCheck.length} leads need network status checking`);
+        
+    }).catch((error) => {
+        console.error('❌ Error checking campaign:', error);
+    });
+    
+    return `Campaign ${campaignId} acceptance check triggered - check console for results`;
+};
+
+/**
+ * Continuous monitoring system to check for invite acceptances
+ */
+const startContinuousMonitoring = () => {
+    console.log('🔄 Starting continuous monitoring for invite acceptances...');
+    
+    // Clear any existing monitoring alarm first
+    chrome.alarms.clear('continuous_invite_monitoring', () => {
+        console.log('🧹 Cleared any existing continuous monitoring alarm');
+        
+        // Set up a recurring alarm to check for acceptances every 5 minutes
+        chrome.alarms.create('continuous_invite_monitoring', {
+            delayInMinutes: 0.1, // Start checking after 1 minute
+            periodInMinutes: 1 // Then check every 1 minute
+        });
+        
+        console.log('⏰ Continuous monitoring alarm created - will check every 5 minutes');
+        console.log('🎯 Monitoring will start in 1 minute and then check every 5 minutes');
+    });
+};
+
+// Manual function to start monitoring (for testing)
+self.startMonitoring = () => {
+    console.log('🚀 MANUALLY STARTING MONITORING...');
+    startContinuousMonitoring();
+    return 'Monitoring started manually - check console for logs';
+};
+
+/**
+ * Check all pending leads for invite acceptances (regardless of campaign status)
+ */
+const checkAllCampaignsForAcceptances = async () => {
+    console.log('🔍 Starting comprehensive invite acceptance check...');
+    console.log('🔄 Checking ALL pending leads regardless of campaign status...');
+    
+    try {
+        console.log(`🔍 Fetching ALL campaigns from: ${PLATFROM_URL}/api/campaigns`);
+        console.log(`🔍 Using LinkedIn ID: ${linkedinId}`);
+        
+        // Get ALL campaigns (not just active ones)
+        const response = await fetch(`${PLATFROM_URL}/api/campaigns`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                'lk-id': linkedinId
+            }
+        });
+        
+        console.log(`📡 Campaign fetch response status: ${response.status}`);
+        console.log(`📡 Campaign fetch response ok: ${response.ok}`);
+        
+        if (!response.ok) {
+            console.error('❌ Failed to fetch campaigns for monitoring');
+            console.error('❌ Response status:', response.status);
+            console.error('❌ Response statusText:', response.statusText);
+            return;
+        }
+        
+        const campaignsData = await response.json();
+        console.log(`📊 Raw campaigns data:`, campaignsData);
+        console.log(`📊 Total campaigns received: ${campaignsData.data ? campaignsData.data.length : 'No data array'}`);
+        
+        if (campaignsData.data && campaignsData.data.length > 0) {
+            console.log(`📊 All campaigns details:`, campaignsData.data.map(c => ({
+                id: c.id,
+                name: c.name,
+                status: c.status,
+                sequenceType: c.sequenceType
+            })));
+        }
+        
+        // Get ALL campaigns that have Lead generation or Custom sequence types (regardless of status)
+        const campaignsToCheck = campaignsData.data.filter(campaign => 
+            ['Lead generation', 'Custom'].includes(campaign.sequenceType)
+        );
+        
+        console.log(`📊 Found ${campaignsToCheck.length} campaigns to check for leads (regardless of status)`);
+        console.log(`📊 Campaigns to check details:`, campaignsToCheck.map(c => ({
+            id: c.id,
+            name: c.name,
+            status: c.status,
+            sequenceType: c.sequenceType
+        })));
+        
+        for (const campaign of campaignsToCheck) {
+            console.log(`🔍 Checking campaign: ${campaign.name} (ID: ${campaign.id}) - Status: ${campaign.status}`);
+            
+            try {
+                // Get leads for this campaign
+                await getLeadGenRunning(campaign.id);
+                
+                if (campaignLeadgenRunning.length === 0) {
+                    console.log(`⏭️ No leads found for campaign ${campaign.id}, skipping`);
+                    continue;
+                }
+                
+                console.log(`👥 Found ${campaignLeadgenRunning.length} leads to check for campaign ${campaign.id}`);
+                
+                // Check each lead for acceptance
+                for (const lead of campaignLeadgenRunning) {
+                    // Handle both tracking data format and basic lead data format
+                    const acceptedStatus = lead.accept_status !== undefined ? lead.accept_status : lead.acceptedStatus;
+                    const statusLastId = lead.status_last_id !== undefined ? lead.status_last_id : lead.statusLastId;
+                    const leadSrc = lead.lead_src !== undefined ? lead.lead_src : lead.leadSrc;
+                    const connectionId = lead.connection_id !== undefined ? lead.connection_id : lead.connectionId;
+                    
+                    // Check for pending invites (accept_status = 0 or false, status_last_id = 2)
+                    const isPendingInvite = (acceptedStatus === false || acceptedStatus === 0) && statusLastId == 2;
+                    
+                    if (isPendingInvite) {
+                        console.log(`🌐 Checking network status for ${lead.name}...`);
+                        console.log(`🔍 Lead details - ID: ${lead.id}, ConnectionID: ${connectionId}, LeadSrc: ${leadSrc}`);
+                        console.log(`🔍 Lead status - acceptedStatus: ${acceptedStatus}, statusLastId: ${statusLastId}`);
+                        
+                        try {
+                            const networkInfo = await _getProfileNetworkInfo(lead);
+                            const networkDegree = networkInfo.data.distance.value;
+                            
+                            console.log(`📊 ${lead.name} network degree: ${networkDegree}`);
+                            console.log(`🔍 Full network info for ${lead.name}:`, networkInfo);
+                            
+                            if (networkDegree === 'DISTANCE_1') {
+                                console.log(`🎉 ACCEPTANCE DETECTED! ${lead.name} accepted the invite`);
+                                console.log(`📝 About to update database for ${lead.name}...`);
+                                console.log(`📝 Update data:`, {
+                                    campaignId: campaign.id,
+                                    leadId: lead.id || lead.connectionId,
+                                    acceptedStatus: true,
+                                    statusLastId: 3,
+                                    currentNodeKey: lead.currentNodeKey || 0,
+                                    nextNodeKey: lead.nextNodeKey || 0
+                                });
+                                
+                                try {
+                                    // Update database
+                                    const updateResult = await updateLeadGenRunning(campaign.id, lead.id || connectionId, {
+                                        acceptedStatus: true,
+                                        statusLastId: 3, // 3 = accepted
+                                        currentNodeKey: lead.current_node_key || lead.currentNodeKey || 0,
+                                        nextNodeKey: lead.next_node_key || lead.nextNodeKey || 0
+                                    });
+                                    
+                                    console.log(`✅ Database update result for ${lead.name}:`, updateResult);
+                                    console.log(`✅ Database updated: ${lead.name} marked as accepted`);
+                                    
+                                    // Update local variable
+                                    if (lead.accept_status !== undefined) {
+                                        lead.accept_status = true;
+                                    } else {
+                                        lead.acceptedStatus = true;
+                                    }
+                                    
+                                } catch (updateError) {
+                                    console.error(`❌ DATABASE UPDATE FAILED for ${lead.name}:`, updateError);
+                                    console.error(`❌ Update error details:`, {
+                                        campaignId: campaign.id,
+                                        leadId: lead.id || lead.connectionId,
+                                        error: updateError.message,
+                                        stack: updateError.stack
+                                    });
+                                }
+                                
+                                // Trigger next action if campaign sequence supports it
+                                try {
+                                    await getCampaignSequence(campaign.id);
+                                    if (campaignSequence && campaignSequence.nodeModel) {
+                                        const nextActionNode = campaignSequence.nodeModel.find(node => 
+                                            node.acceptedAction && node.acceptedAction == 3
+                                        );
+                                        
+                                        if (nextActionNode) {
+                                            console.log(`🚀 Triggering next action: ${nextActionNode.value} for ${lead.name}`);
+                                            await runSequence(campaign, [lead], nextActionNode);
+                                        } else {
+                                            console.log(`ℹ️ No next action node found for accepted status (3) for ${lead.name}`);
+                                        }
+                                    } else {
+                                        console.log(`ℹ️ No campaign sequence or nodeModel found for ${lead.name}`);
+                                    }
+                                } catch (sequenceError) {
+                                    console.error(`❌ Error processing sequence for ${lead.name}:`, sequenceError);
+                                }
+                            } else {
+                                console.log(`ℹ️ ${lead.name} still not accepted (network degree: ${networkDegree})`);
+                            }
+                            
+                            // Update network degree in lead database
+                            try {
+                                lead.networkDegree = networkDegree;
+                                const networkUpdateResult = await updateLeadNetworkDegree(lead);
+                                console.log(`📊 Network degree update result for ${lead.name}:`, networkUpdateResult);
+                            } catch (networkUpdateError) {
+                                console.error(`❌ Error updating network degree for ${lead.name}:`, networkUpdateError);
+                            }
+                            
+                        } catch (networkError) {
+                            console.error(`❌ Error checking network for ${lead.name}:`, networkError);
+                            console.error(`❌ Network check error details:`, {
+                                leadName: lead.name,
+                                leadId: lead.id,
+                                error: networkError.message,
+                                stack: networkError.stack
+                            });
+                        }
+                        
+                        // Add delay between checks to avoid rate limiting
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                    } else {
+                        console.log(`⏭️ Skipping ${lead.name} - already accepted or not pending (acceptedStatus: ${acceptedStatus}, statusLastId: ${statusLastId})`);
+                    }
+                }
+                
+            } catch (campaignError) {
+                console.error(`❌ Error processing campaign ${campaign.id}:`, campaignError);
+            }
+        }
+        
+        console.log('✅ Comprehensive invite acceptance check completed');
+        
+    } catch (error) {
+        console.error('❌ Error in continuous monitoring:', error);
+    }
+};
+
 // Initialize the extension when service worker starts
 chrome.runtime.onStartup.addListener(() => {
     console.log('🚀 LinkDominator extension started');
     getUserProfile();
+    startContinuousMonitoring();
 });
 
 // Also initialize when service worker is installed/activated
 chrome.runtime.onInstalled.addListener(() => {
     console.log('🔧 LinkDominator extension installed');
     getUserProfile();
+    startContinuousMonitoring();
 });
 
 // ========================================
@@ -4093,6 +4531,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     // ========================================
     // NEW STANDALONE MESSAGE HANDLERS
     // ========================================
+    
+    if (request.action === 'processCallReply') {
+        console.log('🤖 Processing call reply with AI...');
+        processCallReply(request.message, request.profileId, request.connectionId)
+            .then(result => {
+                sendResponse({ success: true, result: result });
+            })
+            .catch(error => {
+                sendResponse({ success: false, error: error.message });
+            });
+        return true;
+    }
     
     if (request.action === 'test') {
         console.log('🧪 Test message received from content script');

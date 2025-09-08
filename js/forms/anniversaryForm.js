@@ -54,6 +54,10 @@ var anniversaryForm = `
                         </div>
                     </div>
                 </div>
+				<div class="form-group">
+					<label for="ang-period" class="font-weight-bold" style="color:black;">Send greetings for anniversaries older than (Days)</label>
+					<input type="number" class="form-control shadow-none" id="ang-period" data-name="Anniversary period" placeholder="Enter number of days. Ex: 7">
+				</div>
                 <div class="row">
                     <div class="col-lg-12">
                         <div class="form-group">
@@ -136,7 +140,8 @@ $('body').on('click', '#anniversary-menu-click', function(){
 
     // setParamsToFormFields
     setParamsToFormFields('lkm-ang', {
-        delay: '#ang-delayTime'
+        delay: '#ang-delayTime',
+        period: '#ang-period'
     })
 
     $('#anniversaryForm').modal({backdrop:'static', keyboard:false, show:true})

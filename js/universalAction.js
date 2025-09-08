@@ -610,6 +610,9 @@ const setParamsToFormFields = (lkmModule, formFields) => {
         $(formFields.waitdays).val(getStore.waitdays)
     }
     $(formFields.delay).val(getStore.delay)
+    if(formFields.period && typeof getStore.period !== 'undefined') {
+        $(formFields.period).val(getStore.period)
+    }
 }
 
 /**
