@@ -105,7 +105,10 @@ const handleConnectionInviteRequest = async (data) => {
                     const connectSelectors = [
                         'button[aria-label*="Connect"]',
                         'button[aria-label*="connect"]',
+                        'button[aria-label*="Invite"]',
+                        'button[aria-label*="invite"]',
                         '.artdeco-button[aria-label*="Connect"]',
+                        '.artdeco-button[aria-label*="Invite"]',
                         '[data-control-name="connect"]',
                         '.pv-s-profile-actions--connect',
                         '.pv-s-profile-actions button'
@@ -120,14 +123,94 @@ const handleConnectionInviteRequest = async (data) => {
                         }
                     }
                     
-                    // Fallback: look for any button with "Connect" text
+                    // Fallback: look for any button with "Connect" or "Invite" text
                     if (!connectButton) {
                         const allButtons = document.querySelectorAll('button');
                         for (const button of allButtons) {
-                            if (button.textContent.toLowerCase().includes('connect') && button.offsetParent !== null) {
+                            const buttonText = button.textContent.toLowerCase();
+                            if ((buttonText.includes('connect') || buttonText.includes('invite')) && button.offsetParent !== null) {
                                 connectButton = button;
-                                console.log('✅ Found Connect button by text content');
+                                console.log('✅ Found Connect/Invite button by text content');
                                 break;
+                            }
+                        }
+                    }
+                    
+                    // Fallback: Check "More" dropdown for Connect button
+                    if (!connectButton) {
+                        console.log('🔍 Checking "More" dropdown for Connect button...');
+                        const moreButton = document.querySelector('button[aria-label*="More actions"], button[aria-label*="More"], .artdeco-dropdown__trigger');
+                        console.log('🔍 More button search result:', moreButton);
+                        if (moreButton) {
+                            console.log('✅ Found "More" button, details:', {
+                                text: moreButton.textContent,
+                                ariaLabel: moreButton.getAttribute('aria-label'),
+                                className: moreButton.className,
+                                id: moreButton.id,
+                                visible: moreButton.offsetParent !== null
+                            });
+                            console.log('🖱️ Clicking "More" button to open dropdown...');
+                            moreButton.click();
+                            console.log('✅ "More" button clicked, waiting for dropdown to open...');
+                            await delay(1000); // Wait for dropdown to open
+                            
+                            // Look for Connect button in dropdown
+                            console.log('🔍 Searching for Connect button in dropdown...');
+                            const dropdownConnectSelectors = [
+                                'button[aria-label*="Connect"]',
+                                'button[aria-label*="connect"]',
+                                'button[aria-label*="Invite"]',
+                                'button[aria-label*="invite"]',
+                                '.artdeco-dropdown__content button[aria-label*="Connect"]',
+                                '.artdeco-dropdown__content button[aria-label*="connect"]',
+                                '.artdeco-dropdown__content button[aria-label*="Invite"]',
+                                '.artdeco-dropdown__content button[aria-label*="invite"]',
+                                '.artdeco-dropdown__item[aria-label*="Connect"]',
+                                '.artdeco-dropdown__item[aria-label*="connect"]',
+                                '.artdeco-dropdown__item[aria-label*="Invite"]',
+                                '.artdeco-dropdown__item[aria-label*="invite"]',
+                                '[aria-label*="Invite"][aria-label*="connect"]',
+                                '[role="button"][aria-label*="Connect"]',
+                                '[role="button"][aria-label*="Invite"]'
+                            ];
+                            
+                            for (const selector of dropdownConnectSelectors) {
+                                connectButton = document.querySelector(selector);
+                                console.log(`🔍 Checking selector "${selector}":`, connectButton);
+                                if (connectButton && connectButton.offsetParent !== null) {
+                                    console.log(`✅ Found Connect button in dropdown with selector: ${selector}`);
+                                    console.log('🔍 Connect button details:', {
+                                        text: connectButton.textContent,
+                                        ariaLabel: connectButton.getAttribute('aria-label'),
+                                        className: connectButton.className,
+                                        id: connectButton.id,
+                                        visible: connectButton.offsetParent !== null
+                                    });
+                                    break;
+                                }
+                            }
+                            
+                            // Also check by text content in dropdown
+                            if (!connectButton) {
+                                console.log('🔍 Searching dropdown by text content...');
+                                const dropdownButtons = document.querySelectorAll('.artdeco-dropdown__content button, .artdeco-dropdown__content [role="menuitem"], .artdeco-dropdown__item, [role="button"]');
+                                console.log(`🔍 Found ${dropdownButtons.length} dropdown buttons to check`);
+                                for (const button of dropdownButtons) {
+                                    console.log(`🔍 Checking button: "${button.textContent.trim()}" (aria-label: "${button.getAttribute('aria-label')}")`);
+                                    const buttonText = button.textContent.toLowerCase();
+                                    if ((buttonText.includes('connect') || buttonText.includes('invite')) && button.offsetParent !== null) {
+                                        connectButton = button;
+                                        console.log('✅ Found Connect/Invite button in dropdown by text content');
+                                        console.log('🔍 Connect button details:', {
+                                            text: connectButton.textContent,
+                                            ariaLabel: connectButton.getAttribute('aria-label'),
+                                            className: connectButton.className,
+                                            id: connectButton.id,
+                                            visible: connectButton.offsetParent !== null
+                                        });
+                                        break;
+                                    }
+                                }
                             }
                         }
                     }
@@ -284,6 +367,12 @@ const handleConnectionInviteRequest = async (data) => {
             args: [customMessage]
         });
         
+        // Get the result from the injected script immediately after execution
+        const automationResult = result[0]?.result;
+        console.log('📊 Automation result:', automationResult);
+        console.log('🚨 CRITICAL: Full result object:', result);
+        console.log('🚨 CRITICAL: Result length:', result.length);
+        
         // Step 4: Wait for automation to complete and get results
         console.log('🔄 Step 4: Waiting for automation to complete...');
         await new Promise(resolve => setTimeout(resolve, 5000)); // Give time for automation to complete
@@ -296,10 +385,6 @@ const handleConnectionInviteRequest = async (data) => {
         } catch (tabError) {
             console.log('⚠️ Could not close tab (may have been closed already):', tabError.message);
         }
-        
-        // Get the result from the injected script
-        const automationResult = result[0]?.result;
-        console.log('📊 Automation result:', automationResult);
         
         if (automationResult && automationResult.success) {
             console.log(`✅ INVITATION SUCCESSFULLY SENT to ${profileName}`);
@@ -587,8 +672,6 @@ const getCampaignLeads = async (campaignId, callback) => {
 
 const getLeadGenRunning = async (campaignId) => {
     try {
-        console.log(`🔍 Fetching leads for campaign ${campaignId} from: ${PLATFROM_URL}/api/campaign/${campaignId}/leadgen/tracking`);
-        console.log(`🔍 Using LinkedIn ID: ${linkedinId}`);
         
         // First try the new tracking endpoint
         const response = await fetch(`${PLATFROM_URL}/api/campaign/${campaignId}/leadgen/tracking`, {
@@ -599,41 +682,17 @@ const getLeadGenRunning = async (campaignId) => {
             }
         });
         
-        console.log(`📡 Lead fetch response status: ${response.status}`);
-        console.log(`📡 Lead fetch response ok: ${response.ok}`);
         
         if (response.ok) {
             const data = await response.json();
-            console.log(`📊 Raw lead data for campaign ${campaignId}:`, data);
-            console.log(`📊 Lead data status: ${data.status}`);
-            console.log(`📊 Total leads received: ${data.data ? data.data.length : 'No data array'}`);
             
             if (data.status === 200) {
                 if (data.data && data.data.length > 0) {
-                    console.log(`📊 All leads details for campaign ${campaignId}:`, data.data.map(lead => ({
-                        id: lead.id,
-                        name: lead.name,
-                        acceptedStatus: lead.acceptedStatus,
-                        statusLastId: lead.statusLastId,
-                        leadSrc: lead.leadSrc,
-                        connectionId: lead.connectionId,
-                        accept_status: lead.accept_status,
-                        status_last_id: lead.status_last_id,
-                        lead_src: lead.lead_src
-                    })));
-                    
-                    // Log the actual field names from the first lead to debug
-                    if (data.data.length > 0) {
-                        console.log(`🔍 ACTUAL LEAD FIELDS (first lead):`, Object.keys(data.data[0]));
-                        console.log(`🔍 FIRST LEAD FULL DATA:`, data.data[0]);
-                    }
                     
                     // Check if we have tracking data (new endpoint) or basic data (old endpoint)
                     const hasTrackingData = data.data[0] && (data.data[0].accept_status !== undefined || data.data[0].status_last_id !== undefined);
                     
                     if (hasTrackingData) {
-                        console.log(`✅ SUCCESS: Got tracking data from new endpoint!`);
-                        
                         // Count leads by status using tracking data
                         const pendingLeads = data.data.filter(lead => 
                             (lead.accept_status === false || lead.accept_status === 0) && lead.status_last_id == 2
@@ -644,52 +703,25 @@ const getLeadGenRunning = async (campaignId) => {
                             lead.accept_status !== true && lead.accept_status !== 1
                         );
                         
-                        console.log(`📊 Lead status breakdown for campaign ${campaignId} (from tracking data):`);
-                        console.log(`📊 - Pending invites (accept_status=false, status_last_id=2): ${pendingLeads.length}`);
-                        console.log(`📊 - Accepted invites (accept_status=true): ${acceptedLeads.length}`);
-                        console.log(`📊 - Other status: ${otherLeads.length}`);
-                        
                         // Return the tracking data
                         campaignLeadgenRunning = data.data;
                         return data.data;
                     } else {
-                        console.log(`⚠️ WARNING: Got basic lead data, not tracking data`);
-                        console.log(`⚠️ Need to fetch campaign_leadgen_running data for tracking fields`);
-                        
                         // Fallback to basic lead data if tracking data not available
                         const pendingLeads = data.data.filter(lead => lead.acceptedStatus === false && lead.statusLastId == 2);
                         const acceptedLeads = data.data.filter(lead => lead.acceptedStatus === true);
                         const otherLeads = data.data.filter(lead => !(lead.acceptedStatus === false && lead.statusLastId == 2) && lead.acceptedStatus !== true);
-                        
-                        console.log(`📊 Lead status breakdown for campaign ${campaignId} (from basic data):`);
-                        console.log(`📊 - Pending invites (acceptedStatus=false, statusLastId=2): ${pendingLeads.length}`);
-                        console.log(`📊 - Accepted invites (acceptedStatus=true): ${acceptedLeads.length}`);
-                        console.log(`📊 - Other status: ${otherLeads.length}`);
                     }
-                } else {
-                    console.log(`📊 No leads found for campaign ${campaignId}`);
                 }
                 
                 campaignLeadgenRunning = data.data;
                 return data.data;
-            } else {
-                console.error(`❌ Lead fetch failed - status not 200: ${data.status}`);
-                console.error(`❌ Lead fetch error message:`, data.message);
             }
-        } else {
-            console.error(`❌ Lead fetch failed - response not ok: ${response.status}`);
-            console.error(`❌ Lead fetch status text: ${response.statusText}`);
         }
         
         campaignLeadgenRunning = [];
         return [];
     } catch (error) {
-        console.error('❌ Error fetching leadgen running:', error);
-        console.error('❌ Lead fetch error details:', {
-            campaignId: campaignId,
-            error: error.message,
-            stack: error.stack
-        });
         campaignLeadgenRunning = [];
         return [];
     }
@@ -1467,9 +1499,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
             }
         });
     }else if(alarm.name == 'continuous_invite_monitoring'){
-        console.log('🔄 Continuous invite monitoring alarm triggered');
-        console.log('⏰ Checking all active campaigns for invite acceptances...');
-        console.log('🕐 Alarm fired at:', new Date().toLocaleTimeString());
+        // console.log('🔄 Continuous invite monitoring alarm triggered');
+        // console.log('⏰ Checking all active campaigns for invite acceptances...');
+        // console.log('🕐 Alarm fired at:', new Date().toLocaleTimeString());
         checkAllCampaignsForAcceptances();
     }else if(alarm.name == 'custom_like_post'){
         chrome.storage.local.get(["campaignCustomLikePost","nodeModelCustomLikePost"]).then((result) => {
@@ -2343,7 +2375,22 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
             console.log(`   - !nodeModel.runStatus: ${!nodeModel.runStatus} (runStatus is ${nodeModel.runStatus})`);
             console.log(`   - Combined condition: ${lead.networkDistance != 1 && !nodeModel.runStatus}`);
             
-            if(lead.networkDistance != 1 && !nodeModel.runStatus){
+            // Get current LinkedIn network status before making invite decision
+            console.log(`🌐 Checking current LinkedIn network status for ${lead.name}...`);
+            let currentNetworkDistance = lead.networkDistance; // fallback to database value
+            
+            try {
+                const networkInfo = await _getProfileNetworkInfo(lead);
+                currentNetworkDistance = parseInt(networkInfo.data.distance.value.split('_')[1]);
+                console.log(`📊 Current LinkedIn network distance for ${lead.name}: ${currentNetworkDistance}`);
+                
+                // Update the lead object with current network distance
+                lead.networkDistance = currentNetworkDistance;
+            } catch (error) {
+                console.log(`⚠️ Could not get current network status for ${lead.name}, using database value: ${currentNetworkDistance}`);
+            }
+            
+            if(currentNetworkDistance != 1 && !nodeModel.runStatus){
                 console.log('✅ CONDITIONS MET: Sending connection invite to:', lead.name);
                 console.log('🚀 About to call _sendConnectionInvite...');
                 try {
@@ -2355,21 +2402,21 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                 }
             } else {
                 console.log('❌ CONDITIONS NOT MET - Skipping invite:');
-                if (lead.networkDistance == 1) {
-                    console.log('   ⏭️ Reason: Already connected (network distance is 1)');
+                if (currentNetworkDistance == 1) {
+                    console.log('   ⏭️ Reason: Already connected (current network distance is 1)');
                 } else if (nodeModel.runStatus) {
                     console.log('   ⏭️ Reason: Node already marked as completed (runStatus is true)');
                 } else {
                     console.log('   ⏭️ Reason: Unknown condition failure');
-                    console.log(`   🔍 networkDistance: ${lead.networkDistance} (expected != 1)`);
+                    console.log(`   🔍 currentNetworkDistance: ${currentNetworkDistance} (expected != 1)`);
                     console.log(`   🔍 runStatus: ${nodeModel.runStatus} (expected false)`);
                 }
             }
         }
         console.log(`✅ Finished processing lead ${i+1}/${leads.length}`);
-        console.log(`⏱️ Waiting 30 seconds before next lead...`);
-        await delay(30000)
-        console.log(`✅ 30-second delay completed`);
+        console.log(`⏱️ Waiting 20 seconds before next lead...`);
+        await delay(20000)
+        console.log(`✅ 20-second delay completed`);
     }
     
     if(nodeModel.value == 'send-invites'){
@@ -2918,10 +2965,12 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
             
             // Step 3: Inject automation script to handle the invite process
             console.log('🔄 Step 3: Injecting automation script...');
-            await chrome.scripting.executeScript({
+            const result = await chrome.scripting.executeScript({
                 target: { tabId: tab.id },
                 function: async (customMessage) => {
                     console.log('🤖 LinkedIn Invite Automation script injected');
+                    console.log('🔍 Script execution started - checking page elements...');
+                    console.log('🚨 CRITICAL: Script function is executing!');
                     
                     // Function to wait for element
                     const waitForElement = (selector, timeout = 10000) => {
@@ -2948,6 +2997,7 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
                     
                     try {
                         console.log('🔍 Step 4: Checking connection status...');
+                        console.log('🚨 TEST: Script is executing the try block!');
                         
                         // Check if already connected
                         const connectedElements = document.querySelectorAll('[aria-label*="Connected"], [aria-label*="connected"]');
@@ -2964,37 +3014,154 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
                         }
                         
                         console.log('🔍 Step 5: Looking for Connect button...');
+                        console.log('🔍 Page URL:', window.location.href);
+                        console.log('🔍 Page title:', document.title);
+                        console.log('🚨 TEST: Reached button detection section!');
+                        console.log('🚨 DEBUG: About to check for direct Connect buttons...');
                         
-                        // Find Connect button
+                        // Find Connect button - ONLY within the main profile div
+                        const mainProfileDiv = document.querySelector('.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk');
+                        console.log('🔍 Main profile div found:', mainProfileDiv);
+                        
+                        if (!mainProfileDiv) {
+                            console.log('❌ Main profile div not found - cannot proceed safely');
+                            return { success: false, error: 'Main profile container not found' };
+                        }
+                        
                         const connectSelectors = [
-                            'button[aria-label*="Connect"]',
-                            'button[aria-label*="connect"]',
-                            '.artdeco-button[aria-label*="Connect"]',
-                            '[data-control-name="connect"]',
-                            '.pv-s-profile-actions--connect',
-                            '.pv-s-profile-actions button'
+                            '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk button[aria-label*="Connect"]',
+                            '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk button[aria-label*="connect"]',
+                            '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk button[aria-label*="Invite"]',
+                            '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk button[aria-label*="invite"]',
+                            '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .artdeco-button[aria-label*="Connect"]',
+                            '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .artdeco-button[aria-label*="Invite"]',
+                            '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk [data-control-name="connect"]',
+                            '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .pv-s-profile-actions--connect',
+                            '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .pv-s-profile-actions button'
                         ];
+                        
+                        console.log('🔍 Checking for direct Connect buttons within main profile div...');
+                        
+                        // Log all buttons within the main profile div for debugging
+                        const profileButtons = mainProfileDiv.querySelectorAll('button');
+                        console.log(`🔍 Found ${profileButtons.length} buttons within main profile div:`);
+                        profileButtons.forEach((btn, index) => {
+                            if (index < 10) { // Only log first 10 buttons to avoid spam
+                                console.log(`  Button ${index + 1}: "${btn.textContent.trim()}" (aria-label: "${btn.getAttribute('aria-label')}")`);
+                            }
+                        });
                         
                         let connectButton = null;
                         for (const selector of connectSelectors) {
                             connectButton = document.querySelector(selector);
+                            console.log(`🔍 Checking selector "${selector}":`, connectButton);
                             if (connectButton && connectButton.offsetParent !== null) {
                                 console.log(`✅ Found Connect button with selector: ${selector}`);
                                 break;
                             }
                         }
                         
-                        // Fallback: look for any button with "Connect" text
+                        console.log('🚨 DEBUG: Direct Connect button search completed. Found:', connectButton);
+                        
+                        // Fallback: look for any button with "Connect" or "Invite" text within main profile div
                         if (!connectButton) {
-                            const allButtons = document.querySelectorAll('button');
-                            for (const button of allButtons) {
-                                if (button.textContent.toLowerCase().includes('connect') && button.offsetParent !== null) {
+                            console.log('🚨 DEBUG: No direct Connect button found, checking by text content within main profile div...');
+                            const profileButtons = mainProfileDiv.querySelectorAll('button');
+                            for (const button of profileButtons) {
+                                const buttonText = button.textContent.toLowerCase();
+                                if ((buttonText.includes('connect') || buttonText.includes('invite')) && button.offsetParent !== null) {
                                     connectButton = button;
-                                    console.log('✅ Found Connect button by text content');
+                                    console.log('✅ Found Connect/Invite button by text content within main profile div');
                                     break;
                                 }
                             }
                         }
+                        
+                        console.log('🚨 DEBUG: Text content search completed. Found:', connectButton);
+                        
+                        // Fallback: Check "More" dropdown for Connect button within main profile div
+                        if (!connectButton) {
+                            console.log('🚨 DEBUG: No Connect button found by text, checking More dropdown within main profile div...');
+                            console.log('🔍 Checking "More" dropdown for Connect button...');
+                            const moreButton = mainProfileDiv.querySelector('button[aria-label*="More actions"], button[aria-label*="More"], .artdeco-dropdown__trigger');
+                            console.log('🔍 More button search result:', moreButton);
+                            if (moreButton) {
+                                console.log('✅ Found "More" button, details:', {
+                                    text: moreButton.textContent,
+                                    ariaLabel: moreButton.getAttribute('aria-label'),
+                                    className: moreButton.className,
+                                    id: moreButton.id,
+                                    visible: moreButton.offsetParent !== null
+                                });
+                                console.log('🖱️ Clicking "More" button to open dropdown...');
+                                moreButton.click();
+                                console.log('✅ "More" button clicked, waiting for dropdown to open...');
+                                await delay(1000); // Wait for dropdown to open
+                                
+                                // Look for Connect button in dropdown within main profile div
+                                console.log('🔍 Searching for Connect button in dropdown within main profile div...');
+                                const dropdownConnectSelectors = [
+                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk button[aria-label*="Connect"]',
+                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk button[aria-label*="connect"]',
+                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk button[aria-label*="Invite"]',
+                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk button[aria-label*="invite"]',
+                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .artdeco-dropdown__content button[aria-label*="Connect"]',
+                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .artdeco-dropdown__content button[aria-label*="connect"]',
+                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .artdeco-dropdown__content button[aria-label*="Invite"]',
+                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .artdeco-dropdown__content button[aria-label*="invite"]',
+                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .artdeco-dropdown__item[aria-label*="Connect"]',
+                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .artdeco-dropdown__item[aria-label*="connect"]',
+                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .artdeco-dropdown__item[aria-label*="Invite"]',
+                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .artdeco-dropdown__item[aria-label*="invite"]',
+                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk [aria-label*="Invite"][aria-label*="connect"]',
+                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk [role="button"][aria-label*="Connect"]',
+                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk [role="button"][aria-label*="Invite"]'
+                                ];
+                                
+                                for (const selector of dropdownConnectSelectors) {
+                                    connectButton = document.querySelector(selector);
+                                    console.log(`🔍 Checking selector "${selector}":`, connectButton);
+                                    if (connectButton && connectButton.offsetParent !== null) {
+                                        console.log(`✅ Found Connect button in dropdown with selector: ${selector}`);
+                                        console.log('🔍 Connect button details:', {
+                                            text: connectButton.textContent,
+                                            ariaLabel: connectButton.getAttribute('aria-label'),
+                                            className: connectButton.className,
+                                            id: connectButton.id,
+                                            visible: connectButton.offsetParent !== null
+                                        });
+                                        break;
+                                    }
+                                }
+                                
+                                // Also check by text content in dropdown within main profile div
+                                if (!connectButton) {
+                                    console.log('🔍 Searching dropdown by text content within main profile div...');
+                                    const dropdownButtons = mainProfileDiv.querySelectorAll('.artdeco-dropdown__content button, .artdeco-dropdown__content [role="menuitem"], .artdeco-dropdown__item, [role="button"]');
+                                    console.log(`🔍 Found ${dropdownButtons.length} dropdown buttons to check within main profile div`);
+                                    for (const button of dropdownButtons) {
+                                        console.log(`🔍 Checking button: "${button.textContent.trim()}" (aria-label: "${button.getAttribute('aria-label')}")`);
+                                        const buttonText = button.textContent.toLowerCase();
+                                        if ((buttonText.includes('connect') || buttonText.includes('invite')) && button.offsetParent !== null) {
+                                            connectButton = button;
+                                            console.log('✅ Found Connect/Invite button in dropdown by text content within main profile div');
+                                            console.log('🔍 Connect button details:', {
+                                                text: connectButton.textContent,
+                                                ariaLabel: connectButton.getAttribute('aria-label'),
+                                                className: connectButton.className,
+                                                id: connectButton.id,
+                                                visible: connectButton.offsetParent !== null
+                                            });
+                                            break;
+                                        }
+                                    }
+                                }
+                            } else {
+                                console.log('🚨 DEBUG: More button not found!');
+                            }
+                        }
+                        
+                        console.log('🚨 DEBUG: Final Connect button check. Found:', connectButton);
                         
                         if (!connectButton) {
                             console.log('❌ Connect button not found');
@@ -3072,9 +3239,11 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
                         }
                         
                         console.log('✅ Invite sent (no explicit confirmation found)');
+                        console.log('🚨 TEST: Script completed successfully!');
                         return { success: true };
                         
                     } catch (error) {
+                        console.log('🚨 TEST: Script caught an error!');
                         console.error('❌ Error in automation:', error.message);
                         return { success: false, error: error.message };
                     }
@@ -3091,7 +3260,6 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
             await chrome.tabs.remove(tab.id);
             console.log('✅ Tab closed');
             
-            // For now, assume success (in real implementation, we'd get the actual result)
             console.log(`✅ INVITATION SUCCESSFULLY SENT to ${lead.name} (${lead.connectionId})`);
             console.log(`🎯 Browser automation - Invitation sent successfully`);
             console.log(`📝 Message: ${newMessage || 'Default connection message'}`);
@@ -3423,11 +3591,9 @@ const _getProfileContactInfo = async (lead) => {
 }
 
 const _updateCampaignLeadsNetwork = async () => {
-    console.log('🔄 Starting _updateCampaignLeadsNetwork function...');
     let campaigns = [], clist = [], leads = []
 
     // Get campaigns
-    console.log('📋 Fetching campaigns...');
     await fetch(`${PLATFROM_URL}/api/campaigns`, {
         method: 'get',
         headers: {
@@ -3438,106 +3604,62 @@ const _updateCampaignLeadsNetwork = async () => {
     .then(res => {
         if(res.status == 200){
             campaigns = res.data
-            console.log(`📊 Found ${campaigns.length} campaigns`);
         }
     })
 
     // Get leads
     if(campaigns.length){
-        console.log('🔍 Processing campaigns for leads...');
         for(let campaign of campaigns){
-            console.log(`📈 Processing campaign ${campaign.id} with status: ${campaign.status}`);
             if(['active','running'].includes(campaign.status)){
-                console.log(`✅ Campaign ${campaign.id} is active/running`);
                 for(let list of campaign.campaignList){
                     clist.push(list)
                 }
 
                 try {
-                    console.log(`👥 Fetching leads for campaign ${campaign.id}...`);
                     await getCampaignLeads(campaign.id, (data) => {
                         if(data.length) {
-                            console.log(`📝 Found ${data.length} leads for campaign ${campaign.id}`);
                             for(let lead of data){
                                 leads.push(lead)
                             }
-                        } else {
-                            console.log(`❌ No leads found for campaign ${campaign.id}`);
                         }
                     })
                 } catch (err) {
-                    console.error(`❌ Error fetching leads for campaign ${campaign.id}:`, err)
+                    // Error fetching leads
                 }
-            } else {
-                console.log(`⏸️ Campaign ${campaign.id} is not active (status: ${campaign.status})`);
             }
         }
-
-        console.log(`📊 Total leads collected: ${leads.length}`);
 
         // Remove duplicates
         const uniqueLeads = leads.filter((o, index, arr) => 
             arr.findIndex(item => item.connectionId === o.connectionId) === index
         )
-        console.log(`🔄 After removing duplicates: ${uniqueLeads.length} unique leads`);
 
-        console.log('🔄 Starting to process leads...');
         for(let i = 0; i < uniqueLeads.length; i++){
             let lead = uniqueLeads[i];
-            console.log(`👤 Processing lead ${i+1}/${uniqueLeads.length}: ${lead.connectionId}`);
             
             if(lead.networkDistance != 1){
-                console.log(`🌐 Lead ${lead.connectionId} has network distance: ${lead.networkDistance}, updating...`);
                 try {
                     let networkInfo = await _getProfileNetworkInfo(lead)
-                    console.log(`✅ Got network info for lead ${lead.connectionId}`);
-
-                    // update network distance on crm platform
                     lead.networkDegree = networkInfo.data.distance.value
-                    console.log(`📊 Updating lead ${lead.connectionId} with network degree: ${lead.networkDegree}`);
                     await updateLeadNetworkDegree(lead)
-                    console.log(`✅ Successfully updated lead ${lead.connectionId}`);
                 } catch (error) {
-                    console.error(`❌ Error while trying to get profile network for lead ${lead.connectionId}:`, error.message)
+                    // Error updating network
                 }
-            } else {
-                console.log(`⏭️ Skipping lead ${lead.connectionId} - already has network distance 1`);
             }
 
-            console.log(`⏱️ Waiting 30 seconds before processing next lead...`);
-            await delay(30000)
-            console.log(`✅ 30-second delay completed, moving to next lead...`);
+            await delay(20000)
         }
-        
-        console.log('🎉 Finished processing all leads in _updateCampaignLeadsNetwork');
         
         // After network updates are complete, trigger campaign execution for running campaigns
-        console.log('🚀 Checking for running campaigns to execute...');
-        console.log('📊 All campaigns found:', campaigns.map(c => ({id: c.id, name: c.name, status: c.status})));
-        
-        let runningCampaignsFound = false;
         for(let campaign of campaigns){
             if(['active','running'].includes(campaign.status)){
-                runningCampaignsFound = true;
-                console.log(`🎯 Triggering campaign execution for campaign ${campaign.id}: ${campaign.name}`);
                 try {
                     await setCampaignAlarm(campaign);
-                    console.log(`✅ Campaign ${campaign.id} execution triggered successfully`);
                 } catch (error) {
-                    console.error(`❌ Error triggering campaign ${campaign.id} execution:`, error);
+                    // Error triggering campaign
                 }
             }
         }
-        
-        if (!runningCampaignsFound) {
-            console.log('⏸️ No running campaigns found. All campaigns are stopped:');
-            campaigns.forEach(campaign => {
-                console.log(`   - Campaign ${campaign.id}: ${campaign.name} (Status: ${campaign.status})`);
-            });
-            console.log('💡 To start a campaign, change its status to "running" or "active" in your dashboard.');
-        }
-    } else {
-        console.log('❌ No campaigns found to process');
     }
 }
 
@@ -3873,13 +3995,7 @@ self.startMonitoring = () => {
  * Check all pending leads for invite acceptances (regardless of campaign status)
  */
 const checkAllCampaignsForAcceptances = async () => {
-    console.log('🔍 Starting comprehensive invite acceptance check...');
-    console.log('🔄 Checking ALL pending leads regardless of campaign status...');
-    
     try {
-        console.log(`🔍 Fetching ALL campaigns from: ${PLATFROM_URL}/api/campaigns`);
-        console.log(`🔍 Using LinkedIn ID: ${linkedinId}`);
-        
         // Get ALL campaigns (not just active ones)
         const response = await fetch(`${PLATFROM_URL}/api/campaigns`, {
             method: 'GET',
@@ -3889,55 +4005,25 @@ const checkAllCampaignsForAcceptances = async () => {
             }
         });
         
-        console.log(`📡 Campaign fetch response status: ${response.status}`);
-        console.log(`📡 Campaign fetch response ok: ${response.ok}`);
-        
         if (!response.ok) {
-            console.error('❌ Failed to fetch campaigns for monitoring');
-            console.error('❌ Response status:', response.status);
-            console.error('❌ Response statusText:', response.statusText);
             return;
         }
         
         const campaignsData = await response.json();
-        console.log(`📊 Raw campaigns data:`, campaignsData);
-        console.log(`📊 Total campaigns received: ${campaignsData.data ? campaignsData.data.length : 'No data array'}`);
-        
-        if (campaignsData.data && campaignsData.data.length > 0) {
-            console.log(`📊 All campaigns details:`, campaignsData.data.map(c => ({
-                id: c.id,
-                name: c.name,
-                status: c.status,
-                sequenceType: c.sequenceType
-            })));
-        }
         
         // Get ALL campaigns that have Lead generation or Custom sequence types (regardless of status)
         const campaignsToCheck = campaignsData.data.filter(campaign => 
             ['Lead generation', 'Custom'].includes(campaign.sequenceType)
         );
         
-        console.log(`📊 Found ${campaignsToCheck.length} campaigns to check for leads (regardless of status)`);
-        console.log(`📊 Campaigns to check details:`, campaignsToCheck.map(c => ({
-            id: c.id,
-            name: c.name,
-            status: c.status,
-            sequenceType: c.sequenceType
-        })));
-        
         for (const campaign of campaignsToCheck) {
-            console.log(`🔍 Checking campaign: ${campaign.name} (ID: ${campaign.id}) - Status: ${campaign.status}`);
-            
             try {
                 // Get leads for this campaign
                 await getLeadGenRunning(campaign.id);
                 
                 if (campaignLeadgenRunning.length === 0) {
-                    console.log(`⏭️ No leads found for campaign ${campaign.id}, skipping`);
                     continue;
                 }
-                
-                console.log(`👥 Found ${campaignLeadgenRunning.length} leads to check for campaign ${campaign.id}`);
                 
                 // Check each lead for acceptance
                 for (const lead of campaignLeadgenRunning) {
@@ -3951,28 +4037,12 @@ const checkAllCampaignsForAcceptances = async () => {
                     const isPendingInvite = (acceptedStatus === false || acceptedStatus === 0) && statusLastId == 2;
                     
                     if (isPendingInvite) {
-                        console.log(`🌐 Checking network status for ${lead.name}...`);
-                        console.log(`🔍 Lead details - ID: ${lead.id}, ConnectionID: ${connectionId}, LeadSrc: ${leadSrc}`);
-                        console.log(`🔍 Lead status - acceptedStatus: ${acceptedStatus}, statusLastId: ${statusLastId}`);
-                        
                         try {
                             const networkInfo = await _getProfileNetworkInfo(lead);
                             const networkDegree = networkInfo.data.distance.value;
                             
-                            console.log(`📊 ${lead.name} network degree: ${networkDegree}`);
-                            console.log(`🔍 Full network info for ${lead.name}:`, networkInfo);
-                            
                             if (networkDegree === 'DISTANCE_1') {
-                                console.log(`🎉 ACCEPTANCE DETECTED! ${lead.name} accepted the invite`);
-                                console.log(`📝 About to update database for ${lead.name}...`);
-                                console.log(`📝 Update data:`, {
-                                    campaignId: campaign.id,
-                                    leadId: lead.id || lead.connectionId,
-                                    acceptedStatus: true,
-                                    statusLastId: 3,
-                                    currentNodeKey: lead.currentNodeKey || 0,
-                                    nextNodeKey: lead.nextNodeKey || 0
-                                });
+                                console.log(`🎉 INVITE ACCEPTED! ${lead.name || 'Unknown'} is now 1st degree connection!`);
                                 
                                 try {
                                     // Update database
@@ -3983,9 +4053,6 @@ const checkAllCampaignsForAcceptances = async () => {
                                         nextNodeKey: lead.next_node_key || lead.nextNodeKey || 0
                                     });
                                     
-                                    console.log(`✅ Database update result for ${lead.name}:`, updateResult);
-                                    console.log(`✅ Database updated: ${lead.name} marked as accepted`);
-                                    
                                     // Update local variable
                                     if (lead.accept_status !== undefined) {
                                         lead.accept_status = true;
@@ -3994,13 +4061,7 @@ const checkAllCampaignsForAcceptances = async () => {
                                     }
                                     
                                 } catch (updateError) {
-                                    console.error(`❌ DATABASE UPDATE FAILED for ${lead.name}:`, updateError);
-                                    console.error(`❌ Update error details:`, {
-                                        campaignId: campaign.id,
-                                        leadId: lead.id || lead.connectionId,
-                                        error: updateError.message,
-                                        stack: updateError.stack
-                                    });
+                                    console.error(`❌ Backend update failed for ${lead.name || 'Unknown'}:`, updateError);
                                 }
                                 
                                 // Trigger next action if campaign sequence supports it
@@ -4012,56 +4073,38 @@ const checkAllCampaignsForAcceptances = async () => {
                                         );
                                         
                                         if (nextActionNode) {
-                                            console.log(`🚀 Triggering next action: ${nextActionNode.value} for ${lead.name}`);
                                             await runSequence(campaign, [lead], nextActionNode);
-                                        } else {
-                                            console.log(`ℹ️ No next action node found for accepted status (3) for ${lead.name}`);
                                         }
-                                    } else {
-                                        console.log(`ℹ️ No campaign sequence or nodeModel found for ${lead.name}`);
                                     }
                                 } catch (sequenceError) {
-                                    console.error(`❌ Error processing sequence for ${lead.name}:`, sequenceError);
+                                    // Error processing sequence
                                 }
-                            } else {
-                                console.log(`ℹ️ ${lead.name} still not accepted (network degree: ${networkDegree})`);
                             }
                             
                             // Update network degree in lead database
                             try {
                                 lead.networkDegree = networkDegree;
                                 const networkUpdateResult = await updateLeadNetworkDegree(lead);
-                                console.log(`📊 Network degree update result for ${lead.name}:`, networkUpdateResult);
                             } catch (networkUpdateError) {
-                                console.error(`❌ Error updating network degree for ${lead.name}:`, networkUpdateError);
+                                // Error updating network degree
                             }
                             
                         } catch (networkError) {
-                            console.error(`❌ Error checking network for ${lead.name}:`, networkError);
-                            console.error(`❌ Network check error details:`, {
-                                leadName: lead.name,
-                                leadId: lead.id,
-                                error: networkError.message,
-                                stack: networkError.stack
-                            });
+                            // Error checking network
                         }
                         
                         // Add delay between checks to avoid rate limiting
                         await new Promise(resolve => setTimeout(resolve, 2000));
-                    } else {
-                        console.log(`⏭️ Skipping ${lead.name} - already accepted or not pending (acceptedStatus: ${acceptedStatus}, statusLastId: ${statusLastId})`);
                     }
                 }
                 
             } catch (campaignError) {
-                console.error(`❌ Error processing campaign ${campaign.id}:`, campaignError);
+                // Error processing campaign
             }
         }
         
-        console.log('✅ Comprehensive invite acceptance check completed');
-        
     } catch (error) {
-        console.error('❌ Error in continuous monitoring:', error);
+        // Error in continuous monitoring
     }
 };
 
@@ -4716,3 +4759,4 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
     return true;
 });
+
