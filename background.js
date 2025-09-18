@@ -1849,11 +1849,25 @@ const setCampaignAlarm = async (campaign) => {
                     // Clear the force flag
                     chrome.storage.local.remove('forceSendInvites');
                     
-                    // Force run send-invites
-                    nodeModelArr[0].runStatus = false; // Temporarily override
-                    nodeItem = nodeModelArr[0];
-                    delayInMinutes = 0.10;
-                    console.log('✅ Send-invites forced to run - proceeding to alarm creation');
+                    // Check if there's a next node available before forcing send-invites
+                    const nextNode = nodeModelArr.find(node => 
+                        node.value !== 'send-invites' && !node.runStatus
+                    );
+                    
+                    if (nextNode) {
+                        console.log(`🔄 Force mode detected, but next node available: ${nextNode.label} (${nextNode.value})`);
+                        console.log('⏭️ Skipping force send-invites, advancing to next node instead');
+                        nodeItem = nextNode;
+                        delayInMinutes = 0.10;
+                        console.log('✅ Next node set up instead of forcing send-invites');
+                    } else {
+                        // Force run send-invites only if no next node available
+                        console.log('🔧 DEBUG: Force mode - resetting send-invites to false (no next node)');
+                        nodeModelArr[0].runStatus = false; // Temporarily override
+                        nodeItem = nodeModelArr[0];
+                        delayInMinutes = 0.10;
+                        console.log('✅ Send-invites forced to run - proceeding to alarm creation');
+                    }
                     // Don't return here, let it continue to alarm creation
                 } else {
                     // Normal diagnostic flow
@@ -2089,24 +2103,46 @@ const setCampaignAlarm = async (campaign) => {
                         }
                     }
                 } else {
-                    console.log('❌ No leads found in campaign leadgen running table!');
-                    console.log('🔍 This means either:');
-                    console.log('   1. No invites were actually sent successfully');
-                    console.log('   2. createLeadGenRunning was not called after sending invites');
-                    console.log('   3. There was an error in the invite sending process');
-                    console.log('');
-                    console.log('💡 SOLUTION: Reset the send-invites node to run again');
-                    console.log('   - The send-invites node will be reset to runStatus: false');
-                    console.log('   - This will allow invites to be sent again');
-                    
-                    // Reset the send-invites node to try again
-                    nodeModelArr[0].runStatus = false;
-                    await updateSequenceNodeModel(campaign, nodeModelArr[0]);
-                    
-                    // Now set up the send-invites node to run
-                    nodeItem = nodeModelArr[0];
-                    delayInMinutes = 0.10;
-                    console.log('🔄 Reset send-invites node and scheduling it to run again');
+                    // Check if the send-invites node is already completed
+                    if (nodeModelArr[0].runStatus === true) {
+                        console.log('✅ Send-invites node is already completed, checking for next node...');
+                        
+                        // Find the next node after send-invites
+                        const nextNode = nodeModelArr.find(node => 
+                            node.value !== 'send-invites' && !node.runStatus
+                        );
+                        
+                        if (nextNode) {
+                            console.log(`🔄 Found next node: ${nextNode.label} (${nextNode.value})`);
+                            nodeItem = nextNode;
+                            delayInMinutes = 0.10;
+                            console.log('⏰ Setting up next node execution...');
+                        } else {
+                            console.log('❌ No next node found, campaign completed');
+                            return; // Exit without setting up alarm
+                        }
+                    } else {
+                        console.log('❌ No leads found in campaign leadgen running table!');
+                        console.log('🔍 This means either:');
+                        console.log('   1. No invites were actually sent successfully');
+                        console.log('   2. createLeadGenRunning was not called after sending invites');
+                        console.log('   3. There was an error in the invite sending process');
+                        console.log('');
+                        console.log('💡 SOLUTION: Reset the send-invites node to run again');
+                        console.log('   - The send-invites node will be reset to runStatus: false');
+                        console.log('   - This will allow invites to be sent again');
+                        
+                        // Reset the send-invites node to try again
+                        console.log('🔧 DEBUG: Resetting send-invites node to false (no leads found)');
+                        nodeModelArr[0].runStatus = false;
+                        await updateSequenceNodeModel(campaign, nodeModelArr[0]);
+                        console.log('🔧 DEBUG: Send-invites node reset to false completed');
+                        
+                        // Now set up the send-invites node to run
+                        nodeItem = nodeModelArr[0];
+                        delayInMinutes = 0.10;
+                        console.log('🔄 Reset send-invites node and scheduling it to run again');
+                    }
                 }
             }
         }else if(nodeModelArr[0].value == 'like-post'){
@@ -2558,6 +2594,9 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
         console.log(`✅ 20-second delay completed`);
     }
     
+    console.log('🔧 DEBUG: Finished processing all leads, checking for completion logic...');
+    console.log(`🔧 DEBUG: Current nodeModel.value: ${nodeModel.value}`);
+    
     // Handle completion logic after processing all leads
     if(nodeModel.value == 'send-invites'){
         // 🎯 COMPLETION LOGIC: After sending invites, check for next node
@@ -2565,11 +2604,16 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
         
         // Mark the send-invites node as completed
         try {
+            console.log('🔧 DEBUG: About to mark send-invites node as completed...');
             await updateSequenceNodeModel(currentCampaign, {
                 ...nodeModel,
                 runStatus: true
             });
             console.log('✅ Send-invites node marked as completed');
+            
+            // Add a small delay to prevent race conditions
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            console.log('⏱️ DEBUG: 1-second delay completed after marking node as done');
         } catch (error) {
             console.error('❌ Failed to mark send-invites node as completed:', error.message);
         }
@@ -2640,6 +2684,10 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
         } catch (error) {
             console.error('❌ Failed to check for next node:', error);
         }
+        
+        // Return early to prevent further processing that might reset the node
+        console.log('🔧 DEBUG: Returning early after send-invites completion logic');
+        return;
     }
     
     console.log('🔄 Updating sequence node model...');
