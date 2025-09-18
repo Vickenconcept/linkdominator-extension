@@ -2743,11 +2743,12 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                                     console.log('📝 Message content:', aiMessage);
                                     
                                     // Wait for LinkedIn to fully establish the connection
-                                    console.log('⏳ Waiting 10 seconds for LinkedIn connection to be fully established...');
-                                    await new Promise(resolve => setTimeout(resolve, 10000));
+                                    console.log('⏳ Waiting 30 seconds for LinkedIn connection to be fully established...');
+                                    await new Promise(resolve => setTimeout(resolve, 30000));
                                     
                                     // Send the message using the existing messageConnection function
-                                    await messageConnection({ uploads: [] });
+                                    console.log('🚀 Calling messageConnection function...');
+                                    messageConnection({ uploads: [] });
                                     console.log('✅ AI-generated message sent successfully to LinkedIn!');
                                 } catch (sendErr) {
                                     console.error('❌ Failed to send AI message to LinkedIn:', sendErr);
@@ -3105,7 +3106,7 @@ const getUserProfile = () => {
  * Send message to a given LinkedIn profile
  * @param {object} scheduleInfo 
  */
-const messageConnection = async (scheduleInfo) => {
+const messageConnection = scheduleInfo => {
     console.log('📤 messageConnection called - starting LinkedIn message send...');
     console.log('📝 Message to send:', arConnectionModel.message);
     console.log('👤 Connection details:', {
@@ -3147,94 +3148,50 @@ const messageConnection = async (scheduleInfo) => {
         console.log('📧 Creating new conversation for:', arConnectionModel.connectionId);
     }
 
-    try {
-        // Get JSESSIONID cookie directly (same approach as working functions)
-        const cookieResult = await new Promise((resolve) => {
-            chrome.cookies.get({
-                url: inURL,
-                name: 'JSESSIONID'
-            }, (data) => {
-                resolve(data ? data.value : null);
+    // Get browser cookie
+    chrome.cookies.get({
+        url: inURL,
+        name: 'JSESSIONID'
+    }, function(data) {
+        if (data !== null) {
+            chrome.storage.local.remove("csrfToken")
+            chrome.storage.local.set({
+                "csrfToken": data.value.replaceAll('"','')
             });
-        });
-
-        if (!cookieResult) {
-            throw new Error('JSESSIONID cookie not found');
         }
+    });
 
+    chrome.storage.local.get(["csrfToken"]).then((result) => {
         console.log('🔑 JSESSIONID retrieved, sending message to LinkedIn API...');
         console.log('🌐 API URL:', url);
+        console.log('📦 Request body:', JSON.stringify(conversationObj, null, 2));
         
-        const response = await fetch(url, {
-            method: 'POST',
+        fetch(url, {
+            method: 'post',
             headers: {
-                'csrf-token': cookieResult,
-                'accept': 'application/vnd.linkedin.normalized+json+2.1',
+                'csrf-token': result.csrfToken,
+                'accept': 'text/plain, */*; q=0.01',
                 'content-type': 'application/json; charset=UTF-8',
                 'x-li-lang': 'en_US',
-                'x-li-page-instance': 'urn:li:page:d_flagship3_messaging_conversation_detail;' + Math.random().toString(36).substring(2, 15),
-                'x-li-track': JSON.stringify({
-                    "clientVersion": "1.11.5612",
-                    "mpVersion": "2.0",
-                    "osName": "web",
-                    "timezoneOffset": new Date().getTimezoneOffset(),
-                    "deviceFormFactor": "DESKTOP",
-                    "mpName": "voyager-web"
-                }),
-                'x-restli-protocol-version': '2.0.0'
+                'x-li-page-instance': 'urn:li:page:d_flagship3_people_invitations;1ZlPK7kKRNSMi+vkXMyVMw==',
+                'x-li-track': JSON.stringify({"clientVersion":"1.10.1208","osName":"web","timezoneOffset":1,"deviceFormFactor":"DESKTOP","mpName":"voyager-web"}),
+                'x-restli-protocol-version': '2.0.0',
             },
-            body: JSON.stringify(conversationObj),
-            credentials: 'include'
-        });
-
-        console.log('📡 LinkedIn API response status:', response.status);
-        
-        if (!response.ok) {
-            const responseData = await response.json().catch(() => ({}));
-            console.error('❌ LinkedIn API Error:', {
-                status: response.status,
-                statusText: response.statusText,
-                responseData
-            });
-            console.error('🔍 Full response data:', JSON.stringify(responseData, null, 2));
-            
-            // Enhanced error handling for specific LinkedIn errors
-            let errorMessage = `LinkedIn API Error: ${response.status} ${response.statusText}`;
-            
-            if (response.status === 403) {
-                if (responseData.message && responseData.message.includes("can't be accessed")) {
-                    errorMessage = 'Profile is private or blocked - cannot send message';
-                } else if (responseData.message && responseData.message.includes("not a 1st degree")) {
-                    errorMessage = 'Access denied - not a 1st degree connection yet';
-                } else if (responseData.code === 'UNRESPONDED_INMAIL_EXISTS') {
-                    errorMessage = 'Previous message awaiting response';
-                } else if (responseData.code === 'NOT_ENOUGH_CREDIT') {
-                    errorMessage = 'Insufficient InMail credits';
-                } else if (responseData.code === 'INVALID_RECIPIENT') {
-                    errorMessage = 'Invalid recipient profile';
-                } else if (responseData.code === 'MESSAGE_QUOTA_EXCEEDED') {
-                    errorMessage = 'Daily message limit reached';
-                } else {
-                    errorMessage = 'Access denied - profile may be private or connection not fully established';
-                }
-            } else if (response.status === 429) {
-                errorMessage = 'Rate limit exceeded - too many requests';
-            } else if (response.status === 401) {
-                errorMessage = 'Session expired - please refresh LinkedIn';
-            }
-            
-            console.error('🔍 Detailed error:', errorMessage);
-            throw new Error(errorMessage);
-        }
-
-        const result = await response.json();
-        console.log('✅ LinkedIn message sent successfully!', result);
-        return result;
-        
-    } catch (err) {
-        console.error('❌ Failed to send LinkedIn message:', err);
-        throw err;
-    }
+            body: JSON.stringify(conversationObj)
+        })
+        .then(res => {
+            console.log('📡 LinkedIn API response status:', res.status);
+            return res.json();
+        })
+        .then(res => {
+            console.log('✅ LinkedIn message sent successfully!');
+            console.log('📄 Response data:', res);
+            console.log('🎯 Message sent to:', arConnectionModel.connectionId);
+        })
+        .catch((err) => {
+            console.error('❌ Failed to send LinkedIn message:', err);
+        })
+    })
 }
 
 /**
