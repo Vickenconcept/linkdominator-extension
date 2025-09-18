@@ -1065,7 +1065,11 @@ const storeCallStatus = async (callData) => {
             
             // Store call_id for future reply processing
             if (data.call_id && callData.connection_id) {
-                localStorage.setItem(`call_id_${callData.connection_id}`, data.call_id);
+                try {
+                    await chrome.storage.local.set({ [`call_id_${callData.connection_id}`]: data.call_id });
+                } catch (e) {
+                    console.log('⚠️ Failed to persist call_id in storage:', e.message);
+                }
             }
             
             return data;
@@ -1089,7 +1093,13 @@ const storeCallStatus = async (callData) => {
  */
 const processCallReply = async (message, profileId, connectionId) => {
     try {
-        const callId = localStorage.getItem(`call_id_${connectionId}`);
+        let callId = null;
+        try {
+            const stored = await chrome.storage.local.get([`call_id_${connectionId}`]);
+            callId = stored[`call_id_${connectionId}`] || null;
+        } catch (e) {
+            console.log('⚠️ Failed to read call_id from storage:', e.message);
+        }
         if (!callId) {
             console.log('No call ID found for connection:', connectionId);
             return;
