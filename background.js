@@ -1046,6 +1046,10 @@ const getAudience = async (audienceId, total, filterApi, callback) => {
 
 const storeCallStatus = async (callData) => {
     try {
+        console.log('🔧 DEBUG: storeCallStatus called with data:', callData);
+        console.log('🔧 DEBUG: API URL:', `${PLATFROM_URL}/api/book-call/store`);
+        console.log('🔧 DEBUG: LinkedIn ID:', linkedinId);
+        
         const response = await fetch(`${PLATFROM_URL}/api/book-call/store`, {
             method: 'POST',
             headers: {
@@ -1065,8 +1069,15 @@ const storeCallStatus = async (callData) => {
             }
             
             return data;
+        } else {
+            const errorText = await response.text();
+            console.error('❌ API Error Response:', {
+                status: response.status,
+                statusText: response.statusText,
+                body: errorText
+            });
+            throw new Error(`Failed to store call status: ${response.status} - ${errorText}`);
         }
-        throw new Error('Failed to store call status');
     } catch (error) {
         console.error('Error storing call status:', error);
         throw error;
@@ -1681,6 +1692,59 @@ chrome.alarms.onAlarm.addListener((alarm) => {
                 console.log('❌ No action data found for alarm:', alarm.name);
             }
         });
+    }else if(alarm.name === 'fallback_call'){
+        console.log('🎯 Starting general campaign alarm for:', alarm.name);
+        chrome.storage.local.get(["campaign","nodeModel"]).then(async (result) => {
+            console.log('Campaign', alarm.name, 'sequence is running...')
+            let currentCampaign = result.campaign,
+            nodeModel = result.nodeModel;
+            console.log('📊 Retrieved campaign data:', currentCampaign);
+            console.log('🔗 Retrieved node model:', nodeModel);
+            try {
+                // Fetch accepted leads from DB first
+                await getLeadGenRunning(currentCampaign.id);
+                let acceptedLeads = (campaignLeadgenRunning || []).filter(l => l.acceptedStatus === true || l.accept_status === true || l.statusLastId === 3 || l.status_last_id === 3);
+                console.log(`👥 Found ${acceptedLeads.length} accepted leads for fallback_call execution (DB)`);
+                
+                // If none found, recompute by checking network distance for campaignLeadgenRunning
+                if (acceptedLeads.length === 0) {
+                    const candidates = (campaignLeadgenRunning || []);
+                    console.log(`🔎 Recomputing accepted leads from campaignLeadgenRunning, candidates: ${candidates.length}`);
+                    const computedAccepted = [];
+                    for (const cand of candidates) {
+                        try {
+                            const networkInfo = await _getProfileNetworkInfo(cand);
+                            const degree = networkInfo?.data?.distance?.value;
+                            if (degree === 'DISTANCE_1' || cand.networkDistance == 1) {
+                                computedAccepted.push({
+                                    ...cand,
+                                    acceptedStatus: true,
+                                    networkDistance: 1
+                                });
+                            }
+                        } catch (e) {
+                            // ignore individual errors
+                        }
+                        await delay(400);
+                    }
+                    console.log(`👥 Computed accepted leads: ${computedAccepted.length}`);
+                    acceptedLeads = computedAccepted;
+                }
+
+                if (acceptedLeads.length > 0) {
+                    await runSequence(currentCampaign, acceptedLeads, nodeModel);
+                } else {
+                    console.log('⚠️ No accepted leads found for fallback_call execution');
+                }
+            } catch (err) {
+                console.error('❌ Error executing fallback_call sequence:', err);
+            } finally {
+                // Clear the fallback alarm to prevent repeats
+                chrome.alarms.clear('fallback_call');
+                console.log('🧹 Cleared fallback_call alarm after execution');
+            }
+        });
+        return;
     }else{
         console.log('🎯 Starting general campaign alarm for:', alarm.name);
         chrome.storage.local.get(["campaign","nodeModel"]).then((result) => {
@@ -2491,27 +2555,61 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
             arConnectionModel.lastName = lead.lastName
             arConnectionModel.conversationUrnId = ''
             lead['uploads'] = []
+
+            // Deduplicate call attempts per campaign/lead
+            if (nodeModel.value === 'call') {
+                const attemptKey = `call_attempted_${currentCampaign.id}_${lead.connectionId}`;
+                try {
+                    const stored = await chrome.storage.local.get([attemptKey]);
+                    if (stored && stored[attemptKey]) {
+                        console.log(`⏭️ Skipping duplicate call attempt for ${lead.name} (key: ${attemptKey})`);
+                        // Mark node as completed to avoid loops if already attempted
+                        try {
+                            await updateSequenceNodeModel(currentCampaign, { ...nodeModel, runStatus: true });
+                            console.log('✅ Call node marked as completed to prevent repeat');
+                        } catch (e) {}
+                        continue;
+                    }
+                } catch (e) {
+                    console.log('⚠️ Could not read dedupe key:', e.message);
+                }
+            }
+
             messageConnection(lead)
 
             if(nodeModel.value == 'call'){
                 console.log('📞 Recording call status with enhanced data...');
-                // record call status with enhanced data
-                storeCallStatus({
-                    recipient: `${lead.firstName} ${lead.lastName}`,
-                    profile: `${firstName} ${lastName}`,
-                    sequence: currentCampaign.name,
-                    callStatus: 'suggested',
-                    company: lead.company || null,
-                    industry: lead.industry || null,
-                    job_title: lead.jobTitle || null,
-                    location: lead.location || null,
-                    original_message: arConnectionModel.message,
-                    linkedin_profile_url: lead.profileUrl || null,
-                    connection_id: lead.connectionId || null,
-                    conversation_urn_id: arConnectionModel.conversationUrnId || null,
-                    campaign_id: currentCampaign.id || null,
-                    campaign_name: currentCampaign.name || null
-                })
+                try {
+                    const result = await storeCallStatus({
+                        recipient: `${lead.firstName} ${lead.lastName}`,
+                        profile: `${firstName} ${lastName}`,
+                        sequence: currentCampaign.name,
+                        callStatus: 'suggested',
+                        company: lead.company || null,
+                        industry: lead.industry || null,
+                        job_title: lead.jobTitle || null,
+                        location: lead.location || null,
+                        original_message: arConnectionModel.message,
+                        linkedin_profile_url: lead.profileUrl || null,
+                        connection_id: lead.connectionId || null,
+                        conversation_urn_id: arConnectionModel.conversationUrnId || null,
+                        campaign_id: currentCampaign.id || null,
+                        campaign_name: currentCampaign.name || null
+                    });
+                    // On first successful attempt, set dedupe key
+                    const attemptKey = `call_attempted_${currentCampaign.id}_${lead.connectionId}`;
+                    await chrome.storage.local.set({ [attemptKey]: Date.now() });
+                    console.log('📝 Set call attempt dedupe key:', attemptKey);
+                    // Mark call node as completed after handling once
+                    try {
+                        await updateSequenceNodeModel(currentCampaign, { ...nodeModel, runStatus: true });
+                        console.log('✅ Call node marked as completed');
+                    } catch (e) {}
+                } catch (err) {
+                    console.error('❌ Failed to store call status (will not retry immediately):', err.message);
+                    // Do not set dedupe on failure to allow a later retry
+                    // Do not throw to avoid breaking the whole loop
+                }
             }
         }else     if(nodeModel.value == 'send-invites'){
             console.log('📨 Executing send-invites action...');
