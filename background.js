@@ -483,7 +483,11 @@ const initializeActiveCampaigns = async () => {
                     chrome.storage.local.set({ activeCampaigns: campaignIds });
                     console.log(`📊 Found ${runningCampaigns.length} active campaigns:`, campaignIds);
                     
-                    // Trigger the network update alarm to resume processing
+                    // Trigger the network update alarm to resume processing immediately
+                    console.log('🚀 Resuming campaign processing...');
+                    setTimeout(() => {
+                        _updateCampaignLeadsNetwork();
+                    }, 1000); // Small delay to ensure everything is set up
                     chrome.alarms.create('sequence_leads_network_update', { delayInMinutes: 0.1 });
                     console.log('⏰ Created network update alarm to resume processing');
                 } else {
@@ -516,7 +520,14 @@ chrome.runtime.onStartup.addListener(() => {
     try {
         console.log('🚀 Service worker started');
         keepServiceWorkerAlive();
-        // Removed automatic initializeActiveCampaigns() call to prevent CSRF errors
+        
+        // Initialize active campaigns after a short delay to ensure LinkedIn ID is available
+        setTimeout(async () => {
+            console.log('🔄 Checking for active campaigns on startup...');
+            await initializeActiveCampaigns();
+            // Also check for existing alarms that might need to be resumed
+            await checkAndResumeCampaigns();
+        }, 3000); // 3 second delay to ensure LinkedIn ID is set
     } catch (error) {
         console.log('⚠️ Error in service worker startup:', error.message);
     }
@@ -531,8 +542,13 @@ chrome.runtime.onInstalled.addListener(() => {
         chrome.alarms.clear('sequence_leads_network_update');
         console.log('🧹 Cleared existing sequence_leads_network_update alarm');
         
-        // Don't initialize immediately - wait for LinkedIn ID to be set
-        console.log('⏳ Waiting for LinkedIn ID before checking campaigns...');
+        // Initialize active campaigns after a short delay to ensure LinkedIn ID is set
+        setTimeout(async () => {
+            console.log('🔄 Checking for active campaigns after installation...');
+            await initializeActiveCampaigns();
+            // Also check for existing alarms that might need to be resumed
+            await checkAndResumeCampaigns();
+        }, 5000); // 5 second delay for fresh installation
     } catch (error) {
         console.log('⚠️ Error in extension installation:', error.message);
     }
@@ -570,6 +586,37 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     message: 'No active campaigns - Service worker ready'
                 });
             }
+        });
+        return true;
+    }
+    
+    if (request.action === 'refreshActiveCampaigns') {
+        // Manually trigger campaign detection
+        console.log('🔄 Manual campaign refresh requested');
+        initializeActiveCampaigns().then(() => {
+            sendResponse({ success: true, message: 'Campaign refresh completed' });
+        }).catch((error) => {
+            sendResponse({ success: false, message: 'Campaign refresh failed: ' + error.message });
+        });
+        return true;
+    }
+    
+    if (request.action === 'viewEndorsementHistory') {
+        console.log('📋 Viewing endorsement history requested');
+        viewEndorsementHistory().then(history => {
+            sendResponse({status: 'success', data: history});
+        }).catch(error => {
+            sendResponse({status: 'error', message: error.message});
+        });
+        return true;
+    }
+    
+    if (request.action === 'clearEndorsementHistory') {
+        console.log('🧹 Clearing endorsement history requested');
+        clearEndorsementHistory().then(() => {
+            sendResponse({status: 'success', message: 'Endorsement history cleared'});
+        }).catch(error => {
+            sendResponse({status: 'error', message: error.message});
         });
         return true;
     }
@@ -861,7 +908,7 @@ const updateLeadNetworkDegree = async (lead) => {
             throw new Error('Lead object missing identifier');
         }
 
-        console.log(`🔄 Updating network degree for lead: ${leadId}`);
+        // console.log(`🔄 Updating network degree for lead: ${leadId}`);
         
         const response = await fetch(`${PLATFROM_URL}/api/lead/${leadId}/update`, {
             method: 'POST',
@@ -1572,6 +1619,28 @@ chrome.alarms.onAlarm.addListener((alarm) => {
                 console.log(err)
             }
         });
+    }else if(alarm.name.startsWith('delayed_action_')){
+        console.log('⏰ DELAYED ACTION ALARM TRIGGERED:', alarm.name);
+        console.log('📅 Current time:', new Date().toLocaleString());
+        
+        // Get the stored action data
+        chrome.storage.local.get([`delayed_action_${alarm.name}`]).then((result) => {
+            const actionData = result[`delayed_action_${alarm.name}`];
+            if (actionData) {
+                console.log('🎯 EXECUTING DELAYED ACTION:', actionData.nodeModel.label);
+                console.log('👤 Lead:', actionData.lead.name);
+                console.log('📊 Campaign:', actionData.campaign.name);
+                console.log('⏰ Originally scheduled for:', new Date(actionData.scheduledTime).toLocaleString());
+                
+                // Execute the delayed action
+                runSequence(actionData.campaign, [actionData.lead], actionData.nodeModel);
+                
+                // Clean up the stored data
+                chrome.storage.local.remove([`delayed_action_${alarm.name}`]);
+            } else {
+                console.log('❌ No action data found for alarm:', alarm.name);
+            }
+        });
     }else{
         console.log('🎯 Starting general campaign alarm for:', alarm.name);
         chrome.storage.local.get(["campaign","nodeModel"]).then((result) => {
@@ -1635,7 +1704,7 @@ const setCampaignAlarm = async (campaign) => {
     });
     
     await getCampaignSequence(campaign.id)
-    alarmName = campaign.sequenceType.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+    alarmName = (campaign.sequenceType || 'default_sequence').replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
     nodeModelArr = campaignSequence.nodeModel
     
     console.log('📋 Campaign sequence loaded:', nodeModelArr ? 'Yes' : 'No');
@@ -2286,8 +2355,13 @@ const setCampaignAlarm = async (campaign) => {
 }
 
 const runSequence = async (currentCampaign, leads, nodeModel) => {
-    console.log('🎬 runSequence called with:', {currentCampaign, leads, nodeModel});
-    console.log(`📊 Processing ${leads.length} leads with node model:`, nodeModel);
+    console.log('🎬 RUNSEQUENCE CALLED - Starting sequence execution...');
+    console.log('📊 Campaign:', currentCampaign.name, '(ID:', currentCampaign.id, ')');
+    console.log('👥 Leads to process:', leads.length);
+    console.log('🔗 Node action:', nodeModel.label, '(', nodeModel.value, ')');
+    console.log('⏰ Node delay:', nodeModel.delayInMinutes || 0, 'minutes');
+    console.log('🔧 Full node model:', nodeModel);
+    
     updateCampaignStatus('processing', `Processing ${leads.length} leads...`);
     
     for(const [i, lead] of leads.entries()){
@@ -2295,7 +2369,18 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
         console.log(`🔗 Node action: ${nodeModel.value}`);
         
         if(nodeModel.value == 'endorse'){
-            console.log('🏷️ Executing endorse action...');
+            console.log('🏷️ EXECUTING ENDORSE ACTION...');
+            console.log(`👤 Lead: ${lead.name} (${lead.connectionId})`);
+            console.log(`🎯 Action: ${nodeModel.label} (${nodeModel.value})`);
+            console.log(`⏰ Delay: ${nodeModel.delayInMinutes || 0} minutes`);
+            console.log(`🔧 Node properties:`, {
+                key: nodeModel.key,
+                type: nodeModel.type,
+                runStatus: nodeModel.runStatus,
+                totalSkills: nodeModel.totalSkills
+            });
+            
+            console.log(`🚀 Starting skill endorsement process for ${lead.name}...`);
             _getFeaturedSkill(lead, nodeModel);
         }else if(nodeModel.value == 'profile-view'){
             console.log('👁️ Executing profile view action...');
@@ -2632,6 +2717,13 @@ const messageConnection = scheduleInfo => {
  * @param {object} node 
  */
 const _getFeaturedSkill =  (lead, node) => {
+    console.log(`🔍 GETTING FEATURED SKILLS for ${lead.name}...`);
+    console.log(`👤 Lead details:`, {
+        name: lead.name,
+        connectionId: lead.connectionId,
+        totalSkills: node.totalSkills
+    });
+    
     chrome.cookies.get({
         url: inURL,
         name: 'JSESSIONID'
@@ -2641,11 +2733,18 @@ const _getFeaturedSkill =  (lead, node) => {
             chrome.storage.local.set({
                 "csrfToken": data.value.replaceAll('"','')
             });
+            console.log(`✅ CSRF token obtained for skill endorsement`);
         }
     });
 
     chrome.storage.local.get(["csrfToken"]).then((result) => {
-        fetch(`${LINKEDIN_URL}/voyager/api/identity/profiles/${lead.connectionId}/featuredSkills?includeHiddenEndorsers=false&count=${node.totalSkills}&_=${dInt}`, {
+        // Use memberUrn if available, otherwise fall back to connectionId
+        const profileId = lead.memberUrn ? lead.memberUrn.replace('urn:li:member:', '') : lead.connectionId;
+        const apiUrl = `${LINKEDIN_URL}/voyager/api/identity/profiles/${profileId}/featuredSkills?includeHiddenEndorsers=false&count=${node.totalSkills}&_=${dInt}`;
+        console.log(`🌐 Fetching skills from: ${apiUrl}`);
+        console.log(`👤 Using profile ID: ${profileId} (memberUrn: ${lead.memberUrn}, connectionId: ${lead.connectionId})`);
+        
+        fetch(apiUrl, {
             method: 'get',
             headers: {
                 'csrf-token': result.csrfToken,
@@ -2659,20 +2758,62 @@ const _getFeaturedSkill =  (lead, node) => {
         })
         .then(res => res.json())
         .then(res => {
-            console.log('Featured skill...')
-            if(res.data['*elements'].length){
-                res.included.forEach(item => {
-                    if(item.hasOwnProperty('name')){
+            console.log(`📋 FEATURED SKILLS RESPONSE for ${lead.name}:`, res);
+            console.log(`🔍 DEBUGGING SKILLS DATA:`);
+            console.log(`   📊 Response structure:`, {
+                hasData: !!res.data,
+                hasElements: !!(res.data && res.data['*elements']),
+                elementsLength: res.data && res.data['*elements'] ? res.data['*elements'].length : 0,
+                hasIncluded: !!res.included,
+                includedLength: res.included ? res.included.length : 0
+            });
+            
+            if(res.included && res.included.length > 0) {
+                console.log(`📋 ALL AVAILABLE SKILLS for ${lead.name}:`);
+                res.included.forEach((item, index) => {
+                    console.log(`   ${index + 1}. ${item.name || 'No name'} (${item.entityUrn || 'No URN'})`);
+                    console.log(`      📊 Full item data:`, item);
+                });
+            }
+            
+            // Also check the main data structure
+            if(res.data && res.data['*elements']) {
+                console.log(`📊 MAIN SKILLS DATA:`, res.data['*elements']);
+            }
+            
+            if(res.data && res.data['*elements'] && res.data['*elements'].length){
+                console.log(`✅ Found ${res.data['*elements'].length} skills to endorse for ${lead.name}`);
+                
+                if(res.included && res.included.length > 0) {
+                    console.log(`🎯 Processing ${res.included.length} skill items...`);
+                    console.log(`📊 Campaign setting: Only endorse ${node.totalSkills} skill(s)`); 
+                    
+                    // Filter skills that have names and limit to the number specified in campaign
+                    const skillsToEndorse = res.included
+                        .filter(item => item.hasOwnProperty('name'))
+                        .slice(0, node.totalSkills || 1);
+                    
+                    console.log(`🎯 Will endorse ${skillsToEndorse.length} skills (limited by campaign setting)`);
+                    
+                    skillsToEndorse.forEach((item, index) => {
+                        console.log(`🏷️ Skill ${index + 1}: ${item.name} (${item.entityUrn})`);
                         _endorseConnection({
                             connectionId: lead.connectionId,
+                            memberUrn: lead.memberUrn,
                             entityUrn: item.entityUrn,
                             skillName: item.name
                         }, result)
-                    }
-                });
+                    });
+                } else {
+                    console.log(`⚠️ No skill items found in included array for ${lead.name}`);
+                }
+            } else {
+                console.log(`❌ No skills found for ${lead.name} - response data:`, res.data);
             }
         })
-        .catch(err => console.log(err))
+        .catch(err => {
+            console.error(`❌ Error fetching skills for ${lead.name}:`, err);
+        })
     })
 }
 
@@ -2682,7 +2823,16 @@ const _getFeaturedSkill =  (lead, node) => {
  * @param {object} result 
  */
 const _endorseConnection = (data, result) => {
-    fetch(`${VOYAGER_API}/identity/profiles/${data.connectionId}/normEndorsements`, {
+    console.log(`🏷️ ENDORSING SKILL: ${data.skillName} for connection ${data.connectionId}`);
+    console.log(`🔗 Entity URN: ${data.entityUrn}`);
+    
+    // Use the same profile ID logic as in _getFeaturedSkill
+    const profileId = data.memberUrn ? data.memberUrn.replace('urn:li:member:', '') : data.connectionId;
+    const endorseUrl = `${VOYAGER_API}/identity/profiles/${profileId}/normEndorsements`;
+    console.log(`🌐 Endorsement API URL: ${endorseUrl}`);
+    console.log(`👤 Using profile ID: ${profileId} (memberUrn: ${data.memberUrn}, connectionId: ${data.connectionId})`);
+    
+    fetch(endorseUrl, {
         method: 'post',
         headers: {
             'csrf-token': result.csrfToken,
@@ -2700,11 +2850,59 @@ const _endorseConnection = (data, result) => {
             }
         })
     })
-    .then(res => res.json())
     .then(res => {
-        console.log('Skill endorsed...')
+        console.log(`📊 Endorsement response status: ${res.status} ${res.statusText}`);
+        if(res.status == 201){
+            console.log(`✅ SKILL ENDORSED SUCCESSFULLY: ${data.skillName}`);
+            console.log(`🎯 ENDORSEMENT DETAILS:`);
+            console.log(`   👤 Lead: ${data.connectionId}`);
+            console.log(`   🏷️ Skill: ${data.skillName}`);
+            console.log(`   🔗 Entity URN: ${data.entityUrn}`);
+            console.log(`   📅 Time: ${new Date().toLocaleString()}`);
+            console.log(`   🌐 Profile ID: ${profileId}`);
+            
+            // Store endorsement record for tracking
+            const endorsementRecord = {
+                leadId: data.connectionId,
+                skillName: data.skillName,
+                entityUrn: data.entityUrn,
+                profileId: profileId,
+                timestamp: new Date().toISOString(),
+                status: 'success',
+                responseStatus: res.status
+            };
+            
+            // Store in chrome storage for persistence
+            chrome.storage.local.get(['endorsementHistory']).then((result) => {
+                const history = result.endorsementHistory || [];
+                history.push(endorsementRecord);
+                chrome.storage.local.set({ endorsementHistory: history });
+                console.log(`📝 Endorsement record stored. Total endorsements: ${history.length}`);
+            });
+            
+            return { success: true, message: 'Skill endorsed successfully' };
+        } else {
+            console.log(`❌ Failed to endorse skill: ${res.status} ${res.statusText}`);
+            console.log(`🎯 FAILED ENDORSEMENT DETAILS:`);
+            console.log(`   👤 Lead: ${data.connectionId}`);
+            console.log(`   🏷️ Skill: ${data.skillName}`);
+            console.log(`   🔗 Entity URN: ${data.entityUrn}`);
+            console.log(`   📅 Time: ${new Date().toLocaleString()}`);
+            console.log(`   ❌ Error: ${res.status} ${res.statusText}`);
+            
+            return { success: false, message: `Failed to endorse skill: ${res.status}` };
+        }
     })
-    .catch(err => console.log(err))
+    .then(result => {
+        if(result.success) {
+            console.log(`🎉 ENDORSEMENT COMPLETED: ${data.skillName}`);
+        } else {
+            console.log(`⚠️ Endorsement result:`, result);
+        }
+    })
+    .catch(err => {
+        console.error(`❌ ERROR ENDORSING SKILL ${data.skillName}:`, err);
+    })
 }
 
 /**
@@ -3819,10 +4017,113 @@ const triggerCampaignExecution = async () => {
     }
 };
 
+// Function to view endorsement history
+const viewEndorsementHistory = async () => {
+    try {
+        console.log('📋 VIEWING ENDORSEMENT HISTORY...');
+        const result = await chrome.storage.local.get(['endorsementHistory']);
+        const history = result.endorsementHistory || [];
+        
+        if (history.length === 0) {
+            console.log('📝 No endorsements found in history');
+            return [];
+        }
+        
+        console.log(`📊 Found ${history.length} endorsements in history:`);
+        history.forEach((record, index) => {
+            console.log(`\n${index + 1}. ${record.skillName} for Lead ${record.leadId}`);
+            console.log(`   📅 Time: ${new Date(record.timestamp).toLocaleString()}`);
+            console.log(`   🏷️ Skill: ${record.skillName}`);
+            console.log(`   🔗 Entity URN: ${record.entityUrn}`);
+            console.log(`   🌐 Profile ID: ${record.profileId}`);
+            console.log(`   ✅ Status: ${record.status} (${record.responseStatus})`);
+        });
+        
+        return history;
+    } catch (error) {
+        console.error('❌ Error viewing endorsement history:', error);
+        return [];
+    }
+};
+
+// Function to clear endorsement history
+const clearEndorsementHistory = async () => {
+    try {
+        await chrome.storage.local.remove(['endorsementHistory']);
+        console.log('🧹 Endorsement history cleared');
+    } catch (error) {
+        console.error('❌ Error clearing endorsement history:', error);
+    }
+};
+
+// Function to check and resume any existing campaign alarms
+const checkAndResumeCampaigns = async () => {
+    try {
+        console.log('🔍 Checking for existing campaign alarms...');
+        const alarms = await chrome.alarms.getAll();
+        console.log('📋 Current alarms:', alarms.map(alarm => ({ name: alarm.name, scheduledTime: alarm.scheduledTime })));
+        
+        // Check if we have active campaigns but no alarms
+        chrome.storage.local.get(['activeCampaigns'], (result) => {
+            const activeCampaigns = result.activeCampaigns || [];
+            if (activeCampaigns.length > 0) {
+                console.log(`📊 Found ${activeCampaigns.length} active campaigns in storage`);
+                
+                // Check if we have the network update alarm
+                const hasNetworkAlarm = alarms.some(alarm => alarm.name === 'sequence_leads_network_update');
+                if (!hasNetworkAlarm) {
+                    console.log('⚠️ No network update alarm found, creating one...');
+                    chrome.alarms.create('sequence_leads_network_update', { delayInMinutes: 0.1 });
+                    console.log('✅ Created missing network update alarm');
+                } else {
+                    console.log('✅ Network update alarm already exists');
+                }
+            }
+        });
+    } catch (error) {
+        console.error('❌ Error checking campaign alarms:', error);
+    }
+};
+
+// Function to check all scheduled alarms
+const checkScheduledAlarms = async () => {
+    try {
+        console.log('🔍 CHECKING ALL SCHEDULED ALARMS...');
+        const alarms = await chrome.alarms.getAll();
+        console.log(`📋 Found ${alarms.length} scheduled alarms:`);
+        
+        alarms.forEach((alarm, index) => {
+            const scheduledTime = new Date(alarm.scheduledTime);
+            const timeUntil = scheduledTime - Date.now();
+            const minutesUntil = Math.round(timeUntil / 60000);
+            
+            console.log(`${index + 1}. ${alarm.name}`);
+            console.log(`   📅 Scheduled: ${scheduledTime.toLocaleString()}`);
+            console.log(`   ⏰ Time until: ${minutesUntil} minutes`);
+            
+            if (alarm.name.startsWith('delayed_action_')) {
+                console.log(`   🎯 Type: Delayed sequence action`);
+            } else if (alarm.name === 'sequence_leads_network_update') {
+                console.log(`   🔄 Type: Network update check`);
+            } else {
+                console.log(`   📊 Type: Campaign sequence`);
+            }
+            console.log('');
+        });
+        
+        return alarms;
+    } catch (error) {
+        console.error('❌ Error checking alarms:', error);
+        return [];
+    }
+};
+
 // Make it globally accessible for testing in service worker context
 self.startCampaign = startCampaign;
 self.triggerCampaignExecution = triggerCampaignExecution;
 self.cleanupDuplicateLeads = cleanupDuplicateLeads;
+self.checkAndResumeCampaigns = checkAndResumeCampaigns;
+self.checkScheduledAlarms = checkScheduledAlarms;
 self.resetSendInvites = async (campaignId) => {
     console.log('🔄 AGGRESSIVE RESET of send-invites for campaign:', campaignId);
     
@@ -3995,8 +4296,13 @@ self.startMonitoring = () => {
  * Check all pending leads for invite acceptances (regardless of campaign status)
  */
 const checkAllCampaignsForAcceptances = async () => {
+    console.log('🔍 STARTING ACCEPTANCE CHECK...');
+    console.log('🔑 LinkedIn ID:', linkedinId);
+    console.log('🌐 Platform URL:', PLATFROM_URL);
+    
     try {
         // Get ALL campaigns (not just active ones)
+        console.log('📡 Fetching campaigns from API...');
         const response = await fetch(`${PLATFROM_URL}/api/campaigns`, {
             method: 'GET',
             headers: {
@@ -4006,43 +4312,66 @@ const checkAllCampaignsForAcceptances = async () => {
         });
         
         if (!response.ok) {
+            console.log('❌ API request failed:', response.status, response.statusText);
             return;
         }
         
         const campaignsData = await response.json();
+        console.log('📊 Campaigns data received:', campaignsData);
         
         // Get ALL campaigns that have Lead generation or Custom sequence types (regardless of status)
         const campaignsToCheck = campaignsData.data.filter(campaign => 
             ['Lead generation', 'Custom'].includes(campaign.sequenceType)
         );
         
+        console.log(`🎯 Found ${campaignsToCheck.length} campaigns to check for acceptances:`, campaignsToCheck.map(c => ({id: c.id, name: c.name, sequenceType: c.sequenceType})));
+        
         for (const campaign of campaignsToCheck) {
+            console.log(`\n🔍 Checking campaign ${campaign.id} (${campaign.name})...`);
             try {
                 // Get leads for this campaign
+                console.log(`📋 Getting leads for campaign ${campaign.id}...`);
                 await getLeadGenRunning(campaign.id);
                 
+                console.log(`👥 Found ${campaignLeadgenRunning.length} leads in campaign ${campaign.id}`);
+                
                 if (campaignLeadgenRunning.length === 0) {
+                    console.log(`⚠️ No leads found for campaign ${campaign.id}, skipping...`);
                     continue;
                 }
                 
                 // Check each lead for acceptance
+                console.log(`🔍 Checking each lead for acceptance...`);
                 for (const lead of campaignLeadgenRunning) {
+                    // console.log(`\n👤 Checking lead: ${lead.name || 'Unknown'} (ID: ${lead.id || lead.connectionId})`);
                     // Handle both tracking data format and basic lead data format
                     const acceptedStatus = lead.accept_status !== undefined ? lead.accept_status : lead.acceptedStatus;
                     const statusLastId = lead.status_last_id !== undefined ? lead.status_last_id : lead.statusLastId;
                     const leadSrc = lead.lead_src !== undefined ? lead.lead_src : lead.leadSrc;
                     const connectionId = lead.connection_id !== undefined ? lead.connection_id : lead.connectionId;
                     
+                    // console.log(`📊 Lead status:`, {
+                    //     name: lead.name,
+                    //     acceptedStatus: acceptedStatus,
+                    //     statusLastId: statusLastId,
+                    //     leadSrc: leadSrc,
+                    //     connectionId: connectionId
+                    // });
+                    
                     // Check for pending invites (accept_status = 0 or false, status_last_id = 2)
                     const isPendingInvite = (acceptedStatus === false || acceptedStatus === 0) && statusLastId == 2;
+                    // console.log(`🔍 Is pending invite: ${isPendingInvite} (acceptedStatus: ${acceptedStatus}, statusLastId: ${statusLastId})`);
                     
                     if (isPendingInvite) {
+                        console.log(`🌐 Checking network status for pending invite: ${lead.name}...`);
                         try {
                             const networkInfo = await _getProfileNetworkInfo(lead);
                             const networkDegree = networkInfo.data.distance.value;
                             
                             if (networkDegree === 'DISTANCE_1') {
                                 console.log(`🎉 INVITE ACCEPTED! ${lead.name || 'Unknown'} is now 1st degree connection!`);
+                                console.log(`📊 Campaign: ${campaign.name} (ID: ${campaign.id})`);
+                                console.log(`👤 Lead: ${lead.name} (ID: ${lead.id || connectionId})`);
                                 
                                 try {
                                     // Update database
@@ -4052,6 +4381,8 @@ const checkAllCampaignsForAcceptances = async () => {
                                         currentNodeKey: lead.current_node_key || lead.currentNodeKey || 0,
                                         nextNodeKey: lead.next_node_key || lead.nextNodeKey || 0
                                     });
+                                    
+                                    console.log(`✅ Database updated for ${lead.name || 'Unknown'}:`, updateResult);
                                     
                                     // Update local variable
                                     if (lead.accept_status !== undefined) {
@@ -4066,14 +4397,54 @@ const checkAllCampaignsForAcceptances = async () => {
                                 
                                 // Trigger next action if campaign sequence supports it
                                 try {
+                                    console.log(`🔄 Looking for next action after acceptance for ${lead.name}...`);
                                     await getCampaignSequence(campaign.id);
+                                    
                                     if (campaignSequence && campaignSequence.nodeModel) {
+                                        console.log(`📋 Campaign sequence loaded with ${campaignSequence.nodeModel.length} nodes`);
+                                        
+                                        // Find the next action node for accepted connections
                                         const nextActionNode = campaignSequence.nodeModel.find(node => 
                                             node.acceptedAction && node.acceptedAction == 3
                                         );
                                         
                                         if (nextActionNode) {
-                                            await runSequence(campaign, [lead], nextActionNode);
+                                            console.log(`🎯 FOUND NEXT ACTION: ${nextActionNode.label} (${nextActionNode.value})`);
+                                            console.log(`⏰ Action delay: ${nextActionNode.delayInMinutes || 0} minutes`);
+                                            console.log(`🔧 Action properties:`, {
+                                                key: nextActionNode.key,
+                                                type: nextActionNode.type,
+                                                acceptedAction: nextActionNode.acceptedAction,
+                                                runStatus: nextActionNode.runStatus,
+                                                delayInMinutes: nextActionNode.delayInMinutes
+                                            });
+                                            
+                                            // Check if there's a delay
+                                            if (nextActionNode.delayInMinutes && nextActionNode.delayInMinutes > 0) {
+                                                console.log(`⏰ SCHEDULING ACTION: ${nextActionNode.label} will run in ${nextActionNode.delayInMinutes} minutes`);
+                                                console.log(`📅 Scheduled time: ${new Date(Date.now() + (nextActionNode.delayInMinutes * 60000)).toLocaleString()}`);
+                                                
+                                                // Create an alarm for the delayed execution
+                                                const alarmName = `delayed_action_${campaign.id}_${lead.id || connectionId}_${nextActionNode.key}`;
+                                                chrome.alarms.create(alarmName, {
+                                                    delayInMinutes: nextActionNode.delayInMinutes
+                                                });
+                                                
+                                                // Store the action data for when the alarm triggers
+                                                chrome.storage.local.set({
+                                                    [`delayed_action_${alarmName}`]: {
+                                                        campaign: campaign,
+                                                        lead: lead,
+                                                        nodeModel: nextActionNode,
+                                                        scheduledTime: Date.now() + (nextActionNode.delayInMinutes * 60000)
+                                                    }
+                                                });
+                                                
+                                                console.log(`✅ ALARM CREATED: ${alarmName} - Action will execute automatically at scheduled time`);
+                                            } else {
+                                                console.log(`🚀 EXECUTING NEXT ACTION IMMEDIATELY for ${lead.name}...`);
+                                                await runSequence(campaign, [lead], nextActionNode);
+                                            }
                                         }
                                     }
                                 } catch (sequenceError) {
