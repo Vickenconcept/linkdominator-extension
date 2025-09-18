@@ -2556,7 +2556,7 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
             arConnectionModel.conversationUrnId = ''
             lead['uploads'] = []
 
-            // Deduplicate call attempts per campaign/lead EARLY to prevent multiple sends
+            // Check for duplicate call attempts (but don't set flag yet)
             if (nodeModel.value === 'call') {
                 const attemptKey = `call_attempted_${currentCampaign.id}_${lead.connectionId}`;
                 try {
@@ -2570,11 +2570,9 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                         } catch (e) {}
                         continue;
                     }
-                    // Set the dedupe key BEFORE sending any message or API call
-                    await chrome.storage.local.set({ [attemptKey]: Date.now() });
-                    console.log('📝 Set call attempt dedupe key (pre-send):', attemptKey);
+                    console.log('📝 No previous call attempt found, proceeding with call...');
                 } catch (e) {
-                    console.log('⚠️ Could not set/read dedupe key:', e.message);
+                    console.log('⚠️ Could not check dedupe key:', e.message);
                 }
             }
 
@@ -2600,14 +2598,23 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                         campaign_id: currentCampaign.id || null,
                         campaign_name: currentCampaign.name || null
                     });
+                    
+                    // Only set deduplication flag after successful API call
+                    const attemptKey = `call_attempted_${currentCampaign.id}_${lead.connectionId}`;
+                    await chrome.storage.local.set({ [attemptKey]: Date.now() });
+                    console.log('✅ Call status stored successfully, dedupe flag set:', attemptKey);
                 } catch (err) {
                     console.error('❌ Failed to store call status (will not retry immediately):', err.message);
-                    // Intentionally do not clear dedupe to avoid re-sending the same message
+                    // Don't set dedupe flag on API failure, allowing retry
                 } finally {
                     // Always mark the call node as completed after a single attempt to avoid repeats
                     try {
                         await updateSequenceNodeModel(currentCampaign, { ...nodeModel, runStatus: true });
                         console.log('✅ Call node marked as completed (post-attempt)');
+                        // Set campaign-level completion flag for call node
+                        const callCompletedKey = `call_node_completed_${currentCampaign.id}`;
+                        await chrome.storage.local.set({ [callCompletedKey]: true });
+                        console.log('🗝️ Set campaign call completed flag:', callCompletedKey);
                     } catch (e) {}
                 }
             }
@@ -2788,6 +2795,12 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
         return;
     }
     
+    // If current node is call, return early to avoid resetting runStatus with stale nodeModel
+    if (nodeModel.value === 'call') {
+        console.log('🔧 DEBUG: Returning early after call node handling to preserve completion state');
+        return;
+    }
+
     console.log('🔄 Updating sequence node model...');
     await updateSequenceNodeModel(currentCampaign, nodeModel);
     console.log('⏰ Setting next campaign alarm...');
@@ -5371,4 +5384,31 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
     return true;
 });
+
+// Clear all deduplication flags for a campaign (useful for testing)
+async function clearCampaignDedupeFlags(campaignId) {
+    try {
+        const keys = await chrome.storage.local.get();
+        const campaignKeys = Object.keys(keys).filter(key => key.includes(`call_attempted_${campaignId}_`));
+        
+        if (campaignKeys.length > 0) {
+            await chrome.storage.local.remove(campaignKeys);
+            console.log(`🧹 Cleared ${campaignKeys.length} dedupe flags for campaign ${campaignId}`);
+        } else {
+            console.log(`ℹ️ No dedupe flags found for campaign ${campaignId}`);
+        }
+    } catch (error) {
+        console.error('❌ Error clearing dedupe flags:', error);
+    }
+}
+
+// Clear dedupe flags for campaign 100 to allow retry
+console.log('🧹 Clearing dedupe flags for campaign 100...');
+clearCampaignDedupeFlags(100);
+
+// Manually trigger fallback_call alarm for testing
+setTimeout(() => {
+    console.log('🚀 Manually triggering fallback_call alarm for testing...');
+    chrome.alarms.create('fallback_call', { when: Date.now() + 1000 });
+}, 2000);
 
