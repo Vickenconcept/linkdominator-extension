@@ -2726,6 +2726,28 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                                 
                                 // Update the message to use AI-generated content
                                 arConnectionModel.message = aiMessage;
+                                
+                                // Now send the AI-generated message to LinkedIn
+                                console.log('📤 Sending AI-generated message to LinkedIn...');
+                                try {
+                                    // Ensure we have the necessary connection details
+                                    if (typeof arConnectionModel !== 'object' || arConnectionModel === null) {
+                                        arConnectionModel = {};
+                                    }
+                                    arConnectionModel.connectionId = lead.connectionId;
+                                    arConnectionModel.distance = lead.networkDistance || 1;
+                                    // Use existing conversation if available, otherwise create new one
+                                    arConnectionModel.conversationUrnId = lead.conversationUrnId || undefined;
+                                    
+                                    console.log('📧 Sending message to:', lead.name, '(', lead.connectionId, ')');
+                                    console.log('📝 Message content:', aiMessage);
+                                    
+                                    // Send the message using the existing messageConnection function
+                                    await messageConnection({ uploads: [] });
+                                    console.log('✅ AI-generated message sent successfully to LinkedIn!');
+                                } catch (sendErr) {
+                                    console.error('❌ Failed to send AI message to LinkedIn:', sendErr);
+                                }
                             } else {
                                 console.log('⚠️ No AI message available, using original message');
                                 console.log('🔍 AI message:', aiMessage);
