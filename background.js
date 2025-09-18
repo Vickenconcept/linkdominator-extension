@@ -5412,13 +5412,6 @@ async function clearCampaignDedupeFlags(campaignId) {
     }
 }
 
-// Clear dedupe flags for campaign 100 to allow retry
-console.log('🧹 Clearing dedupe flags for campaign 100...');
-clearCampaignDedupeFlags(100);
-
-// Manually trigger fallback_call alarm for testing
-setTimeout(() => {
-    console.log('🚀 Manually triggering fallback_call alarm for testing...');
-    chrome.alarms.create('fallback_call', { when: Date.now() + 1000 });
-}, 2000);
+// Clear dedupe flags for campaign 100 to allow retry (for testing)
+// clearCampaignDedupeFlags(100);
 
