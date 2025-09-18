@@ -2635,13 +2635,12 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                 }
             }
 
-            // Send the LinkedIn message
-            messageConnection(lead)
-
             if(nodeModel.value == 'call'){
                 console.log('📞 Recording call status with enhanced data...');
                 try {
-                    await storeCallStatus({
+                    // First, store the call status to get AI-generated message
+                    // Don't send original_message so backend will generate AI message
+                    const callResponse = await storeCallStatus({
                         recipient: `${lead.firstName} ${lead.lastName}`,
                         profile: `${firstName} ${lastName}`,
                         sequence: currentCampaign.name,
@@ -2650,13 +2649,95 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                         industry: lead.industry || null,
                         job_title: lead.jobTitle || null,
                         location: lead.location || null,
-                        original_message: arConnectionModel.message,
+                        // original_message: arConnectionModel.message, // Don't send this - let backend generate AI message
                         linkedin_profile_url: lead.profileUrl || null,
                         connection_id: lead.connectionId || null,
                         conversation_urn_id: arConnectionModel.conversationUrnId || null,
                         campaign_id: currentCampaign.id || null,
                         campaign_name: currentCampaign.name || null
                     });
+                    
+                    console.log('✅ Call status stored successfully:', callResponse);
+                    
+                    // Now fetch the AI-generated message from the backend
+                    console.log('🔍 Attempting to fetch AI-generated message...');
+                    try {
+                        const callId = callResponse.call_id || callResponse.data?.call_id;
+                        console.log('🔍 Call ID extracted:', callId);
+                        
+                        if (!callId) {
+                            console.warn('⚠️ No call_id received from backend');
+                            return;
+                        }
+                        
+                        // Poll for AI-generated message (OpenAI takes time to generate)
+                        console.log('⏳ Polling for AI-generated message...');
+                        let aiMessage = null;
+                        let attempts = 0;
+                        const maxAttempts = 10; // 10 attempts with 2-second intervals = 20 seconds max
+                        
+                        while (attempts < maxAttempts) {
+                            attempts++;
+                            console.log(`🔍 AI message poll attempt ${attempts}/${maxAttempts}`);
+                            
+                            const currentLinkedInId = linkedinId || 'vicken-concept';
+                            console.log('🔍 Using LinkedIn ID for polling:', currentLinkedInId);
+                            
+                            const messageResponse = await fetch(`${PLATFROM_URL}/api/calls/${callId}/message`, {
+                                method: 'GET',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'lk-id': currentLinkedInId
+                                }
+                            });
+                            
+                            if (messageResponse.ok) {
+                                const messageData = await messageResponse.json();
+                                console.log('🔍 Message data received:', messageData);
+                                
+                                // Check if AI message is ready (not "No AI message generated yet")
+                                if (messageData.message && 
+                                    messageData.message !== 'No AI message generated yet' && 
+                                    messageData.original_message) {
+                                    console.log('✅ AI message ready!');
+                                    aiMessage = messageData.message || messageData.original_message;
+                                    break;
+                                } else {
+                                    console.log('⏳ AI message not ready yet, waiting 2 seconds...');
+                                    await new Promise(resolve => setTimeout(resolve, 2000));
+                                }
+                            } else {
+                                console.warn(`⚠️ Poll attempt ${attempts} failed with status:`, messageResponse.status);
+                                break;
+                            }
+                        }
+                        
+                        if (attempts >= maxAttempts) {
+                            console.warn('⚠️ AI message generation timeout after', maxAttempts, 'attempts');
+                        }
+                        
+                        // Process the AI message if polling was successful
+                        if (aiMessage) {
+                            if (aiMessage !== 'No AI message generated yet' && 
+                                aiMessage !== arConnectionModel.message) {
+                                console.log('🤖 Using AI-generated message instead of hardcoded message');
+                                console.log('📝 Original message:', arConnectionModel.message);
+                                console.log('🤖 AI message:', aiMessage);
+                                
+                                // Update the message to use AI-generated content
+                                arConnectionModel.message = aiMessage;
+                            } else {
+                                console.log('⚠️ No AI message available, using original message');
+                                console.log('🔍 AI message:', aiMessage);
+                                console.log('🔍 Original message:', arConnectionModel.message);
+                            }
+                        } else {
+                            console.warn('⚠️ Could not fetch AI message after polling, using original message');
+                        }
+                    } catch (msgErr) {
+                        console.warn('⚠️ Failed to fetch AI message:', msgErr.message);
+                        console.warn('🔍 Full error:', msgErr);
+                    }
                     
                     // Only set deduplication flag after successful API call
                     const attemptKey = `call_attempted_${currentCampaign.id}_${lead.connectionId}`;
@@ -2677,6 +2758,9 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                     } catch (e) {}
                 }
             }
+
+            // Send the LinkedIn message (after updating with AI message if it's a call)
+            messageConnection(lead)
         }else     if(nodeModel.value == 'send-invites'){
             console.log('📨 Executing send-invites action...');
         
