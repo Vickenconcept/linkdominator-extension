@@ -2072,7 +2072,22 @@ const setCampaignAlarm = async (campaign) => {
                             acceptedTime: node.acceptedTime,
                             acceptedAction: node.acceptedAction,
                             notAcceptedTime: node.notAcceptedTime,
-                            notAcceptedAction: node.notAcceptedAction
+                            notAcceptedAction: node.notAcceptedAction,
+                            runStatus: node.runStatus
+                        })));
+                        
+                        // Debug: Show what we're looking for vs what we have
+                        console.log(`🔍 DEBUG: Looking for nodes with statusLastId: ${statusLastId}`);
+                        console.log(`🔍 DEBUG: Available acceptedAction values:`, nodeModelArr.map(n => n.acceptedAction).filter(v => v !== undefined));
+                        console.log(`🔍 DEBUG: Available notAcceptedAction values:`, nodeModelArr.map(n => n.notAcceptedAction).filter(v => v !== undefined));
+                        
+                        // Debug: Show all action nodes and their status
+                        const actionNodes = nodeModelArr.filter(n => n.type === 'action');
+                        console.log(`🔍 DEBUG: Available action nodes:`, actionNodes.map(n => ({
+                            key: n.key,
+                            label: n.label,
+                            value: n.value,
+                            runStatus: n.runStatus
                         })));
                         
                         for(let nodeModel of nodeModelArr){
@@ -2087,6 +2102,34 @@ const setCampaignAlarm = async (campaign) => {
                                 console.log(`🎯 Found acceptedAction node: ${nodeModel.key} - ${nodeModel.label}`);
                                 acceptedNodeItem = nodeModel
                                 currentNodeKey = nodeModel.key
+                            }
+                        }
+                        
+                        // If no node found with exact statusLastId match, try to find the next available action node
+                        if (!acceptedNodeItem) {
+                            console.log(`🔍 No exact match found for statusLastId: ${statusLastId}, looking for next available action...`);
+                            
+                            // Debug: Show all action nodes and their properties
+                            const availableActionNodes = nodeModelArr.filter(n => n.type === 'action');
+                            console.log(`🔍 DEBUG: Checking ${availableActionNodes.length} action nodes:`);
+                            availableActionNodes.forEach((node, index) => {
+                                console.log(`   ${index + 1}. Key: ${node.key}, Label: ${node.label}, Value: ${node.value}, RunStatus: ${node.runStatus}`);
+                            });
+                            
+                            for(let nodeModel of nodeModelArr){
+                                console.log(`🔍 Checking node: ${nodeModel.key} - ${nodeModel.label} (${nodeModel.value})`);
+                                console.log(`   - type: ${nodeModel.type}`);
+                                console.log(`   - runStatus: ${nodeModel.runStatus}`);
+                                console.log(`   - value: ${nodeModel.value}`);
+                                
+                                if(nodeModel.type === 'action' && nodeModel.runStatus === false && nodeModel.value !== 'send-invites'){
+                                    console.log(`🎯 FOUND MATCHING ACTION NODE: ${nodeModel.key} - ${nodeModel.label} (${nodeModel.value})`);
+                                    acceptedNodeItem = nodeModel
+                                    currentNodeKey = nodeModel.key
+                                    break;
+                                } else {
+                                    console.log(`   ❌ Skipped: type=${nodeModel.type === 'action'}, runStatus=${nodeModel.runStatus === false}, value=${nodeModel.value !== 'send-invites'}`);
+                                }
                             }
                         }
                         
@@ -2490,13 +2533,19 @@ const setCampaignAlarm = async (campaign) => {
         
         // For debugging: let's try a simpler approach - find the next unrun action node
         console.log('🔄 Attempting fallback: find next unrun action node...');
+        console.log(`🔍 DEBUG: Checking ${nodeModelArr.length} nodes for fallback...`);
+        
         for(let i = 1; i < nodeModelArr.length; i++) {
             let node = nodeModelArr[i];
+            console.log(`🔍 Fallback check ${i}: Key: ${node.key}, Type: ${node.type}, Value: ${node.value}, RunStatus: ${node.runStatus}`);
+            
             if(node.type === 'action' && node.runStatus === false && node.value !== 'end') {
                 console.log(`✅ Found next unrun action node: ${node.key} - ${node.label} (${node.value})`);
                 nodeItem = node;
                 alarmName = `fallback_${node.value}`;
                 break;
+            } else {
+                console.log(`❌ Skipped: type=${node.type === 'action'}, runStatus=${node.runStatus === false}, value=${node.value !== 'end'}`);
             }
         }
         
@@ -2805,8 +2854,49 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
         return;
     }
     
-    // If current node is call, return early to avoid resetting runStatus with stale nodeModel
+    // If current node is call, check if campaign should be completed
     if (nodeModel.value === 'call') {
+        console.log('🔧 DEBUG: Call action completed, checking if campaign should be marked as completed...');
+        
+        try {
+            // Check if there are any more unrun actions in the sequence
+            await getCampaignSequence(currentCampaign.id);
+            console.log(`📋 Campaign sequence loaded with ${campaignSequence.nodeModel.length} nodes`);
+            
+            // Find any remaining unrun action nodes (excluding send-invites and call)
+            const remainingActions = campaignSequence.nodeModel.filter(node => 
+                node.type === 'action' && 
+                node.runStatus === false && 
+                node.value !== 'send-invites' && 
+                node.value !== 'call' &&
+                node.value !== 'end'
+            );
+            
+            if (remainingActions.length === 0) {
+                console.log('🎉 No more actions available - marking campaign as completed');
+                
+                await updateCampaign({
+                    campaignId: currentCampaign.id,
+                    status: 'completed'
+                });
+                console.log('✅ Campaign marked as completed in backend');
+                
+                // Clear any pending alarms for this campaign
+                chrome.alarms.clear('lead_generation');
+                chrome.alarms.clear('accepted_leads');
+                console.log('🧹 Cleared pending campaign alarms');
+                
+                console.log('🎊 CAMPAIGN COMPLETED SUCCESSFULLY!');
+                console.log('📞 All call actions have been completed');
+                console.log('🛑 Campaign will no longer run automatically');
+            } else {
+                console.log(`📋 Found ${remainingActions.length} remaining actions, campaign will continue`);
+                console.log('Remaining actions:', remainingActions.map(a => `${a.label} (${a.value})`));
+            }
+        } catch (error) {
+            console.error('❌ Failed to check campaign completion status:', error);
+        }
+        
         console.log('🔧 DEBUG: Returning early after call node handling to preserve completion state');
         return;
     }
@@ -4528,8 +4618,18 @@ self.checkCampaignAcceptances = (campaignId) => {
 /**
  * Continuous monitoring system to check for invite acceptances
  */
+// Flag to prevent multiple monitoring instances
+let isMonitoringStarted = false;
+
 const startContinuousMonitoring = () => {
+    // Prevent multiple instances from starting
+    if (isMonitoringStarted) {
+        console.log('⚠️ Continuous monitoring already started, skipping...');
+        return;
+    }
+    
     console.log('🔄 Starting continuous monitoring for invite acceptances...');
+    isMonitoringStarted = true;
     
     // Clear any existing monitoring alarm first
     chrome.alarms.clear('continuous_invite_monitoring', () => {
@@ -4537,32 +4637,51 @@ const startContinuousMonitoring = () => {
         
         // Set up a recurring alarm to check for acceptances every 5 minutes
         chrome.alarms.create('continuous_invite_monitoring', {
-            delayInMinutes: 0.1, // Start checking after 1 minute
-            periodInMinutes: 1 // Then check every 1 minute
+            delayInMinutes: 0.1, // Start checking after 5 minutes
+            periodInMinutes: 1 // Then check every 5 minutes (fixed from 1 minute)
         });
         
         console.log('⏰ Continuous monitoring alarm created - will check every 5 minutes');
-        console.log('🎯 Monitoring will start in 1 minute and then check every 5 minutes');
+        console.log('🎯 Monitoring will start in 5 minutes and then check every 5 minutes');
     });
 };
 
 // Manual function to start monitoring (for testing)
 self.startMonitoring = () => {
     console.log('🚀 MANUALLY STARTING MONITORING...');
+    isMonitoringStarted = false; // Reset flag to allow restart
     startContinuousMonitoring();
     return 'Monitoring started manually - check console for logs';
 };
+
+// Manual function to stop monitoring (for testing)
+self.stopMonitoring = () => {
+    console.log('🛑 MANUALLY STOPPING MONITORING...');
+    chrome.alarms.clear('continuous_invite_monitoring');
+    isMonitoringStarted = false;
+    return 'Monitoring stopped manually';
+};
+
+// Flag to prevent concurrent execution of acceptance checks
+let isCheckingAcceptances = false;
 
 /**
  * Check all pending leads for invite acceptances (regardless of campaign status)
  */
 const checkAllCampaignsForAcceptances = async () => {
+    // Prevent concurrent execution
+    if (isCheckingAcceptances) {
+        console.log('⚠️ Acceptance check already in progress, skipping...');
+        return;
+    }
+    
+    isCheckingAcceptances = true;
     console.log('🔍 STARTING ACCEPTANCE CHECK...');
     console.log('🔑 LinkedIn ID:', linkedinId);
     console.log('🌐 Platform URL:', PLATFROM_URL);
     
     try {
-        // Get ALL campaigns (not just active ones)
+        // Get ONLY ACTIVE campaigns that are currently running
         console.log('📡 Fetching campaigns from API...');
         const response = await fetch(`${PLATFROM_URL}/api/campaigns`, {
             method: 'GET',
@@ -4580,15 +4699,40 @@ const checkAllCampaignsForAcceptances = async () => {
         const campaignsData = await response.json();
         console.log('📊 Campaigns data received:', campaignsData);
         
-        // Get ALL campaigns that have Lead generation or Custom sequence types (regardless of status)
-        const campaignsToCheck = campaignsData.data.filter(campaign => 
+        // Get campaigns that have Lead generation or Custom sequence types
+        const allCampaigns = campaignsData.data;
+        const eligibleCampaigns = allCampaigns.filter(campaign => 
             ['Lead generation', 'Custom'].includes(campaign.sequenceType)
         );
         
-        console.log(`🎯 Found ${campaignsToCheck.length} campaigns to check for acceptances:`, campaignsToCheck.map(c => ({id: c.id, name: c.name, sequenceType: c.sequenceType})));
+        // Separate active and inactive campaigns
+        // Note: 'running' status should be treated as active
+        const activeCampaigns = eligibleCampaigns.filter(campaign => 
+            campaign.status === 'active' || campaign.status === 'running'
+        );
+        const inactiveCampaigns = eligibleCampaigns.filter(campaign => 
+            campaign.status !== 'active' && campaign.status !== 'running'
+        );
+        
+        // Log filtering details for debugging
+        console.log(`📊 Total campaigns found: ${allCampaigns.length}`);
+        console.log(`🎯 Eligible campaigns (Lead gen/Custom): ${eligibleCampaigns.length}`);
+        console.log(`✅ Active campaigns: ${activeCampaigns.length}`, activeCampaigns.map(c => ({id: c.id, name: c.name, status: c.status})));
+        console.log(`⏸️ Inactive campaigns: ${inactiveCampaigns.length}`, inactiveCampaigns.map(c => ({id: c.id, name: c.name, status: c.status})));
+        
+        // Prioritize active campaigns, but also check inactive ones for cross-campaign acceptances
+        const campaignsToCheck = [...activeCampaigns, ...inactiveCampaigns];
+        
+        console.log(`🔍 Will check ${campaignsToCheck.length} campaigns: ${activeCampaigns.length} active + ${inactiveCampaigns.length} inactive`);
+        
+        // Early exit if no campaigns to check
+        if (campaignsToCheck.length === 0) {
+            console.log('✅ No campaigns found - skipping acceptance check');
+            return;
+        }
         
         for (const campaign of campaignsToCheck) {
-            console.log(`\n🔍 Checking campaign ${campaign.id} (${campaign.name})...`);
+            console.log(`\n🔍 Checking campaign ${campaign.id} (${campaign.name}) [Status: ${campaign.status}]...`);
             try {
                 // Get leads for this campaign
                 console.log(`📋 Getting leads for campaign ${campaign.id}...`);
@@ -4597,8 +4741,19 @@ const checkAllCampaignsForAcceptances = async () => {
                 console.log(`👥 Found ${campaignLeadgenRunning.length} leads in campaign ${campaign.id}`);
                 
                 if (campaignLeadgenRunning.length === 0) {
-                    console.log(`⚠️ No leads found for campaign ${campaign.id}, skipping...`);
+                    if (campaign.status === 'active') {
+                        console.log(`⚠️ ACTIVE campaign ${campaign.id} has no leads - this might indicate an issue!`);
+                    } else {
+                        console.log(`⏸️ INACTIVE campaign ${campaign.id} has no leads - skipping (normal for stopped campaigns)`);
+                    }
                     continue;
+                }
+                
+                // For inactive campaigns, only check if they have leads (for cross-campaign acceptance tracking)
+                if (campaign.status !== 'active' && campaign.status !== 'running') {
+                    console.log(`⏸️ Checking INACTIVE campaign ${campaign.id} because it has ${campaignLeadgenRunning.length} leads (cross-campaign acceptance tracking)`);
+                } else {
+                    console.log(`✅ Checking ACTIVE campaign ${campaign.id} with ${campaignLeadgenRunning.length} leads`);
                 }
                 
                 // Check each lead for acceptance
@@ -4667,10 +4822,12 @@ const checkAllCampaignsForAcceptances = async () => {
                                     if (campaignSequence && campaignSequence.nodeModel) {
                                         console.log(`📋 Campaign sequence loaded with ${campaignSequence.nodeModel.length} nodes`);
                                         
-                                        // Find the next action node for accepted connections
-                                        const nextActionNode = campaignSequence.nodeModel.find(node => 
-                                            node.acceptedAction && node.acceptedAction == 3
-                                        );
+                        // Find the next action node for accepted connections
+                        // Look for nodes that have acceptedAction property or are action nodes that haven't run yet
+                        const nextActionNode = campaignSequence.nodeModel.find(node => 
+                            (node.acceptedAction && node.acceptedAction == 3) || 
+                            (node.type === 'action' && node.runStatus === false && node.value !== 'send-invites')
+                        );
                                         
                                         if (nextActionNode) {
                                             console.log(`🎯 FOUND NEXT ACTION: ${nextActionNode.label} (${nextActionNode.value})`);
@@ -4739,7 +4896,11 @@ const checkAllCampaignsForAcceptances = async () => {
         }
         
     } catch (error) {
-        // Error in continuous monitoring
+        console.error('❌ Error in acceptance check:', error);
+    } finally {
+        // Reset the flag to allow future executions
+        isCheckingAcceptances = false;
+        console.log('✅ Acceptance check completed');
     }
 };
 
