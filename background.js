@@ -2661,6 +2661,9 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                     
                     // Now fetch the AI-generated message from the backend
                     console.log('🔍 Attempting to fetch AI-generated message...');
+                    let aiMessage = null;
+                    let messageSentViaAI = false;
+                    
                     try {
                         const callId = callResponse.call_id || callResponse.data?.call_id;
                         console.log('🔍 Call ID extracted:', callId);
@@ -2672,7 +2675,6 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                         
                         // Poll for AI-generated message (OpenAI takes time to generate)
                         console.log('⏳ Polling for AI-generated message...');
-                        let aiMessage = null;
                         let attempts = 0;
                         const maxAttempts = 10; // 10 attempts with 2-second intervals = 20 seconds max
                         
@@ -2749,6 +2751,7 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                                     // Send the message using the existing messageConnection function
                                     console.log('🚀 Calling messageConnection function...');
                                     messageConnection({ uploads: [] });
+                                    messageSentViaAI = true;
                                     console.log('✅ AI-generated message sent successfully to LinkedIn!');
                                 } catch (sendErr) {
                                     console.error('❌ Failed to send AI message to LinkedIn:', sendErr);
@@ -2786,8 +2789,13 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                 }
             }
 
-            // Send the LinkedIn message (after updating with AI message if it's a call)
-            messageConnection(lead)
+            // Send the LinkedIn message (only if not already sent via AI message processing)
+            if (!messageSentViaAI) {
+                console.log('📤 Sending message via standard method (no AI message or AI message not used)');
+                messageConnection(lead);
+            } else {
+                console.log('✅ Message already sent via AI message processing, skipping duplicate send');
+            }
         }else     if(nodeModel.value == 'send-invites'){
             console.log('📨 Executing send-invites action...');
         
