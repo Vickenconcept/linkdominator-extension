@@ -1105,7 +1105,47 @@ const processCallReply = async (message, profileId, connectionId) => {
             // Handle AI-suggested response
             if (result.suggested_response && result.analysis.next_action === 'schedule_call') {
                 console.log('🤖 AI suggests scheduling a call');
-                // TODO: Implement automatic call scheduling
+
+                try {
+                    // Prefer scheduling details from the response; fallback to API fetch
+                    let scheduling = result.scheduling;
+                    if (!scheduling) {
+                        const schedRes = await fetch(`${PLATFROM_URL}/api/calls/${callId}/scheduling`, {
+                            method: 'GET',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'lk-id': linkedinId
+                            }
+                        });
+                        if (schedRes.ok) {
+                            scheduling = await schedRes.json();
+                        }
+                    }
+
+                    if (scheduling && (scheduling.scheduling_message || scheduling.schedulingMessage)) {
+                        const messageText = scheduling.scheduling_message || scheduling.schedulingMessage;
+
+                        // Prepare minimal arConnectionModel for messageConnection()
+                        if (typeof arConnectionModel !== 'object' || arConnectionModel === null) {
+                            // eslint-disable-next-line no-undef
+                            arConnectionModel = {};
+                        }
+                        arConnectionModel.message = messageText;
+                        arConnectionModel.connectionId = connectionId;
+                        // Use existing conversation if available
+                        arConnectionModel.conversationUrnId = (typeof result.analysis?.conversation_urn_id === 'string' && result.analysis.conversation_urn_id) ? result.analysis.conversation_urn_id : undefined;
+                        arConnectionModel.distance = 1;
+
+                        console.log('📤 Sending scheduling message via LinkedIn...', { hasConversation: !!arConnectionModel.conversationUrnId });
+                        // Reuse existing LinkedIn messaging helper
+                        await messageConnection({ uploads: [] });
+                        console.log('✅ Scheduling message sent');
+                    } else {
+                        console.warn('⚠️ No scheduling details available to send');
+                    }
+                } catch (sendErr) {
+                    console.error('❌ Failed to send scheduling message:', sendErr);
+                }
             }
             
             return result;
@@ -1902,6 +1942,20 @@ const setCampaignAlarm = async (campaign) => {
                             
                             lead.acceptedStatus = wasAccepted;
                             console.log(`✅ Updated acceptedStatus for ${lead.name}: ${lead.acceptedStatus}`);
+                        } else if(lead.acceptedStatus === true) {
+                            // Lead is already marked as accepted, verify they're still 1st degree
+                            console.log(`✅ ${lead.name} is already marked as accepted, verifying network status...`);
+                            let networkInfo = await _getProfileNetworkInfo(lead);
+                            lead['networkDegree'] = networkInfo.data.distance.value
+                            console.log(`📊 Network degree for ${lead.name}: ${lead.networkDegree}`);
+                            await updateLeadNetworkDegree(lead)
+                            
+                            // If they're still 1st degree, they're ready for the next sequence step
+                            if(lead['networkDegree'] == 'DISTANCE_1') {
+                                console.log(`🎯 ${lead.name} is confirmed 1st degree and ready for sequence execution`);
+                            } else {
+                                console.log(`⚠️ ${lead.name} is no longer 1st degree, may need re-invitation`);
+                            }
                         }
                         
                         if(lead.acceptedStatus === true){
@@ -2504,49 +2558,87 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
         console.log(`✅ 20-second delay completed`);
     }
     
+    // Handle completion logic after processing all leads
     if(nodeModel.value == 'send-invites'){
-        // 🎯 COMPLETION LOGIC: After sending invites, mark campaign as completed
-        console.log('🎉 All invites sent successfully! Marking campaign as completed...');
+        // 🎯 COMPLETION LOGIC: After sending invites, check for next node
+        console.log('🎉 All invites sent successfully! Checking for next node...');
+        
+        // Mark the send-invites node as completed
+        try {
+            await updateSequenceNodeModel(currentCampaign, {
+                ...nodeModel,
+                runStatus: true
+            });
+            console.log('✅ Send-invites node marked as completed');
+        } catch (error) {
+            console.error('❌ Failed to mark send-invites node as completed:', error.message);
+        }
         
         // Update status in storage for persistence
         chrome.storage.local.set({ 
-            lastCampaignStatus: 'completed',
-            lastCampaignMessage: 'All invites sent successfully!'
+            lastCampaignStatus: 'invites_sent',
+            lastCampaignMessage: 'All invites sent! Checking for next step...'
         });
-        
-        // Clear completion status after 30 seconds to return to ready state
-        setTimeout(() => {
-            chrome.storage.local.remove(['lastCampaignStatus', 'lastCampaignMessage']);
-            console.log('🔄 Cleared completion status, returning to ready state');
-        }, 30000);
         
         // Try to update UI status (with error handling)
         try {
-            updateCampaignStatus('completed', 'All invites sent!');
+            updateCampaignStatus('processing', 'All invites sent! Checking for next step...');
         } catch (error) {
             console.log('⚠️ Could not update UI status (content script not available):', error.message);
         }
         
+        // Check if there's a next node in the sequence
         try {
-            await updateCampaign({
-                campaignId: currentCampaign.id,
-                status: 'completed'
-            });
-            console.log('✅ Campaign marked as completed in backend');
+            await getCampaignSequence(currentCampaign.id);
+            console.log(`📋 Campaign sequence loaded with ${campaignSequence.nodeModel.length} nodes`);
+            
+            // Find the next node after send-invites
+            const nextNode = campaignSequence.nodeModel.find(node => 
+                node.value !== 'send-invites' && !node.runStatus
+            );
+            
+            if (nextNode) {
+                console.log(`🔄 Found next node: ${nextNode.label} (${nextNode.value})`);
+                console.log(`⏰ Executing next node immediately...`);
                 
-            // Clear any pending alarms for this campaign
-            chrome.alarms.clear('lead_generation');
-            chrome.alarms.clear('accepted_leads');
-            console.log('🧹 Cleared pending campaign alarms');
-            
-            console.log('🎊 CAMPAIGN COMPLETED SUCCESSFULLY!');
-            console.log('📧 All LinkedIn invites have been sent');
-            console.log('💡 Check LinkedIn → My Network → Sent invitations to verify');
-            console.log('🛑 Campaign will no longer run automatically');
-            
-            return; // Exit early - no more processing needed
+                // Get accepted leads for the next node
+                await getLeadGenRunning(currentCampaign.id);
+                const acceptedLeads = campaignLeadgenRunning.filter(lead => lead.acceptedStatus === true);
+                
+                if (acceptedLeads.length > 0) {
+                    console.log(`👥 Found ${acceptedLeads.length} accepted leads for next node execution`);
+                    
+                    // Execute the next node immediately
+                    await runSequence(currentCampaign, acceptedLeads, nextNode);
+                    console.log('✅ Next node executed successfully');
+                } else {
+                    console.log('⚠️ No accepted leads found for next node execution');
+                }
+            } else {
+                console.log('❌ No next node found, marking campaign as completed');
+                
+                try {
+                    await updateCampaign({
+                        campaignId: currentCampaign.id,
+                        status: 'completed'
+                    });
+                    console.log('✅ Campaign marked as completed in backend');
+                        
+                    // Clear any pending alarms for this campaign
+                    chrome.alarms.clear('lead_generation');
+                    chrome.alarms.clear('accepted_leads');
+                    console.log('🧹 Cleared pending campaign alarms');
+                    
+                    console.log('🎊 CAMPAIGN COMPLETED SUCCESSFULLY!');
+                    console.log('📧 All LinkedIn invites have been sent');
+                    console.log('💡 Check LinkedIn → My Network → Sent invitations to verify');
+                    console.log('🛑 Campaign will no longer run automatically');
+                } catch (error) {
+                    console.error('❌ Failed to mark campaign as completed:', error);
+                }
+            }
         } catch (error) {
-            console.error('❌ Failed to mark campaign as completed:', error);
+            console.error('❌ Failed to check for next node:', error);
         }
     }
     
@@ -4360,10 +4452,13 @@ const checkAllCampaignsForAcceptances = async () => {
                     
                     // Check for pending invites (accept_status = 0 or false, status_last_id = 2)
                     const isPendingInvite = (acceptedStatus === false || acceptedStatus === 0) && statusLastId == 2;
+                    // Also check for leads that are already 1st-degree but not marked as accepted (like Eleazer)
+                    const isAlreadyAccepted = (acceptedStatus === false || acceptedStatus === 0) && statusLastId == 1;
                     // console.log(`🔍 Is pending invite: ${isPendingInvite} (acceptedStatus: ${acceptedStatus}, statusLastId: ${statusLastId})`);
+                    // console.log(`🔍 Is already accepted but not marked: ${isAlreadyAccepted}`);
                     
-                    if (isPendingInvite) {
-                        console.log(`🌐 Checking network status for pending invite: ${lead.name}...`);
+                    if (isPendingInvite || isAlreadyAccepted) {
+                        console.log(`🌐 Checking network status for ${isPendingInvite ? 'pending invite' : 'already accepted lead'}: ${lead.name}...`);
                         try {
                             const networkInfo = await _getProfileNetworkInfo(lead);
                             const networkDegree = networkInfo.data.distance.value;
