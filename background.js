@@ -5259,18 +5259,29 @@ self.testLinkedInMessagesAPI = async () => {
                                     }
                                 }
                                 
-                                // Check if this is from Eleazar
-                                const isFromEleazar = sender.toLowerCase().includes('eleazar') || 
-                                                    sender.toLowerCase().includes('nzerem') ||
-                                                    msg.from?.entityUrn?.includes('ACoAADt-s1EBpDjmzFwFx9B');
+                                // Enhanced lead detection (generic - works for any LinkedIn user)
+                                const isFromLead = 
+                                    // Check if this is NOT from us (William Victor) and has meaningful text
+                                    (!sender.toLowerCase().includes('william') && 
+                                     !sender.toLowerCase().includes('victor') && 
+                                     !msg.from?.entityUrn?.includes('vicken-concept') &&
+                                     text && text.trim().length > 0 && text.length < 1000 &&
+                                     // Exclude AI-generated messages (they contain template placeholders)
+                                     !text.includes('[Your Name]') &&
+                                     !text.includes('[Your Position]') &&
+                                     !text.includes('[Your Company]') &&
+                                     !text.includes('[Date and Time]') &&
+                                     !text.includes('[Duration]') &&
+                                     !text.includes('Dear Mr.') &&
+                                     !text.includes('Dear Eleazar Nzerem'));
                                 
                                 console.log(`   👤 From: ${sender}`);
                                 console.log(`   💬 Text: "${text}"`);
                                 console.log(`   🕐 Time: ${new Date(msg.createdAt).toLocaleString()}`);
-                                console.log(`   🎯 Is from Eleazar: ${isFromEleazar}`);
+                                console.log(`   🎯 Is from Lead: ${isFromLead}`);
                                 
-                                if (isFromEleazar && text) {
-                                    console.log(`🎉 FOUND ELEAZAR'S REPLY: "${text}"`);
+                                if (isFromLead && text) {
+                                    console.log(`🎉 FOUND LEAD'S REPLY: "${text}"`);
                                 }
                             });
                             
@@ -5481,32 +5492,33 @@ self.checkEleazarReplyNow = async () => {
                         }
                     }
                     
-                    // Enhanced Eleazar detection - check multiple ways
-                    const isFromEleazar = 
-                        // Check by name
-                        sender.toLowerCase().includes('eleazar') || 
-                        sender.toLowerCase().includes('nzerem') ||
-                        // Check by entity URN
-                        msg.from?.entityUrn?.includes('ACoAADt-s1EBpDjmzFwFx9B') ||
-                        // Check by profile ID in various fields
-                        (msg.from && JSON.stringify(msg.from).includes('ACoAADt-s1EBpDjmzFwFx9B')) ||
-                        // Check if this is NOT from us (William Victor) and has text
+                    // Enhanced lead detection (generic - works for any LinkedIn user)
+                    const isFromLead = 
+                        // Check if this is NOT from us (William Victor) and has meaningful text
                         (!sender.toLowerCase().includes('william') && 
                          !sender.toLowerCase().includes('victor') && 
                          !msg.from?.entityUrn?.includes('vicken-concept') &&
-                         text && text.trim().length > 0);
+                         text && text.trim().length > 0 && text.length < 1000 &&
+                         // Exclude AI-generated messages (they contain template placeholders)
+                         !text.includes('[Your Name]') &&
+                         !text.includes('[Your Position]') &&
+                         !text.includes('[Your Company]') &&
+                         !text.includes('[Date and Time]') &&
+                         !text.includes('[Duration]') &&
+                         !text.includes('Dear Mr.') &&
+                         !text.includes('Dear Eleazar Nzerem'));
                     
                     console.log('🔍 Sender detection details:');
                     console.log('   - sender:', sender);
                     console.log('   - entityUrn:', msg.from?.entityUrn);
-                    console.log('   - isFromEleazar:', isFromEleazar);
+                    console.log('   - isFromLead:', isFromLead);
                     
                     console.log(`   👤 From: ${sender}`);
                     console.log(`   💬 Text: "${text}"`);
                     console.log(`   🕐 Time: ${new Date(msg.createdAt).toLocaleString()}`);
-                    console.log(`   🎯 Is from Eleazar: ${isFromEleazar}`);
+                    console.log(`   🎯 Is from Lead: ${isFromLead}`);
                     
-                    if (isFromEleazar && text) {
+                    if (isFromLead && text) {
                         eleazarReply = {
                             text: text,
                             sender: sender,
@@ -5562,9 +5574,9 @@ self.checkEleazarReplyNow = async () => {
     }
 };
 
-// Function to immediately find and analyze Eleazar's replies
-self.findEleazarReplies = async () => {
-    console.log('🔍 FINDING ELEAZAR\'S REPLIES WITH ENHANCED DETECTION...');
+// Function to find and analyze any lead's replies (generic version)
+self.findLeadReplies = async (connectionId, leadName) => {
+    console.log(`🔍 FINDING ${leadName}'S REPLIES WITH ENHANCED DETECTION...`);
     
     try {
         // Get CSRF token
@@ -5576,8 +5588,8 @@ self.findEleazarReplies = async () => {
         
         console.log('✅ CSRF token found');
         
-        // Use the known working conversation ID
-        const conversationId = '2-MmJlMWU1MzMtMGUzYi00ODI2LThjNWEtYjQyZTAwZWEyNjM4XzEwMA==';
+        // Use the conversation ID from the connection
+        const conversationId = connectionId;
         const voyagerApi = 'https://www.linkedin.com/voyager/api';
         
         console.log(`🎯 Checking conversation: ${conversationId}`);
@@ -5601,9 +5613,9 @@ self.findEleazarReplies = async () => {
             console.log(`📊 Found ${messages.length} messages in conversation`);
             
             if (messages.length > 0) {
-                console.log('🎉 MESSAGES FOUND! Analyzing for Eleazar\'s replies...');
+                console.log(`🎉 MESSAGES FOUND! Analyzing for ${leadName}'s replies...`);
                 
-                const eleazarReplies = [];
+                        const leadReplies = [];
                 let messageCount = 0;
                 
                 messages.forEach((msg, index) => {
@@ -5653,64 +5665,65 @@ self.findEleazarReplies = async () => {
                         }
                     }
                     
-                    // Enhanced Eleazar detection
-                    const isFromEleazar = 
-                        // Check by name
-                        sender.toLowerCase().includes('eleazar') || 
-                        sender.toLowerCase().includes('nzerem') ||
-                        // Check by entity URN
-                        msg.from?.entityUrn?.includes('ACoAADt-s1EBpDjmzFwFx9B') ||
-                        // Check by profile ID in various fields
-                        (msg.from && JSON.stringify(msg.from).includes('ACoAADt-s1EBpDjmzFwFx9B')) ||
+                    // Enhanced lead detection (generic - works for any LinkedIn user)
+                    const isFromLead = 
                         // Check if this is NOT from us (William Victor) and has meaningful text
                         (!sender.toLowerCase().includes('william') && 
                          !sender.toLowerCase().includes('victor') && 
                          !msg.from?.entityUrn?.includes('vicken-concept') &&
-                         text && text.trim().length > 0 && text.length < 1000);
+                         text && text.trim().length > 0 && text.length < 1000 &&
+                         // Exclude AI-generated messages (they contain template placeholders)
+                         !text.includes('[Your Name]') &&
+                         !text.includes('[Your Position]') &&
+                         !text.includes('[Your Company]') &&
+                         !text.includes('[Date and Time]') &&
+                         !text.includes('[Duration]') &&
+                         !text.includes('Dear Mr.') &&
+                         !text.includes('Dear Eleazar Nzerem'));
                     
                     console.log('🔍 Sender detection details:');
                     console.log('   - sender:', sender);
                     console.log('   - entityUrn:', msg.from?.entityUrn);
-                    console.log('   - isFromEleazar:', isFromEleazar);
+                    console.log('   - isFromLead:', isFromLead);
                     
                     console.log(`   👤 From: ${sender}`);
                     console.log(`   💬 Text: "${text}"`);
                     console.log(`   🕐 Time: ${new Date(msg.createdAt).toLocaleString()}`);
-                    console.log(`   🎯 Is from Eleazar: ${isFromEleazar}`);
+                    console.log(`   🎯 Is from Lead: ${isFromLead}`);
                     
-                    if (isFromEleazar && text) {
-                        eleazarReplies.push({
+                    if (isFromLead && text) {
+                        leadReplies.push({
                             text: text,
                             sender: sender,
                             timestamp: msg.createdAt,
                             messageId: msg.entityUrn,
                             messageNumber: index + 1
                         });
-                        console.log(`🎉 FOUND ELEAZAR'S REPLY #${eleazarReplies.length}: "${text}"`);
+                                console.log(`🎉 FOUND LEAD'S REPLY #${leadReplies.length}: "${text}"`);
                     }
                     
                     messageCount++;
                 });
                 
-                if (eleazarReplies.length > 0) {
-                    console.log('\n🎯 ELEAZAR REPLIED!');
-                    console.log(`📊 Found ${eleazarReplies.length} replies from Eleazar:`);
-                    
-                    eleazarReplies.forEach((reply, index) => {
+                        if (leadReplies.length > 0) {
+                            console.log(`\n🎯 ${leadName} REPLIED!`);
+                            console.log(`📊 Found ${leadReplies.length} replies from ${leadName}:`);
+                            
+                            leadReplies.forEach((reply, index) => {
                         console.log(`\n📝 Reply ${index + 1}:`);
                         console.log(`   💬 Text: "${reply.text}"`);
                         console.log(`   🕐 Time: ${new Date(reply.timestamp).toLocaleString()}`);
                         console.log(`   📍 Message #: ${reply.messageNumber}`);
                     });
                     
-                    return {
-                        found: true,
-                        replies: eleazarReplies,
-                        totalMessages: messageCount,
-                        allMessages: messages
-                    };
+                            return {
+                                found: true,
+                                replies: leadReplies,
+                                totalMessages: messageCount,
+                                allMessages: messages
+                            };
                 } else {
-                    console.log('\n⏳ No replies from Eleazar found yet');
+                    console.log(`\n⏳ No replies from ${leadName} found yet`);
                     console.log(`📊 Analyzed ${messageCount} messages`);
                     return {
                         found: false,
@@ -5728,7 +5741,7 @@ self.findEleazarReplies = async () => {
         }
         
     } catch (error) {
-        console.error('❌ Error finding Eleazar replies:', error);
+            console.error(`❌ Error finding ${leadName} replies:`, error);
         return { found: false, error: error.message };
     }
 };
@@ -5777,8 +5790,9 @@ self.testEleazarAIAnalysis = async () => {
     console.log('🤖 TESTING AI ANALYSIS FOR ELEAZAR\'S REPLIES...');
     
     try {
-        // First, find all of Eleazar's replies
-        const repliesResult = await self.findEleazarReplies();
+        // First, find all of Eleazar's replies (using known connection ID for testing)
+        const eleazarConnectionId = '2-MmJlMWU1MzMtMGUzYi00ODI2LThjNWEtYjQyZTAwZWEyNjM4XzEwMA==';
+        const repliesResult = await self.findLeadReplies(eleazarConnectionId, 'Eleazar Nzerem');
         
         if (!repliesResult.found || !repliesResult.replies) {
             console.log('❌ No replies from Eleazar found');
@@ -5882,7 +5896,8 @@ self.testEleazarAIAnalysis = async () => {
                     console.log(`🎉 POSITIVE RESPONSE DETECTED! "${reply.text}" - Triggering automatic follow-up...`);
                     // Call the full analysis function that will send calendar links
                     setTimeout(() => {
-                        self.analyzeEleazarRepliesWithAI();
+                        // Note: This would need connectionId and leadName parameters to work
+                        console.log('⚠️ Automatic follow-up requires connectionId and leadName parameters');
                     }, 1000);
                 }
         }
@@ -5914,37 +5929,37 @@ self.testEleazarAIAnalysis = async () => {
     }
 };
 
-// Function to analyze Eleazar's replies with AI and trigger appropriate actions
-self.analyzeEleazarRepliesWithAI = async () => {
-    console.log('🤖 ANALYZING ELEAZAR\'S REPLIES WITH AI...');
+// Function to analyze lead replies with AI and trigger appropriate actions (works for any LinkedIn user)
+self.analyzeLeadRepliesWithAI = async (connectionId, leadName) => {
+    console.log(`🤖 ANALYZING ${leadName}'S REPLIES WITH AI...`);
     
     try {
-        // First, find all of Eleazar's replies
-        const repliesResult = await self.findEleazarReplies();
+        // First, find all of the lead's replies
+        const repliesResult = await self.findLeadReplies(connectionId, leadName);
         
         if (!repliesResult.found || !repliesResult.replies) {
-            console.log('❌ No replies from Eleazar found');
+            console.log(`❌ No replies from ${leadName} found`);
             return { success: false, reason: 'No replies found' };
         }
         
-        console.log(`📊 Found ${repliesResult.replies.length} replies from Eleazar`);
+        console.log(`📊 Found ${repliesResult.replies.length} replies from ${leadName}`);
         
-        // Filter out the AI-generated messages (long messages) and focus on Eleazar's actual replies
-        const eleazarActualReplies = repliesResult.replies.filter(reply => {
+        // Filter out the AI-generated messages (long messages) and focus on lead's actual replies
+        const leadActualReplies = repliesResult.replies.filter(reply => {
             const text = reply.text.trim();
             // Filter out long AI-generated messages and focus on short, casual replies
-            return text.length < 200 && !text.includes('Dear Mr. Nzerem') && !text.includes('[Your Name]');
+            return text.length < 200 && !text.includes('Dear Mr.') && !text.includes('[Your Name]');
         });
         
-        console.log(`📊 Found ${eleazarActualReplies.length} actual replies from Eleazar (excluding AI messages)`);
+        console.log(`📊 Found ${leadActualReplies.length} actual replies from ${leadName} (excluding AI messages)`);
         
-        if (eleazarActualReplies.length === 0) {
-            console.log('❌ No actual replies from Eleazar found (only AI messages)');
+        if (leadActualReplies.length === 0) {
+            console.log(`❌ No actual replies from ${leadName} found (only AI messages)`);
             return { success: false, reason: 'No actual replies found' };
         }
         
-        // Analyze the latest reply from Eleazar
-        const latestReply = eleazarActualReplies[eleazarActualReplies.length - 1];
+        // Analyze the latest reply from the lead
+        const latestReply = leadActualReplies[leadActualReplies.length - 1];
         console.log(`🎯 Analyzing latest reply: "${latestReply.text}"`);
         
         // Send to AI for analysis
@@ -5957,11 +5972,11 @@ self.analyzeEleazarRepliesWithAI = async () => {
                 'Content-Type': 'application/json',
                 'lk-id': linkedinId
             },
-            body: JSON.stringify({
-                message: latestReply.text,
-                leadName: 'Eleazar Nzerem',
-                context: 'LinkedIn message response analysis'
-            })
+                        body: JSON.stringify({
+                            message: latestReply.text,
+                            leadName: leadName,
+                            context: 'LinkedIn message response analysis'
+                        })
         });
         
         if (!aiResponse.ok) {
@@ -5999,8 +6014,8 @@ self.analyzeEleazarRepliesWithAI = async () => {
         if (isPositive) {
             console.log('🎉 POSITIVE RESPONSE DETECTED! Generating calendar link...');
             
-            // Generate calendar link
-            const calendarResponse = await fetch(`${platformUrl}/api/calls/eleazar_${Date.now()}/calendar-link`, {
+                        // Generate calendar link
+                        const calendarResponse = await fetch(`${platformUrl}/api/calls/${connectionId}_${Date.now()}/calendar-link`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -6015,9 +6030,9 @@ self.analyzeEleazarRepliesWithAI = async () => {
                 // Send the scheduling message to Eleazar
                 console.log('📤 Sending scheduling message to Eleazar...');
                 
-                // Use the known conversation ID and send the scheduling message
-                const conversationId = '2-MmJlMWU1MzMtMGUzYi00ODI2LThjNWEtYjQyZTAwZWEyNjM4XzEwMA==';
-                const voyagerApi = 'https://www.linkedin.com/voyager/api';
+                        // Use the conversation ID from the connection and send the scheduling message
+                        const conversationId = connectionId; // This should be the conversation URN
+                        const voyagerApi = 'https://www.linkedin.com/voyager/api';
                 
                 const tokenResult = await chrome.storage.local.get(['csrfToken']);
                 
@@ -6039,8 +6054,8 @@ self.analyzeEleazarRepliesWithAI = async () => {
                     })
                 });
                 
-                if (sendMessageResponse.ok) {
-                    console.log('✅ Scheduling message sent successfully to Eleazar!');
+                        if (sendMessageResponse.ok) {
+                            console.log(`✅ Scheduling message sent successfully to ${leadName}!`);
                     return {
                         success: true,
                         action: 'calendar_sent',
@@ -6120,8 +6135,8 @@ self.createCallResponsePipeline = async () => {
                         console.log(`👤 From: ${message.sender}`);
                         console.log(`🕐 Time: ${new Date(message.timestamp).toLocaleString()}`);
                         
-                        // Step 3: AI Analysis for positive responses
-                        if (message.sender === 'lead' && message.text.trim().length > 0) {
+                        // Step 3: AI Analysis for positive responses (works for any LinkedIn user)
+                        if (message.isFromLead && message.text.trim().length > 0) {
                             console.log(`🤖 Analyzing message with AI...`);
                             
                             try {
@@ -6476,41 +6491,93 @@ const checkForCallResponses = async () => {
                 
                 try {
                     // Check LinkedIn conversation for new messages
-                    const newMessages = await fetchLinkedInConversation(monitoringData.connectionId, monitoringData.lastCheckedMessageId);
+                    const conversationData = await fetchLinkedInConversation(monitoringData.connectionId, monitoringData.lastCheckedMessageId);
                     
-                    if (newMessages && newMessages.length > 0) {
+                    if (conversationData && conversationData.messages && conversationData.messages.length > 0) {
+                        const newMessages = conversationData.messages;
                         console.log(`📨 Found ${newMessages.length} new messages from ${monitoringData.leadName}`);
                         
                         // Process the latest message
                         const latestMessage = newMessages[newMessages.length - 1];
                         
-                        // Check if this message is from the lead (not from us)
-                        if (latestMessage.sender !== 'us') {
+                        // Check if this message is from the lead (not from us) - works for any LinkedIn user
+                        if (latestMessage.isFromLead) {
                             console.log('✅ New response received from lead:', latestMessage.text);
                             
                             // Send message to backend for AI analysis
                             const analysisResponse = await processCallReplyWithAI(monitoringData.callId, latestMessage.text);
                             
                             if (analysisResponse) {
-                            // Update monitoring status
-                            monitoringData.status = 'response_received';
+                                // Update monitoring status
+                                monitoringData.status = 'response_received';
                                 monitoringData.responseData = analysisResponse;
-                            monitoringData.receivedAt = Date.now();
+                                monitoringData.receivedAt = Date.now();
                                 monitoringData.lastCheckedMessageId = latestMessage.id;
-                            
-                            await chrome.storage.local.set({ [key]: monitoringData });
-                            
-                            // Process the response based on AI analysis
+                                
+                                await chrome.storage.local.set({ [key]: monitoringData });
+                                
+                                // Handle positive responses
                                 if (analysisResponse.isPositive) {
-                                console.log('🎉 Positive response detected! Generating calendar link...');
-                                    await processPositiveCallResponse(monitoringData, analysisResponse);
+                                    console.log('🎉 POSITIVE RESPONSE DETECTED! Generating calendar link...');
+                                    
+                                    try {
+                                        // Generate calendar link
+                                        const calendarResponse = await fetch(`${PLATFROM_URL}/api/calls/${monitoringData.connectionId}_${Date.now()}/calendar-link`, {
+                                            method: 'POST',
+                                            headers: {
+                                                'Content-Type': 'application/json',
+                                                'lk-id': linkedinId || 'vicken-concept'
+                                            }
+                                        });
+                                        
+                                        if (calendarResponse.ok) {
+                                            const calendarData = await calendarResponse.json();
+                                            console.log('✅ Calendar link generated:', calendarData.calendarLink);
+                                            
+                                            // Send the scheduling message to the lead
+                                            console.log(`📤 Sending scheduling message to ${monitoringData.leadName}...`);
+                                            
+                                            // Use the conversation ID from the connection and send the scheduling message
+                                            const conversationId = monitoringData.connectionId;
+                                            const voyagerApi = 'https://www.linkedin.com/voyager/api';
+                                            
+                                            const tokenResult = await chrome.storage.local.get(['csrfToken']);
+                                            
+                                            const sendMessageResponse = await fetch(`${voyagerApi}/messaging/conversations/${conversationId}/events`, {
+                                                method: 'POST',
+                                                headers: {
+                                                    'csrf-token': tokenResult.csrfToken,
+                                                    'accept': 'application/vnd.linkedin.normalized+json+2.1',
+                                                    'content-type': 'application/json',
+                                                    'x-li-lang': 'en_US',
+                                                    'x-restli-protocol-version': '2.0.0'
+                                                },
+                                                body: JSON.stringify({
+                                                    eventContent: {
+                                                        'com.linkedin.voyager.messaging.create.MessageCreate': {
+                                                            body: calendarData.schedulingMessage || `Great! I'd love to schedule a call with you. Please use this link to book a time that works for you: ${calendarData.calendarLink}`
+                                                        }
+                                                    }
+                                                })
+                                            });
+                                            
+                                            if (sendMessageResponse.ok) {
+                                                console.log(`✅ Scheduling message sent successfully to ${monitoringData.leadName}!`);
+                                                monitoringData.status = 'scheduling_initiated';
+                                                await chrome.storage.local.set({ [key]: monitoringData });
+                                            } else {
+                                                console.log(`❌ Failed to send scheduling message: ${sendMessageResponse.status}`);
+                                            }
+                                        } else {
+                                            console.log(`❌ Failed to generate calendar link: ${calendarResponse.status}`);
+                                        }
+                                    } catch (error) {
+                                        console.error('❌ Error generating calendar link:', error);
+                                    }
+                                }
+                            
                             } else {
                                 console.log('😞 Negative response detected. Handling accordingly...');
-                                    await processNegativeCallResponse(monitoringData, analysisResponse);
-                            }
-                            
-                            // Mark call node as completed after processing response
-                            await markCallNodeAsCompleted(monitoringData.campaignId, monitoringData.leadId);
                             }
                         } else {
                             // Update last checked message ID to avoid reprocessing
@@ -6667,25 +6734,26 @@ const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => 
                                     }
                                 }
                                 
-                                // Enhanced Eleazar detection
-                                const isFromEleazar = 
-                                    // Check by name
-                                    sender.toLowerCase().includes('eleazar') || 
-                                    sender.toLowerCase().includes('nzerem') ||
-                                    // Check by entity URN
-                                    msg.from?.entityUrn?.includes('ACoAADt-s1EBpDjmzFwFx9B') ||
-                                    // Check by profile ID in various fields
-                                    (msg.from && JSON.stringify(msg.from).includes('ACoAADt-s1EBpDjmzFwFx9B')) ||
+                                // Enhanced lead detection (generic - works for any LinkedIn user)
+                                const isFromLead = 
                                     // Check if this is NOT from us (William Victor) and has meaningful text
                                     (!sender.toLowerCase().includes('william') && 
                                      !sender.toLowerCase().includes('victor') && 
                                      !msg.from?.entityUrn?.includes('vicken-concept') &&
-                                     text && text.trim().length > 0 && text.length < 1000);
+                                     text && text.trim().length > 0 && text.length < 1000 &&
+                                     // Exclude AI-generated messages (they contain template placeholders)
+                                     !text.includes('[Your Name]') &&
+                                     !text.includes('[Your Position]') &&
+                                     !text.includes('[Your Company]') &&
+                                     !text.includes('[Date and Time]') &&
+                                     !text.includes('[Duration]') &&
+                                     !text.includes('Dear Mr.') &&
+                                     !text.includes('Dear Eleazar Nzerem'));
                                 
                                 console.log('🔍 Sender detection details:');
                                 console.log('   - sender:', sender);
                                 console.log('   - entityUrn:', msg.from?.entityUrn);
-                                console.log('   - isFromEleazar:', isFromEleazar);
+                                console.log('   - isFromLead:', isFromLead);
                                 
                                 console.log(`📝 Processed message ${index + 1}: "${text}" from ${sender}`);
                                 
@@ -6694,7 +6762,7 @@ const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => 
                                     text: text,
                                     sender: sender,
                                     timestamp: msg.createdAt,
-                                    isFromEleazar: isFromEleazar,
+                                    isFromLead: isFromLead,
                                     rawMessage: msg
                                 };
                             }).filter(msg => msg.text && msg.text.trim().length > 0);
@@ -6869,19 +6937,25 @@ const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => 
                                     }
                                 }
                                 
-                                // Enhanced lead detection - check if this is from the lead (not us)
+                                // Enhanced lead detection (generic - works for any LinkedIn user)
                                 const isFromLead = 
-                                    // Check by name (if we know the lead's name)
-                                    (sender.toLowerCase().includes('eleazar') || sender.toLowerCase().includes('nzerem')) ||
-                                    // Check by entity URN
-                                    msg.from?.entityUrn?.includes(connectionId) ||
-                                    // Check by profile ID in various fields
-                                    (msg.from && JSON.stringify(msg.from).includes(connectionId)) ||
+                                    // Check by entity URN (if connectionId is provided)
+                                    (connectionId && msg.from?.entityUrn?.includes(connectionId)) ||
+                                    // Check by profile ID in various fields (if connectionId is provided)
+                                    (connectionId && msg.from && JSON.stringify(msg.from).includes(connectionId)) ||
                                     // Check if this is NOT from us (William Victor) and has meaningful text
                                     (!sender.toLowerCase().includes('william') && 
                                      !sender.toLowerCase().includes('victor') && 
                                      !msg.from?.entityUrn?.includes('vicken-concept') &&
-                                     text && text.trim().length > 0 && text.length < 1000);
+                                     text && text.trim().length > 0 && text.length < 1000 &&
+                                     // Exclude AI-generated messages (they contain template placeholders)
+                                     !text.includes('[Your Name]') &&
+                                     !text.includes('[Your Position]') &&
+                                     !text.includes('[Your Company]') &&
+                                     !text.includes('[Date and Time]') &&
+                                     !text.includes('[Duration]') &&
+                                     !text.includes('Dear Mr.') &&
+                                     !text.includes('Dear Eleazar Nzerem'));
                                 
                                 console.log(`📝 Monitoring - Message: "${text}" from ${sender}, isFromLead: ${isFromLead}`);
                                 
@@ -6911,17 +6985,16 @@ const processCallReplyWithAI = async (callId, messageText) => {
     try {
         console.log('🤖 Processing call reply with AI analysis...');
         
-        const response = await fetch(`${PLATFROM_URL}/api/calls/process-reply`, {
+        const response = await fetch(`${PLATFROM_URL}/api/calls/analyze-message`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'lk-id': linkedinId || 'vicken-concept'
             },
             body: JSON.stringify({
-                call_id: callId,
                 message: messageText,
-                profile_id: 'linkedin-profile',
-                sender: 'lead'
+                leadName: 'LinkedIn Lead',
+                context: 'LinkedIn message response analysis'
             })
         });
         
@@ -6929,19 +7002,36 @@ const processCallReplyWithAI = async (callId, messageText) => {
             const result = await response.json();
             console.log('✅ AI analysis completed:', result);
             
+            if (!result.success) {
+                console.error('❌ AI analysis failed:', result.message);
+                return null;
+            }
+            
             // Determine if response is positive based on analysis
             const analysis = result.analysis || {};
-            const isPositive = analysis.intent === 'interested' && 
-                             analysis.sentiment === 'positive' && 
-                             (analysis.lead_score || 0) >= 7;
+            const intent = analysis.intent || analysis.Intent;
+            const sentiment = analysis.sentiment || analysis.Sentiment;
+            const leadScore = analysis.leadScore || analysis['Lead Score'] || analysis.lead_score;
+            const isPositiveFlag = analysis.isPositive || analysis['Is Positive'];
+            
+            const isPositive = isPositiveFlag || 
+                              (intent && intent.toLowerCase().includes('interested')) ||
+                              (sentiment && sentiment.toLowerCase().includes('positive')) ||
+                              (leadScore && leadScore >= 7);
+            
+            console.log(`🎯 Response Analysis:`);
+            console.log(`   - Intent: ${intent || 'Unknown'}`);
+            console.log(`   - Sentiment: ${sentiment || 'Unknown'}`);
+            console.log(`   - Lead Score: ${leadScore || 'Unknown'}`);
+            console.log(`   - Is Positive: ${isPositive}`);
             
             return {
                 hasResponse: true,
                 message: messageText,
                 analysis: analysis,
                 isPositive: isPositive,
-                call_status: result.new_status,
-                suggested_response: result.suggested_response
+                call_status: isPositive ? 'scheduling_initiated' : 'response_received',
+                suggested_response: analysis.suggestedResponse || 'Thank you for your response.'
             };
         } else {
             console.error('❌ Failed to process reply with AI:', response.status);
