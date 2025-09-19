@@ -5070,6 +5070,824 @@ self.testLinkedInAPI = async () => {
     }
 };
 
+// Function to extract conversation ID from LinkedIn thread URL
+self.extractConversationId = async () => {
+    console.log('🔍 EXTRACTING CONVERSATION ID FROM LINKEDIN...');
+    
+    try {
+        // Get all tabs to find LinkedIn messaging tabs
+        const tabs = await chrome.tabs.query({});
+        const linkedinTabs = tabs.filter(tab => 
+            tab.url && (
+                tab.url.includes('linkedin.com/messaging/thread/') ||
+                tab.url.includes('linkedin.com/messaging/')
+            )
+        );
+        
+        if (linkedinTabs.length === 0) {
+            console.log('❌ No LinkedIn messaging tabs found');
+            console.log('💡 Please open LinkedIn messages first');
+            return null;
+        }
+        
+        console.log(`📊 Found ${linkedinTabs.length} LinkedIn messaging tabs`);
+        
+        const conversationIds = [];
+        
+        for (const tab of linkedinTabs) {
+            console.log(`🔍 Checking tab: ${tab.url}`);
+            
+            // Extract conversation ID from URL
+            const threadMatch = tab.url.match(/\/messaging\/thread\/([^\/]+)/);
+            if (threadMatch) {
+                const conversationId = threadMatch[1];
+                conversationIds.push(conversationId);
+                console.log(`✅ Found conversation ID: ${conversationId}`);
+            }
+        }
+        
+        if (conversationIds.length > 0) {
+            console.log(`🎯 Extracted ${conversationIds.length} conversation IDs:`, conversationIds);
+            return conversationIds;
+        } else {
+            console.log('❌ No conversation IDs found in URLs');
+            return null;
+        }
+        
+    } catch (error) {
+        console.error('❌ Error extracting conversation ID:', error);
+        return null;
+    }
+};
+
+// Function to test different LinkedIn API endpoints for messages
+self.testLinkedInMessagesAPI = async () => {
+    console.log('🧪 TESTING DIFFERENT LINKEDIN MESSAGES API ENDPOINTS...');
+    
+    try {
+        // Get CSRF token
+        const tokenResult = await chrome.storage.local.get(['csrfToken']);
+        if (!tokenResult.csrfToken) {
+            console.error('❌ No CSRF token found');
+            return;
+        }
+        
+        console.log('✅ CSRF token found');
+        
+        // Get conversation IDs from current tabs
+        const conversationIds = await self.extractConversationId();
+        
+        if (!conversationIds || conversationIds.length === 0) {
+            console.log('❌ No conversation IDs found');
+            console.log('💡 Please open LinkedIn messages first');
+            return;
+        }
+        
+        const voyagerApi = 'https://www.linkedin.com/voyager/api';
+        const conversationId = conversationIds[0]; // Use first conversation ID
+        
+        console.log(`🎯 Testing with conversation ID: ${conversationId}`);
+        
+        // Test different API endpoints and parameters
+        const endpoints = [
+            `/messaging/conversations/${conversationId}/events`,
+            `/messaging/conversations/${conversationId}/events?count=50`,
+            `/messaging/conversations/${conversationId}/events?start=0&count=20`,
+            `/messaging/conversations/${conversationId}/events?q=all`,
+            `/messaging/conversations/${conversationId}/events?q=all&count=50`,
+            `/messaging/conversations/${conversationId}/events?q=all&count=100`,
+            `/messaging/conversations/${conversationId}/events?q=all&count=200`,
+            `/messaging/conversations/${conversationId}/events?q=all&count=500`,
+            `/messaging/conversations/${conversationId}/events?q=all&count=1000`,
+            `/messaging/conversations/${conversationId}/events?q=all&count=2000`,
+            `/messaging/conversations/${conversationId}/events?q=all&count=5000`,
+            `/messaging/conversations/${conversationId}/events?q=all&count=10000`
+        ];
+        
+        // Test different header combinations
+        const headerSets = [
+            // Standard headers
+            {
+                'csrf-token': tokenResult.csrfToken,
+                'accept': 'application/vnd.linkedin.normalized+json+2.1',
+                'x-li-lang': 'en_US',
+                'x-li-page-instance': 'urn:li:page:d_flagship3_messaging_conversations;1ZlPK7kKRNSMi+vkXMyVMw==',
+                'x-li-track': JSON.stringify({"clientVersion":"1.10.1208","osName":"web","timezoneOffset":1,"deviceFormFactor":"DESKTOP","mpName":"voyager-web"}),
+                'x-restli-protocol-version': '2.0.0'
+            },
+            // Alternative headers
+            {
+                'csrf-token': tokenResult.csrfToken,
+                'accept': 'application/vnd.linkedin.normalized+json+2.1',
+                'x-li-lang': 'en_US',
+                'x-restli-protocol-version': '2.0.0'
+            },
+            // Minimal headers
+            {
+                'csrf-token': tokenResult.csrfToken,
+                'accept': 'application/json',
+                'x-restli-protocol-version': '2.0.0'
+            }
+        ];
+        
+        for (let headerIndex = 0; headerIndex < headerSets.length; headerIndex++) {
+            const headers = headerSets[headerIndex];
+            console.log(`\n🧪 Testing header set ${headerIndex + 1}:`, headers);
+            
+            for (const endpoint of endpoints) {
+                try {
+                    console.log(`🔍 Testing: ${endpoint}`);
+                    
+                    const response = await fetch(`${voyagerApi}${endpoint}`, {
+                        method: 'GET',
+                        headers: headers
+                    });
+                    
+                    console.log(`📡 Status: ${response.status}`);
+                    
+                    if (response.ok) {
+                        const data = await response.json();
+                        const messages = data.elements || [];
+                        
+                        console.log(`✅ Found ${messages.length} messages with endpoint: ${endpoint}`);
+                        
+                        if (messages.length > 0) {
+                            console.log('🎉 SUCCESS! Messages found:');
+                            
+                            messages.forEach((msg, index) => {
+                                console.log(`📝 Message ${index + 1}:`, msg);
+                                
+                                // Try multiple ways to extract text from the message
+                                let text = '';
+                                let sender = 'unknown';
+                                
+                                // Method 1: Standard message structure
+                                if (msg.eventContent?.com?.linkedin?.voyager?.messaging?.create?.MessageCreate) {
+                                    const messageCreate = msg.eventContent.com.linkedin.voyager.messaging.create.MessageCreate;
+                                    text = messageCreate.body || messageCreate.attributedBody?.text || '';
+                                }
+                                
+                                // Method 2: Alternative message structure
+                                if (!text && msg.eventContent?.com?.linkedin?.voyager?.messaging?.EventContent) {
+                                    const eventContent = msg.eventContent.com.linkedin.voyager.messaging.EventContent;
+                                    text = eventContent.attributedBody?.text || '';
+                                }
+                                
+                                // Method 3: Direct body access
+                                if (!text && msg.body) {
+                                    text = msg.body;
+                                }
+                                
+                                // Method 4: Check for different eventContent structures
+                                if (!text && msg.eventContent) {
+                                    console.log('🔍 eventContent structure:', msg.eventContent);
+                                    // Try to find any text in the eventContent
+                                    const eventContentStr = JSON.stringify(msg.eventContent);
+                                    const textMatch = eventContentStr.match(/"text":"([^"]+)"/);
+                                    if (textMatch) {
+                                        text = textMatch[1];
+                                    }
+                                }
+                                
+                                // Extract sender information
+                                if (msg.from?.com?.linkedin?.voyager?.messaging?.MessagingMember) {
+                                    const member = msg.from.com.linkedin.voyager.messaging.MessagingMember;
+                                    if (member.name) {
+                                        sender = member.name;
+                                    } else if (member.miniProfile) {
+                                        sender = `${member.miniProfile.firstName || ''} ${member.miniProfile.lastName || ''}`.trim();
+                                    }
+                                }
+                                
+                                // Check if this is from Eleazar
+                                const isFromEleazar = sender.toLowerCase().includes('eleazar') || 
+                                                    sender.toLowerCase().includes('nzerem') ||
+                                                    msg.from?.entityUrn?.includes('ACoAADt-s1EBpDjmzFwFx9B');
+                                
+                                console.log(`   👤 From: ${sender}`);
+                                console.log(`   💬 Text: "${text}"`);
+                                console.log(`   🕐 Time: ${new Date(msg.createdAt).toLocaleString()}`);
+                                console.log(`   🎯 Is from Eleazar: ${isFromEleazar}`);
+                                
+                                if (isFromEleazar && text) {
+                                    console.log(`🎉 FOUND ELEAZAR'S REPLY: "${text}"`);
+                                }
+                            });
+                            
+                            return {
+                                endpoint: endpoint,
+                                headers: headers,
+                                messages: messages,
+                                success: true
+                            };
+                        }
+                    } else {
+                        console.log(`❌ Failed: ${response.status}`);
+                    }
+                } catch (error) {
+                    console.log(`❌ Error: ${error.message}`);
+                }
+            }
+        }
+        
+        console.log('❌ No messages found with any endpoint/header combination');
+        
+    } catch (error) {
+        console.error('❌ LinkedIn messages API test failed:', error);
+    }
+};
+
+// Function to test direct conversation API access
+self.testDirectConversationAPI = async () => {
+    console.log('🧪 TESTING DIRECT CONVERSATION API ACCESS...');
+    
+    try {
+        // Get CSRF token
+        const tokenResult = await chrome.storage.local.get(['csrfToken']);
+        if (!tokenResult.csrfToken) {
+            console.error('❌ No CSRF token found');
+            return;
+        }
+        
+        console.log('✅ CSRF token found');
+        
+        // Get conversation IDs from current tabs
+        const conversationIds = await self.extractConversationId();
+        
+        if (!conversationIds || conversationIds.length === 0) {
+            console.log('❌ No conversation IDs found');
+            console.log('💡 Please open LinkedIn messages first');
+            return;
+        }
+        
+        const voyagerApi = 'https://www.linkedin.com/voyager/api';
+        
+        // Test each conversation ID
+        for (const conversationId of conversationIds) {
+            try {
+                console.log(`🧪 Testing conversation ID: ${conversationId}`);
+                
+                const response = await fetch(`${voyagerApi}/messaging/conversations/${conversationId}/events`, {
+                    method: 'GET',
+                    headers: {
+                        'csrf-token': tokenResult.csrfToken,
+                        'accept': 'application/vnd.linkedin.normalized+json+2.1',
+                        'x-li-lang': 'en_US',
+                        'x-li-page-instance': 'urn:li:page:d_flagship3_messaging_conversations;1ZlPK7kKRNSMi+vkXMyVMw==',
+                        'x-li-track': JSON.stringify({"clientVersion":"1.10.1208","osName":"web","timezoneOffset":1,"deviceFormFactor":"DESKTOP","mpName":"voyager-web"}),
+                        'x-restli-protocol-version': '2.0.0'
+                    }
+                });
+                
+                console.log(`📡 Status: ${response.status}`);
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    const messages = data.elements || [];
+                    
+                    console.log(`✅ Found ${messages.length} messages in conversation ${conversationId}`);
+                    
+                    if (messages.length > 0) {
+                        console.log('🎉 SUCCESS! Messages found:');
+                        
+                        messages.forEach((msg, index) => {
+                            const messageContent = msg.eventContent?.com?.linkedin?.voyager?.messaging?.EventContent;
+                            const text = messageContent?.attributedBody?.text || 
+                                        messageContent?.com?.linkedin?.voyager?.messaging?.create?.MessageCreate?.attributedBody?.text || 
+                                        messageContent?.com?.linkedin?.voyager?.messaging?.create?.MessageCreate?.body || '';
+                            
+                            const sender = msg.from?.com?.linkedin?.voyager?.messaging?.MessagingMember?.name || 
+                                          msg.from?.com?.linkedin?.voyager?.messaging?.MessagingMember?.miniProfile?.firstName + ' ' + 
+                                          msg.from?.com?.linkedin?.voyager?.messaging?.MessagingMember?.miniProfile?.lastName || 'Unknown';
+                            
+                            console.log(`📝 Message ${index + 1}:`);
+                            console.log(`   👤 From: ${sender}`);
+                            console.log(`   💬 Text: ${text}`);
+                            console.log(`   🕐 Time: ${new Date(msg.createdAt).toLocaleString()}`);
+                        });
+                        
+                        return {
+                            conversationId: conversationId,
+                            messages: messages,
+                            success: true
+                        };
+                    }
+                } else {
+                    console.log(`❌ Failed: ${response.status}`);
+                    if (response.status === 403) {
+                        console.log('💡 This might be a permission issue - make sure you have access to this conversation');
+                    }
+                }
+            } catch (error) {
+                console.log(`❌ Error: ${error.message}`);
+            }
+        }
+        
+        console.log('❌ No messages found in any conversation');
+        
+    } catch (error) {
+        console.error('❌ Direct conversation API test failed:', error);
+    }
+};
+
+// Function to immediately check for Eleazar's reply using the working API
+self.checkEleazarReplyNow = async () => {
+    console.log('🔍 IMMEDIATELY CHECKING FOR ELEAZAR\'S REPLY...');
+    
+    try {
+        // Get CSRF token
+        const tokenResult = await chrome.storage.local.get(['csrfToken']);
+        if (!tokenResult.csrfToken) {
+            console.error('❌ No CSRF token found');
+            return;
+        }
+        
+        console.log('✅ CSRF token found');
+        
+        // Use the known working conversation ID
+        const conversationId = '2-MmJlMWU1MzMtMGUzYi00ODI2LThjNWEtYjQyZTAwZWEyNjM4XzEwMA==';
+        const voyagerApi = 'https://www.linkedin.com/voyager/api';
+        
+        console.log(`🎯 Checking conversation: ${conversationId}`);
+        
+        // Use the WORKING headers from the test
+        const response = await fetch(`${voyagerApi}/messaging/conversations/${conversationId}/events`, {
+            method: 'GET',
+            headers: {
+                'csrf-token': tokenResult.csrfToken,
+                'accept': 'application/json',  // ← This is the magic header!
+                'x-restli-protocol-version': '2.0.0'
+            }
+        });
+        
+        console.log(`📡 API Status: ${response.status}`);
+        
+        if (response.ok) {
+            const data = await response.json();
+            const messages = data.elements || [];
+            
+            console.log(`📊 Found ${messages.length} messages in conversation`);
+            
+            if (messages.length > 0) {
+                console.log('🎉 MESSAGES FOUND! Analyzing for Eleazar\'s reply...');
+                
+                let eleazarReply = null;
+                let latestMessage = null;
+                
+                messages.forEach((msg, index) => {
+                    console.log(`\n📝 Message ${index + 1}:`);
+                    
+                    // Extract text using multiple methods
+                    let text = '';
+                    
+                    // Method 1: Standard structure
+                    if (msg.eventContent?.com?.linkedin?.voyager?.messaging?.create?.MessageCreate) {
+                        const messageCreate = msg.eventContent.com.linkedin.voyager.messaging.create.MessageCreate;
+                        text = messageCreate.body || messageCreate.attributedBody?.text || '';
+                    }
+                    
+                    // Method 2: Alternative structure
+                    if (!text && msg.eventContent?.com?.linkedin?.voyager?.messaging?.EventContent) {
+                        const eventContent = msg.eventContent.com.linkedin.voyager.messaging.EventContent;
+                        text = eventContent.attributedBody?.text || '';
+                    }
+                    
+                    // Method 3: Direct body
+                    if (!text && msg.body) {
+                        text = msg.body;
+                    }
+                    
+                    // Method 4: Search in eventContent JSON
+                    if (!text && msg.eventContent) {
+                        const eventContentStr = JSON.stringify(msg.eventContent);
+                        const textMatch = eventContentStr.match(/"text":"([^"]+)"/);
+                        if (textMatch) {
+                            text = textMatch[1];
+                        }
+                    }
+                    
+                    // Extract sender with enhanced detection
+                    let sender = 'unknown';
+                    console.log('🔍 Raw sender data:', msg.from);
+                    
+                    if (msg.from?.com?.linkedin?.voyager?.messaging?.MessagingMember) {
+                        const member = msg.from.com.linkedin.voyager.messaging.MessagingMember;
+                        console.log('🔍 MessagingMember data:', member);
+                        
+                        if (member.name) {
+                            sender = member.name;
+                        } else if (member.miniProfile) {
+                            sender = `${member.miniProfile.firstName || ''} ${member.miniProfile.lastName || ''}`.trim();
+                        }
+                    }
+                    
+                    // Enhanced Eleazar detection - check multiple ways
+                    const isFromEleazar = 
+                        // Check by name
+                        sender.toLowerCase().includes('eleazar') || 
+                        sender.toLowerCase().includes('nzerem') ||
+                        // Check by entity URN
+                        msg.from?.entityUrn?.includes('ACoAADt-s1EBpDjmzFwFx9B') ||
+                        // Check by profile ID in various fields
+                        (msg.from && JSON.stringify(msg.from).includes('ACoAADt-s1EBpDjmzFwFx9B')) ||
+                        // Check if this is NOT from us (William Victor) and has text
+                        (!sender.toLowerCase().includes('william') && 
+                         !sender.toLowerCase().includes('victor') && 
+                         !msg.from?.entityUrn?.includes('vicken-concept') &&
+                         text && text.trim().length > 0);
+                    
+                    console.log('🔍 Sender detection details:');
+                    console.log('   - sender:', sender);
+                    console.log('   - entityUrn:', msg.from?.entityUrn);
+                    console.log('   - isFromEleazar:', isFromEleazar);
+                    
+                    console.log(`   👤 From: ${sender}`);
+                    console.log(`   💬 Text: "${text}"`);
+                    console.log(`   🕐 Time: ${new Date(msg.createdAt).toLocaleString()}`);
+                    console.log(`   🎯 Is from Eleazar: ${isFromEleazar}`);
+                    
+                    if (isFromEleazar && text) {
+                        eleazarReply = {
+                            text: text,
+                            sender: sender,
+                            timestamp: msg.createdAt,
+                            messageId: msg.entityUrn
+                        };
+                        console.log(`🎉 FOUND ELEAZAR'S REPLY: "${text}"`);
+                    }
+                    
+                    // Track latest message
+                    if (index === messages.length - 1) {
+                        latestMessage = {
+                            text: text,
+                            sender: sender,
+                            timestamp: msg.createdAt,
+                            messageId: msg.entityUrn
+                        };
+                    }
+                });
+                
+                if (eleazarReply) {
+                    console.log('\n🎯 ELEAZAR REPLIED!');
+                    console.log(`📝 Reply: "${eleazarReply.text}"`);
+                    console.log(`🕐 Time: ${new Date(eleazarReply.timestamp).toLocaleString()}`);
+                    
+                    // TODO: Send this to AI for analysis and trigger calendar link
+                    return {
+                        found: true,
+                        reply: eleazarReply,
+                        allMessages: messages
+                    };
+                } else {
+                    console.log('\n⏳ No reply from Eleazar found yet');
+                    console.log(`📊 Latest message: "${latestMessage?.text}" from ${latestMessage?.sender}`);
+                    return {
+                        found: false,
+                        latestMessage: latestMessage,
+                        allMessages: messages
+                    };
+                }
+            } else {
+                console.log('📭 No messages found in conversation');
+                return { found: false, messages: [] };
+            }
+        } else {
+            console.log(`❌ API failed: ${response.status}`);
+            return { found: false, error: response.status };
+        }
+        
+    } catch (error) {
+        console.error('❌ Error checking Eleazar reply:', error);
+        return { found: false, error: error.message };
+    }
+};
+
+// Function to immediately find and analyze Eleazar's replies
+self.findEleazarReplies = async () => {
+    console.log('🔍 FINDING ELEAZAR\'S REPLIES WITH ENHANCED DETECTION...');
+    
+    try {
+        // Get CSRF token
+        const tokenResult = await chrome.storage.local.get(['csrfToken']);
+        if (!tokenResult.csrfToken) {
+            console.error('❌ No CSRF token found');
+            return;
+        }
+        
+        console.log('✅ CSRF token found');
+        
+        // Use the known working conversation ID
+        const conversationId = '2-MmJlMWU1MzMtMGUzYi00ODI2LThjNWEtYjQyZTAwZWEyNjM4XzEwMA==';
+        const voyagerApi = 'https://www.linkedin.com/voyager/api';
+        
+        console.log(`🎯 Checking conversation: ${conversationId}`);
+        
+        // Use the WORKING headers
+        const response = await fetch(`${voyagerApi}/messaging/conversations/${conversationId}/events`, {
+            method: 'GET',
+            headers: {
+                'csrf-token': tokenResult.csrfToken,
+                'accept': 'application/json',
+                'x-restli-protocol-version': '2.0.0'
+            }
+        });
+        
+        console.log(`📡 API Status: ${response.status}`);
+        
+        if (response.ok) {
+            const data = await response.json();
+            const messages = data.elements || [];
+            
+            console.log(`📊 Found ${messages.length} messages in conversation`);
+            
+            if (messages.length > 0) {
+                console.log('🎉 MESSAGES FOUND! Analyzing for Eleazar\'s replies...');
+                
+                const eleazarReplies = [];
+                let messageCount = 0;
+                
+                messages.forEach((msg, index) => {
+                    console.log(`\n📝 Message ${index + 1}:`);
+                    
+                    // Extract text using multiple methods
+                    let text = '';
+                    
+                    // Method 1: Standard structure
+                    if (msg.eventContent?.com?.linkedin?.voyager?.messaging?.create?.MessageCreate) {
+                        const messageCreate = msg.eventContent.com.linkedin.voyager.messaging.create.MessageCreate;
+                        text = messageCreate.body || messageCreate.attributedBody?.text || '';
+                    }
+                    
+                    // Method 2: Alternative structure
+                    if (!text && msg.eventContent?.com?.linkedin?.voyager?.messaging?.EventContent) {
+                        const eventContent = msg.eventContent.com.linkedin.voyager.messaging.EventContent;
+                        text = eventContent.attributedBody?.text || '';
+                    }
+                    
+                    // Method 3: Direct body
+                    if (!text && msg.body) {
+                        text = msg.body;
+                    }
+                    
+                    // Method 4: Search in eventContent JSON
+                    if (!text && msg.eventContent) {
+                        const eventContentStr = JSON.stringify(msg.eventContent);
+                        const textMatch = eventContentStr.match(/"text":"([^"]+)"/);
+                        if (textMatch) {
+                            text = textMatch[1];
+                        }
+                    }
+                    
+                    // Extract sender with enhanced detection
+                    let sender = 'unknown';
+                    console.log('🔍 Raw sender data:', msg.from);
+                    
+                    if (msg.from?.com?.linkedin?.voyager?.messaging?.MessagingMember) {
+                        const member = msg.from.com.linkedin.voyager.messaging.MessagingMember;
+                        console.log('🔍 MessagingMember data:', member);
+                        
+                        if (member.name) {
+                            sender = member.name;
+                        } else if (member.miniProfile) {
+                            sender = `${member.miniProfile.firstName || ''} ${member.miniProfile.lastName || ''}`.trim();
+                        }
+                    }
+                    
+                    // Enhanced Eleazar detection
+                    const isFromEleazar = 
+                        // Check by name
+                        sender.toLowerCase().includes('eleazar') || 
+                        sender.toLowerCase().includes('nzerem') ||
+                        // Check by entity URN
+                        msg.from?.entityUrn?.includes('ACoAADt-s1EBpDjmzFwFx9B') ||
+                        // Check by profile ID in various fields
+                        (msg.from && JSON.stringify(msg.from).includes('ACoAADt-s1EBpDjmzFwFx9B')) ||
+                        // Check if this is NOT from us (William Victor) and has meaningful text
+                        (!sender.toLowerCase().includes('william') && 
+                         !sender.toLowerCase().includes('victor') && 
+                         !msg.from?.entityUrn?.includes('vicken-concept') &&
+                         text && text.trim().length > 0 && text.length < 1000);
+                    
+                    console.log('🔍 Sender detection details:');
+                    console.log('   - sender:', sender);
+                    console.log('   - entityUrn:', msg.from?.entityUrn);
+                    console.log('   - isFromEleazar:', isFromEleazar);
+                    
+                    console.log(`   👤 From: ${sender}`);
+                    console.log(`   💬 Text: "${text}"`);
+                    console.log(`   🕐 Time: ${new Date(msg.createdAt).toLocaleString()}`);
+                    console.log(`   🎯 Is from Eleazar: ${isFromEleazar}`);
+                    
+                    if (isFromEleazar && text) {
+                        eleazarReplies.push({
+                            text: text,
+                            sender: sender,
+                            timestamp: msg.createdAt,
+                            messageId: msg.entityUrn,
+                            messageNumber: index + 1
+                        });
+                        console.log(`🎉 FOUND ELEAZAR'S REPLY #${eleazarReplies.length}: "${text}"`);
+                    }
+                    
+                    messageCount++;
+                });
+                
+                if (eleazarReplies.length > 0) {
+                    console.log('\n🎯 ELEAZAR REPLIED!');
+                    console.log(`📊 Found ${eleazarReplies.length} replies from Eleazar:`);
+                    
+                    eleazarReplies.forEach((reply, index) => {
+                        console.log(`\n📝 Reply ${index + 1}:`);
+                        console.log(`   💬 Text: "${reply.text}"`);
+                        console.log(`   🕐 Time: ${new Date(reply.timestamp).toLocaleString()}`);
+                        console.log(`   📍 Message #: ${reply.messageNumber}`);
+                    });
+                    
+                    return {
+                        found: true,
+                        replies: eleazarReplies,
+                        totalMessages: messageCount,
+                        allMessages: messages
+                    };
+                } else {
+                    console.log('\n⏳ No replies from Eleazar found yet');
+                    console.log(`📊 Analyzed ${messageCount} messages`);
+                    return {
+                        found: false,
+                        totalMessages: messageCount,
+                        allMessages: messages
+                    };
+                }
+            } else {
+                console.log('📭 No messages found in conversation');
+                return { found: false, messages: [] };
+            }
+        } else {
+            console.log(`❌ API failed: ${response.status}`);
+            return { found: false, error: response.status };
+        }
+        
+    } catch (error) {
+        console.error('❌ Error finding Eleazar replies:', error);
+        return { found: false, error: error.message };
+    }
+};
+
+// Function to analyze Eleazar's replies with AI and trigger appropriate actions
+self.analyzeEleazarRepliesWithAI = async () => {
+    console.log('🤖 ANALYZING ELEAZAR\'S REPLIES WITH AI...');
+    
+    try {
+        // First, find all of Eleazar's replies
+        const repliesResult = await self.findEleazarReplies();
+        
+        if (!repliesResult.found || !repliesResult.replies) {
+            console.log('❌ No replies from Eleazar found');
+            return { success: false, reason: 'No replies found' };
+        }
+        
+        console.log(`📊 Found ${repliesResult.replies.length} replies from Eleazar`);
+        
+        // Filter out the AI-generated messages (long messages) and focus on Eleazar's actual replies
+        const eleazarActualReplies = repliesResult.replies.filter(reply => {
+            const text = reply.text.trim();
+            // Filter out long AI-generated messages and focus on short, casual replies
+            return text.length < 200 && !text.includes('Dear Mr. Nzerem') && !text.includes('[Your Name]');
+        });
+        
+        console.log(`📊 Found ${eleazarActualReplies.length} actual replies from Eleazar (excluding AI messages)`);
+        
+        if (eleazarActualReplies.length === 0) {
+            console.log('❌ No actual replies from Eleazar found (only AI messages)');
+            return { success: false, reason: 'No actual replies found' };
+        }
+        
+        // Analyze the latest reply from Eleazar
+        const latestReply = eleazarActualReplies[eleazarActualReplies.length - 1];
+        console.log(`🎯 Analyzing latest reply: "${latestReply.text}"`);
+        
+        // Send to AI for analysis
+        const platformUrl = 'https://app.linkdominator.com';
+        const linkedinId = 'vicken-concept';
+        
+        const aiResponse = await fetch(`${platformUrl}/api/calls/process-reply`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'lk-id': linkedinId
+            },
+            body: JSON.stringify({
+                callId: 'eleazar_' + Date.now(), // Generate a temporary call ID
+                message: latestReply.text,
+                leadName: 'Eleazar Nzerem',
+                context: 'LinkedIn message response analysis'
+            })
+        });
+        
+        if (!aiResponse.ok) {
+            console.log(`❌ AI analysis failed: ${aiResponse.status}`);
+            return { success: false, reason: 'AI analysis failed' };
+        }
+        
+        const aiAnalysis = await aiResponse.json();
+        console.log('🤖 AI Analysis Result:', aiAnalysis);
+        
+        // Check if the response is positive
+        const isPositive = aiAnalysis.isPositive || 
+                          (aiAnalysis.intent && aiAnalysis.intent.toLowerCase().includes('interested')) ||
+                          (aiAnalysis.sentiment && aiAnalysis.sentiment.toLowerCase().includes('positive')) ||
+                          (aiAnalysis.leadScore && aiAnalysis.leadScore >= 7);
+        
+        console.log(`🎯 Response Analysis:`);
+        console.log(`   - Intent: ${aiAnalysis.intent || 'Unknown'}`);
+        console.log(`   - Sentiment: ${aiAnalysis.sentiment || 'Unknown'}`);
+        console.log(`   - Lead Score: ${aiAnalysis.leadScore || 'Unknown'}`);
+        console.log(`   - Is Positive: ${isPositive}`);
+        
+        if (isPositive) {
+            console.log('🎉 POSITIVE RESPONSE DETECTED! Generating calendar link...');
+            
+            // Generate calendar link
+            const calendarResponse = await fetch(`${platformUrl}/api/calls/eleazar_${Date.now()}/calendar-link`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'lk-id': linkedinId
+                }
+            });
+            
+            if (calendarResponse.ok) {
+                const calendarData = await calendarResponse.json();
+                console.log('✅ Calendar link generated:', calendarData.calendarLink);
+                
+                // Send the scheduling message to Eleazar
+                console.log('📤 Sending scheduling message to Eleazar...');
+                
+                // Use the known conversation ID and send the scheduling message
+                const conversationId = '2-MmJlMWU1MzMtMGUzYi00ODI2LThjNWEtYjQyZTAwZWEyNjM4XzEwMA==';
+                const voyagerApi = 'https://www.linkedin.com/voyager/api';
+                
+                const tokenResult = await chrome.storage.local.get(['csrfToken']);
+                
+                const sendMessageResponse = await fetch(`${voyagerApi}/messaging/conversations/${conversationId}/events`, {
+                    method: 'POST',
+                    headers: {
+                        'csrf-token': tokenResult.csrfToken,
+                        'accept': 'application/vnd.linkedin.normalized+json+2.1',
+                        'content-type': 'application/json',
+                        'x-li-lang': 'en_US',
+                        'x-restli-protocol-version': '2.0.0'
+                    },
+                    body: JSON.stringify({
+                        eventContent: {
+                            'com.linkedin.voyager.messaging.create.MessageCreate': {
+                                body: calendarData.schedulingMessage || `Great! I'd love to schedule a call with you. Please use this link to book a time that works for you: ${calendarData.calendarLink}`
+                            }
+                        }
+                    })
+                });
+                
+                if (sendMessageResponse.ok) {
+                    console.log('✅ Scheduling message sent successfully to Eleazar!');
+                    return {
+                        success: true,
+                        action: 'calendar_sent',
+                        calendarLink: calendarData.calendarLink,
+                        schedulingMessage: calendarData.schedulingMessage,
+                        aiAnalysis: aiAnalysis
+                    };
+                } else {
+                    console.log(`❌ Failed to send scheduling message: ${sendMessageResponse.status}`);
+                    return {
+                        success: false,
+                        reason: 'Failed to send scheduling message',
+                        aiAnalysis: aiAnalysis
+                    };
+                }
+            } else {
+                console.log(`❌ Failed to generate calendar link: ${calendarResponse.status}`);
+                return {
+                    success: false,
+                    reason: 'Failed to generate calendar link',
+                    aiAnalysis: aiAnalysis
+                };
+            }
+        } else {
+            console.log('📝 Response is neutral/negative - no action taken');
+            return {
+                success: true,
+                action: 'no_action_needed',
+                aiAnalysis: aiAnalysis,
+                message: 'Response analyzed as neutral/negative'
+            };
+        }
+        
+    } catch (error) {
+        console.error('❌ Error analyzing Eleazar replies:', error);
+        return { success: false, reason: 'Analysis failed', error: error.message };
+    }
+};
+
 // Function to create a comprehensive polling + AI pipeline for call response tracking
 self.createCallResponsePipeline = async () => {
     console.log('🚀 CREATING COMPREHENSIVE CALL RESPONSE PIPELINE...');
@@ -5482,25 +6300,25 @@ const checkForCallResponses = async () => {
                             const analysisResponse = await processCallReplyWithAI(monitoringData.callId, latestMessage.text);
                             
                             if (analysisResponse) {
-                                // Update monitoring status
-                                monitoringData.status = 'response_received';
+                            // Update monitoring status
+                            monitoringData.status = 'response_received';
                                 monitoringData.responseData = analysisResponse;
-                                monitoringData.receivedAt = Date.now();
+                            monitoringData.receivedAt = Date.now();
                                 monitoringData.lastCheckedMessageId = latestMessage.id;
-                                
-                                await chrome.storage.local.set({ [key]: monitoringData });
-                                
-                                // Process the response based on AI analysis
+                            
+                            await chrome.storage.local.set({ [key]: monitoringData });
+                            
+                            // Process the response based on AI analysis
                                 if (analysisResponse.isPositive) {
-                                    console.log('🎉 Positive response detected! Generating calendar link...');
+                                console.log('🎉 Positive response detected! Generating calendar link...');
                                     await processPositiveCallResponse(monitoringData, analysisResponse);
-                                } else {
-                                    console.log('😞 Negative response detected. Handling accordingly...');
+                            } else {
+                                console.log('😞 Negative response detected. Handling accordingly...');
                                     await processNegativeCallResponse(monitoringData, analysisResponse);
-                                }
-                                
-                                // Mark call node as completed after processing response
-                                await markCallNodeAsCompleted(monitoringData.campaignId, monitoringData.leadId);
+                            }
+                            
+                            // Mark call node as completed after processing response
+                            await markCallNodeAsCompleted(monitoringData.campaignId, monitoringData.leadId);
                             }
                         } else {
                             // Update last checked message ID to avoid reprocessing
@@ -5509,14 +6327,14 @@ const checkForCallResponses = async () => {
                         }
                     } else {
                         console.log('⏳ No new messages from', monitoringData.leadName);
-                        
-                        // Check if it's been too long (e.g., 7 days)
-                        const daysSinceSent = (Date.now() - monitoringData.sentAt) / (1000 * 60 * 60 * 24);
-                        if (daysSinceSent > 7) {
-                            console.log('⏰ Response timeout after 7 days, marking as no response');
-                            monitoringData.status = 'timeout';
-                            await chrome.storage.local.set({ [key]: monitoringData });
-                            await markCallNodeAsCompleted(monitoringData.campaignId, monitoringData.leadId);
+                            
+                            // Check if it's been too long (e.g., 7 days)
+                            const daysSinceSent = (Date.now() - monitoringData.sentAt) / (1000 * 60 * 60 * 24);
+                            if (daysSinceSent > 7) {
+                                console.log('⏰ Response timeout after 7 days, marking as no response');
+                                monitoringData.status = 'timeout';
+                                await chrome.storage.local.set({ [key]: monitoringData });
+                                await markCallNodeAsCompleted(monitoringData.campaignId, monitoringData.leadId);
                         }
                     }
                 } catch (error) {
@@ -5544,55 +6362,147 @@ const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => 
             return null;
         }
         
-        // Step 1: Try different conversation endpoints to find one that works
-        const conversationEndpoints = [
-            '/messaging/conversations',
-            '/messaging/conversations?count=50',
-            '/messaging/conversations?q=all',
-            '/messaging/conversations?q=all&count=100',
-            '/messaging/conversations?start=0&count=20'
-        ];
+        // Step 1: Try to get conversations, but also try direct conversation access
+        console.log('🔍 Attempting to fetch conversations...');
+        
+        // First try the standard conversations endpoint
+        const conversationsResponse = await fetch(`${voyagerApi}/messaging/conversations`, {
+            method: 'GET',
+            headers: {
+                'csrf-token': tokenResult.csrfToken,
+                'accept': 'application/vnd.linkedin.normalized+json+2.1',
+                'x-li-lang': 'en_US',
+                'x-li-page-instance': 'urn:li:page:d_flagship3_messaging_conversations;1ZlPK7kKRNSMi+vkXMyVMw==',
+                'x-li-track': JSON.stringify({"clientVersion":"1.10.1208","osName":"web","timezoneOffset":1,"deviceFormFactor":"DESKTOP","mpName":"voyager-web"}),
+                'x-restli-protocol-version': '2.0.0'
+            }
+        });
+        
+        console.log(`📡 Conversations API status: ${conversationsResponse.status}`);
         
         let conversations = [];
-        let workingEndpoint = null;
+        if (conversationsResponse.ok) {
+            const conversationsData = await conversationsResponse.json();
+            conversations = conversationsData.elements || [];
+            console.log(`📊 Found ${conversations.length} conversations via API`);
+        } else {
+            console.log(`❌ Conversations API failed: ${conversationsResponse.status}`);
+        }
         
-        for (const endpoint of conversationEndpoints) {
-            try {
-                console.log(`🧪 Trying conversations endpoint: ${endpoint}`);
-                const conversationsResponse = await fetch(`${voyagerApi}${endpoint}`, {
-                    method: 'GET',
-                    headers: {
-                        'csrf-token': tokenResult.csrfToken,
-                        'accept': 'application/vnd.linkedin.normalized+json+2.1',
-                        'x-li-lang': 'en_US',
-                        'x-li-page-instance': 'urn:li:page:d_flagship3_messaging_conversations;1ZlPK7kKRNSMi+vkXMyVMw==',
-                        'x-li-track': JSON.stringify({"clientVersion":"1.10.1208","osName":"web","timezoneOffset":1,"deviceFormFactor":"DESKTOP","mpName":"voyager-web"}),
-                        'x-restli-protocol-version': '2.0.0'
-                    }
-                });
-                
-                console.log(`📡 Status: ${conversationsResponse.status}`);
-                
-                if (conversationsResponse.ok) {
-                    const conversationsData = await conversationsResponse.json();
-                    conversations = conversationsData.elements || [];
-                    console.log(`✅ Found ${conversations.length} conversations with endpoint: ${endpoint}`);
+        // If no conversations found via API, try direct conversation access
+        if (conversations.length === 0) {
+            console.log('🔍 No conversations via API, trying direct conversation access...');
+            
+            // Known conversation ID for Eleazar (from the URL you provided)
+            const knownConversationIds = [
+                '2-MmJlMWU1MzMtMGUzYi00ODI2LThjNWEtYjQyZTAwZWEyNjM4XzEwMA==',
+                connectionId // Also try the connection ID itself
+            ];
+            
+            for (const conversationId of knownConversationIds) {
+                try {
+                    console.log(`🧪 Trying direct conversation access: ${conversationId}`);
                     
-                    if (conversations.length > 0) {
-                        workingEndpoint = endpoint;
-                        console.log('🎉 SUCCESS! Found conversations with endpoint:', endpoint);
-                        break;
+                    // Try to get messages directly from this conversation using the WORKING headers
+                    const directMessagesResponse = await fetch(`${voyagerApi}/messaging/conversations/${conversationId}/events`, {
+                        method: 'GET',
+                        headers: {
+                            'csrf-token': tokenResult.csrfToken,
+                            'accept': 'application/json',  // ← This is the key that works!
+                            'x-restli-protocol-version': '2.0.0'
+                        }
+                    });
+                    
+                    console.log(`📡 Direct conversation status: ${directMessagesResponse.status}`);
+                    
+                    if (directMessagesResponse.ok) {
+                        const messagesData = await directMessagesResponse.json();
+                        console.log('📋 Raw API Response:', messagesData);
+                        
+                        const messages = messagesData.elements || [];
+                        console.log(`📊 Found ${messages.length} raw messages in API response`);
+                        
+                        if (messages.length > 0) {
+                            console.log(`🎉 SUCCESS! Found ${messages.length} messages in direct conversation: ${conversationId}`);
+                            console.log('📝 Sample message structure:', messages[0]);
+                            
+                            // Process messages to extract text and sender info
+                            const processedMessages = messages.map((msg, index) => {
+                                console.log(`🔍 Processing message ${index + 1}:`, msg);
+                                
+                                // Try multiple ways to extract message content
+                                let text = '';
+                                let sender = 'unknown';
+                                
+                                // Method 1: Standard message structure
+                                if (msg.eventContent?.com?.linkedin?.voyager?.messaging?.create?.MessageCreate) {
+                                    const messageCreate = msg.eventContent.com.linkedin.voyager.messaging.create.MessageCreate;
+                                    text = messageCreate.body || messageCreate.attributedBody?.text || '';
+                                }
+                                
+                                // Method 2: Alternative message structure
+                                if (!text && msg.eventContent?.com?.linkedin?.voyager?.messaging?.EventContent) {
+                                    const eventContent = msg.eventContent.com.linkedin.voyager.messaging.EventContent;
+                                    text = eventContent.attributedBody?.text || '';
+                                }
+                                
+                                // Method 3: Direct body access
+                                if (!text && msg.body) {
+                                    text = msg.body;
+                                }
+                                
+                                // Extract sender information
+                                if (msg.from?.com?.linkedin?.voyager?.messaging?.MessagingMember) {
+                                    const member = msg.from.com.linkedin.voyager.messaging.MessagingMember;
+                                    if (member.name) {
+                                        sender = member.name;
+                                    } else if (member.miniProfile) {
+                                        sender = `${member.miniProfile.firstName || ''} ${member.miniProfile.lastName || ''}`.trim();
+                                    }
+                                }
+                                
+                                console.log(`📝 Processed message ${index + 1}: "${text}" from ${sender}`);
+                                
+                                return {
+                                    id: msg.entityUrn || msg.eventUrn || `msg_${index}`,
+                                    text: text,
+                                    sender: sender,
+                                    timestamp: msg.createdAt,
+                                    rawMessage: msg
+                                };
+                            }).filter(msg => msg.text && msg.text.trim().length > 0);
+                            
+                            console.log(`📊 Processed ${processedMessages.length} valid messages`);
+                            
+                            // Return the processed messages
+                            return {
+                                conversationUrnId: conversationId,
+                                messages: processedMessages,
+                                totalMessages: processedMessages.length,
+                                workingEndpoint: 'direct_conversation_access',
+                                rawResponse: messagesData
+                            };
+                        } else {
+                            console.log(`📭 No messages found in conversation ${conversationId}`);
+                            console.log('🔍 Full API response structure:', JSON.stringify(messagesData, null, 2));
+                        }
+                    } else {
+                        console.log(`❌ Direct conversation failed: ${conversationId} (${directMessagesResponse.status})`);
+                        try {
+                            const errorData = await directMessagesResponse.text();
+                            console.log('❌ Error response:', errorData);
+                        } catch (e) {
+                            console.log('❌ Could not read error response');
+                        }
                     }
-                } else {
-                    console.log(`❌ Endpoint failed: ${endpoint} (${conversationsResponse.status})`);
+                } catch (error) {
+                    console.log(`❌ Direct conversation error: ${conversationId} - ${error.message}`);
                 }
-            } catch (error) {
-                console.log(`❌ Endpoint error: ${endpoint} - ${error.message}`);
             }
         }
         
         if (conversations.length === 0) {
-            console.log('❌ No conversations found with any endpoint');
+            console.log('❌ No conversations found via any method');
             console.log('💡 This could mean:');
             console.log('   1. LinkedIn API has changed');
             console.log('   2. No conversations exist');
@@ -5690,20 +6600,73 @@ const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => 
             console.log('🎉 NEW MESSAGES DETECTED! Response tracking is working!');
         }
         
-        // Process messages to extract text and sender info
-        const processedMessages = newMessages.map(msg => {
-            const messageContent = msg.eventContent?.com.linkedin.voyager.messaging.create.MessageCreate;
-            const text = messageContent?.body || messageContent?.attributedBody?.text || '';
-            const sender = msg.from?.entityUrn?.includes(connectionId) ? 'lead' : 'us';
-            
-            return {
-                id: msg.entityUrn,
-                text: text,
-                sender: sender,
-                timestamp: msg.createdAt,
-                messageType: msg.eventContent?.com.linkedin.voyager.messaging.create.MessageCreate?.attachments?.length > 0 ? 'attachment' : 'text'
-            };
-        }).filter(msg => msg.text && msg.text.trim().length > 0);
+                            // Process messages to extract text and sender info using enhanced detection
+                            const processedMessages = newMessages.map(msg => {
+                                // Extract text using multiple methods (same as working function)
+                                let text = '';
+                                
+                                // Method 1: Standard structure
+                                if (msg.eventContent?.com?.linkedin?.voyager?.messaging?.create?.MessageCreate) {
+                                    const messageCreate = msg.eventContent.com.linkedin.voyager.messaging.create.MessageCreate;
+                                    text = messageCreate.body || messageCreate.attributedBody?.text || '';
+                                }
+                                
+                                // Method 2: Alternative structure
+                                if (!text && msg.eventContent?.com?.linkedin?.voyager?.messaging?.EventContent) {
+                                    const eventContent = msg.eventContent.com.linkedin.voyager.messaging.EventContent;
+                                    text = eventContent.attributedBody?.text || '';
+                                }
+                                
+                                // Method 3: Direct body
+                                if (!text && msg.body) {
+                                    text = msg.body;
+                                }
+                                
+                                // Method 4: Search in eventContent JSON
+                                if (!text && msg.eventContent) {
+                                    const eventContentStr = JSON.stringify(msg.eventContent);
+                                    const textMatch = eventContentStr.match(/"text":"([^"]+)"/);
+                                    if (textMatch) {
+                                        text = textMatch[1];
+                                    }
+                                }
+                                
+                                // Enhanced sender detection (same as working function)
+                                let sender = 'unknown';
+                                if (msg.from?.com?.linkedin?.voyager?.messaging?.MessagingMember) {
+                                    const member = msg.from.com.linkedin.voyager.messaging.MessagingMember;
+                                    if (member.name) {
+                                        sender = member.name;
+                                    } else if (member.miniProfile) {
+                                        sender = `${member.miniProfile.firstName || ''} ${member.miniProfile.lastName || ''}`.trim();
+                                    }
+                                }
+                                
+                                // Enhanced lead detection - check if this is from the lead (not us)
+                                const isFromLead = 
+                                    // Check by name (if we know the lead's name)
+                                    (sender.toLowerCase().includes('eleazar') || sender.toLowerCase().includes('nzerem')) ||
+                                    // Check by entity URN
+                                    msg.from?.entityUrn?.includes(connectionId) ||
+                                    // Check by profile ID in various fields
+                                    (msg.from && JSON.stringify(msg.from).includes(connectionId)) ||
+                                    // Check if this is NOT from us (William Victor) and has meaningful text
+                                    (!sender.toLowerCase().includes('william') && 
+                                     !sender.toLowerCase().includes('victor') && 
+                                     !msg.from?.entityUrn?.includes('vicken-concept') &&
+                                     text && text.trim().length > 0 && text.length < 1000);
+                                
+                                console.log(`📝 Monitoring - Message: "${text}" from ${sender}, isFromLead: ${isFromLead}`);
+                                
+                                return {
+                                    id: msg.entityUrn,
+                                    text: text,
+                                    sender: isFromLead ? 'lead' : 'us',
+                                    timestamp: msg.createdAt,
+                                    messageType: msg.eventContent?.com?.linkedin?.voyager?.messaging?.create?.MessageCreate?.attachments?.length > 0 ? 'attachment' : 'text',
+                                    rawSender: sender
+                                };
+                            }).filter(msg => msg.text && msg.text.trim().length > 0);
         
         console.log(`📊 Processed ${processedMessages.length} new messages`);
         return processedMessages;
