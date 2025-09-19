@@ -119,14 +119,14 @@ window.LinkDominatorDebug = {
     // Check configuration
     checkConfig: function() {
         console.log('🔧 Configuration Check:');
-        console.log('PLATFROM_URL:', typeof PLATFROM_URL !== 'undefined' ? PLATFROM_URL : 'UNDEFINED');
+        console.log('PLATFORM_URL:', typeof PLATFORM_URL !== 'undefined' ? PLATFORM_URL : 'UNDEFINED');
         console.log('LINKEDIN_URL:', typeof LINKEDIN_URL !== 'undefined' ? LINKEDIN_URL : 'UNDEFINED');
         console.log('filterApi:', typeof filterApi !== 'undefined' ? filterApi : 'UNDEFINED');
         console.log('voyagerApi:', typeof voyagerApi !== 'undefined' ? voyagerApi : 'UNDEFINED');
         console.log('LinkedIn ID:', $('#me-publicIdentifier').val() || 'NOT FOUND');
         
         return {
-            platformUrl: typeof PLATFROM_URL !== 'undefined' ? PLATFROM_URL : 'UNDEFINED',
+            platformUrl: typeof PLATFORM_URL !== 'undefined' ? PLATFORM_URL : 'UNDEFINED',
             filterApi: typeof filterApi !== 'undefined' ? filterApi : 'UNDEFINED',
             linkedinId: $('#me-publicIdentifier').val() || 'NOT FOUND'
         };

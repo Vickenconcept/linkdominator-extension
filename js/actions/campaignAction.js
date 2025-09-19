@@ -80,7 +80,7 @@ const apiRequest = async (url, options = {}) => {
 const getCampaigns = async () => {
     try {
         console.log('Fetching campaigns...');
-        const response = await apiRequest(`${PLATFROM_URL}/api/campaigns`, {
+        const response = await apiRequest(`${PLATFORM_URL}/api/campaigns`, {
             method: 'GET'
         });
         
@@ -127,7 +127,7 @@ const setCampaigns = () => {
 const getCampaignLeads = async (campaignId, callback) => {
     try {
         console.log('Fetching campaign leads for ID:', campaignId);
-        const response = await apiRequest(`${PLATFROM_URL}/api/campaign/${campaignId}/leads`, {
+        const response = await apiRequest(`${PLATFORM_URL}/api/campaign/${campaignId}/leads`, {
             method: 'GET'
         });
         
@@ -149,7 +149,7 @@ const getCampaignLeads = async (campaignId, callback) => {
 const getCampaignSequence = async (campaignId) => {
     try {
         console.log('Fetching campaign sequence for ID:', campaignId);
-        const response = await apiRequest(`${PLATFROM_URL}/api/campaign/${campaignId}/sequence`, {
+        const response = await apiRequest(`${PLATFORM_URL}/api/campaign/${campaignId}/sequence`, {
             method: 'GET'
         });
         
@@ -193,11 +193,11 @@ const updateCampaign = async (data) => {
         }
         
         console.log('Sending campaign update request:', {
-            url: `${PLATFROM_URL}/api/campaign/${campaignId}/update`,
+            url: `${PLATFORM_URL}/api/campaign/${campaignId}/update`,
             data: requestData
         });
         
-        const response = await apiRequest(`${PLATFROM_URL}/api/campaign/${campaignId}/update`, {
+        const response = await apiRequest(`${PLATFORM_URL}/api/campaign/${campaignId}/update`, {
             method: 'POST',
             body: JSON.stringify(requestData)
         });
@@ -234,11 +234,11 @@ const updateSequenceNodeModel = async (campaign, nodeModel) => {
         };
         
         console.log('Sending sequence update request:', {
-            url: `${PLATFROM_URL}/api/campaign/${campaign.id}/update-node`,
+            url: `${PLATFORM_URL}/api/campaign/${campaign.id}/update-node`,
             data: requestData
         });
         
-        const response = await apiRequest(`${PLATFROM_URL}/api/campaign/${campaign.id}/update-node`, {
+        const response = await apiRequest(`${PLATFORM_URL}/api/campaign/${campaign.id}/update-node`, {
             method: 'POST',
             body: JSON.stringify(requestData)
         });
@@ -258,7 +258,7 @@ const updateSequenceNodeModel = async (campaign, nodeModel) => {
  * @param {integer} campaignId 
  */
 const createLeadGenRunning = campaignId => {
-    fetch(`${PLATFROM_URL}/api/campaign/${campaignId}/leadgen/store`, {
+    fetch(`${PLATFORM_URL}/api/campaign/${campaignId}/leadgen/store`, {
         method: 'post',
         headers: {
             'lk-id': linkedinId,
@@ -287,11 +287,11 @@ const updateLeadGenRunning = async (campaignId, leadId, data) => {
         };
         
         console.log('Sending lead gen update request:', {
-            url: `${PLATFROM_URL}/api/campaign/${campaignId}/leadgen/${leadId}/update`,
+            url: `${PLATFORM_URL}/api/campaign/${campaignId}/leadgen/${leadId}/update`,
             data: requestData
         });
         
-        const response = await apiRequest(`${PLATFROM_URL}/api/campaign/${campaignId}/leadgen/${leadId}/update`, {
+        const response = await apiRequest(`${PLATFORM_URL}/api/campaign/${campaignId}/leadgen/${leadId}/update`, {
             method: 'POST',
             body: JSON.stringify(requestData)
         });
@@ -313,7 +313,7 @@ const updateLeadGenRunning = async (campaignId, leadId, data) => {
 const getLeadGenRunning = async (campaignId) => {
     try {
         console.log('Fetching lead gen running for campaign:', campaignId);
-        const response = await apiRequest(`${PLATFROM_URL}/api/campaign/${campaignId}/leads/running`, {
+        const response = await apiRequest(`${PLATFORM_URL}/api/campaign/${campaignId}/leads/running`, {
             method: 'GET'
         });
         
@@ -343,11 +343,11 @@ const updateLeadNetworkDegree = async (leadData) => {
         };
         
         console.log('Sending lead network update request:', {
-            url: `${PLATFROM_URL}/api/lead/${leadData.id}/update`,
+            url: `${PLATFORM_URL}/api/lead/${leadData.id}/update`,
             data: requestData
         });
         
-        const response = await apiRequest(`${PLATFROM_URL}/api/lead/${leadData.id}/update`, {
+        const response = await apiRequest(`${PLATFORM_URL}/api/lead/${leadData.id}/update`, {
             method: 'POST',
             body: JSON.stringify(requestData)
         });
@@ -379,11 +379,11 @@ const storeCallStatus = async (data) => {
         };
         
         console.log('Sending call status store request:', {
-            url: `${PLATFROM_URL}/api/book-call/store`,
+            url: `${PLATFORM_URL}/api/book-call/store`,
             data: requestData
         });
         
-        const response = await apiRequest(`${PLATFROM_URL}/api/book-call/store`, {
+        const response = await apiRequest(`${PLATFORM_URL}/api/book-call/store`, {
             method: 'POST',
             body: JSON.stringify(requestData)
         });

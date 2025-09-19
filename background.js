@@ -454,7 +454,7 @@ const initializeActiveCampaigns = async () => {
     
     try {
         // Get all campaigns from the backend
-        const response = await fetch(`${PLATFROM_URL}/api/campaigns`, {
+        const response = await fetch(`${PLATFORM_URL}/api/campaigns`, {
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json',
@@ -669,7 +669,7 @@ const changeMessageVariableNames = (message, lead) => {
 // API helper functions
 const getCampaignSequence = async (campaignId) => {
     try {
-        const response = await fetch(`${PLATFROM_URL}/api/campaign/${campaignId}/sequence`, {
+        const response = await fetch(`${PLATFORM_URL}/api/campaign/${campaignId}/sequence`, {
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json',
@@ -693,7 +693,7 @@ const getCampaignSequence = async (campaignId) => {
 
 const getCampaignLeads = async (campaignId, callback) => {
     try {
-        const response = await fetch(`${PLATFROM_URL}/api/campaign/${campaignId}/leads`, {
+        const response = await fetch(`${PLATFORM_URL}/api/campaign/${campaignId}/leads`, {
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json',
@@ -721,7 +721,7 @@ const getLeadGenRunning = async (campaignId) => {
     try {
         
         // First try the new tracking endpoint
-        const response = await fetch(`${PLATFROM_URL}/api/campaign/${campaignId}/leadgen/tracking`, {
+        const response = await fetch(`${PLATFORM_URL}/api/campaign/${campaignId}/leadgen/tracking`, {
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json',
@@ -782,7 +782,7 @@ const updateSequenceNodeModel = async (campaign, nodeModel) => {
             runStatus: nodeModel.runStatus
         });
         
-        const response = await fetch(`${PLATFROM_URL}/api/campaign/${campaign.id}/update-node`, {
+        const response = await fetch(`${PLATFORM_URL}/api/campaign/${campaign.id}/update-node`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -808,7 +808,7 @@ const updateSequenceNodeModel = async (campaign, nodeModel) => {
 
 const updateCampaign = async (campaignData) => {
     try {
-        const response = await fetch(`${PLATFROM_URL}/api/campaign/${campaignData.campaignId}/update`, {
+        const response = await fetch(`${PLATFORM_URL}/api/campaign/${campaignData.campaignId}/update`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -849,13 +849,13 @@ const updateLeadGenRunning = async (campaignId, leadId, updateData) => {
 
         console.log(`🔄 Updating leadgen running for campaign ${campaignId}, lead ${leadId}`);
         console.log(`🔍 Update data:`, updateData);
-        console.log(`🔗 API URL: ${PLATFROM_URL}/api/campaign/${campaignId}/leadgen/${leadId}/update`);
+        console.log(`🔗 API URL: ${PLATFORM_URL}/api/campaign/${campaignId}/leadgen/${leadId}/update`);
         console.log(`🔑 LinkedIn ID: ${linkedinId}`);
         
         const requestBody = JSON.stringify(updateData);
         console.log(`📦 Request body:`, requestBody);
         
-        const response = await fetch(`${PLATFROM_URL}/api/campaign/${campaignId}/leadgen/${leadId}/update`, {
+        const response = await fetch(`${PLATFORM_URL}/api/campaign/${campaignId}/leadgen/${leadId}/update`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -878,7 +878,7 @@ const updateLeadGenRunning = async (campaignId, leadId, updateData) => {
         const responseText = await response.text();
         console.error(`❌ Failed to update leadgen running - Status: ${response.status}, Response: ${responseText}`);
         console.error(`🔍 Full request details:`, {
-            url: `${PLATFROM_URL}/api/campaign/${campaignId}/leadgen/${leadId}/update`,
+            url: `${PLATFORM_URL}/api/campaign/${campaignId}/leadgen/${leadId}/update`,
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -891,7 +891,7 @@ const updateLeadGenRunning = async (campaignId, leadId, updateData) => {
         console.error('❌ Error updating leadgen running:', error);
         console.error('🔍 Parameters:', { campaignId, leadId, updateData });
         console.error('🔍 LinkedIn ID available:', !!linkedinId);
-        console.error('🔍 Platform URL:', PLATFROM_URL);
+        console.error('🔍 Platform URL:', PLATFORM_URL);
         
         // Don't throw the error, just log it and continue
         return null;
@@ -910,7 +910,7 @@ const updateLeadNetworkDegree = async (lead) => {
 
         // console.log(`🔄 Updating network degree for lead: ${leadId}`);
         
-        const response = await fetch(`${PLATFROM_URL}/api/lead/${leadId}/update`, {
+        const response = await fetch(`${PLATFORM_URL}/api/lead/${leadId}/update`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -968,7 +968,7 @@ const createLeadGenRunning = async (campaignId) => {
         }
         
         console.log(`✅ No existing leadgen running found, creating new entries for campaign ${campaignId}...`);
-        const response = await fetch(`${PLATFROM_URL}/api/campaign/${campaignId}/leadgen/store`, {
+        const response = await fetch(`${PLATFORM_URL}/api/campaign/${campaignId}/leadgen/store`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -1047,10 +1047,10 @@ const getAudience = async (audienceId, total, filterApi, callback) => {
 const storeCallStatus = async (callData) => {
     try {
         console.log('🔧 DEBUG: storeCallStatus called with data:', callData);
-        console.log('🔧 DEBUG: API URL:', `${PLATFROM_URL}/api/book-call/store`);
+        console.log('🔧 DEBUG: API URL:', `${PLATFORM_URL}/api/book-call/store`);
         console.log('🔧 DEBUG: LinkedIn ID:', linkedinId);
         
-        const response = await fetch(`${PLATFROM_URL}/api/book-call/store`, {
+        const response = await fetch(`${PLATFORM_URL}/api/book-call/store`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -1105,7 +1105,7 @@ const processCallReply = async (message, profileId, connectionId) => {
             return;
         }
 
-        const response = await fetch(`${PLATFROM_URL}/api/calls/process-reply`, {
+        const response = await fetch(`${PLATFORM_URL}/api/calls/process-reply`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -1131,7 +1131,7 @@ const processCallReply = async (message, profileId, connectionId) => {
                     // Prefer scheduling details from the response; fallback to API fetch
                     let scheduling = result.scheduling;
                     if (!scheduling) {
-                        const schedRes = await fetch(`${PLATFROM_URL}/api/calls/${callId}/scheduling`, {
+                        const schedRes = await fetch(`${PLATFORM_URL}/api/calls/${callId}/scheduling`, {
                             method: 'GET',
                             headers: {
                                 'Content-Type': 'application/json',
@@ -1225,7 +1225,7 @@ const cleanupDuplicateLeads = async (campaignId) => {
     }
 };
 
-var lkmApi = PLATFROM_URL+'/api';
+var lkmApi = PLATFORM_URL+'/api';
 var inURL = LINKEDIN_URL;
 var voyagerApi = VOYAGER_API;
 var csrfToken, linkedinId, plainId, firstName, lastName;
@@ -2707,7 +2707,7 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                             const currentLinkedInId = linkedinId || 'vicken-concept';
                             console.log('🔍 Using LinkedIn ID for polling:', currentLinkedInId);
                             
-                            const messageResponse = await fetch(`${PLATFROM_URL}/api/calls/${callId}/message`, {
+                            const messageResponse = await fetch(`${PLATFORM_URL}/api/calls/${callId}/message`, {
                                 method: 'GET',
                                 headers: {
                                     'Content-Type': 'application/json',
@@ -4366,7 +4366,7 @@ const _updateCampaignLeadsNetwork = async () => {
     let campaigns = [], clist = [], leads = []
 
     // Get campaigns
-    await fetch(`${PLATFROM_URL}/api/campaigns`, {
+    await fetch(`${PLATFORM_URL}/api/campaigns`, {
         method: 'get',
         headers: {
             'lk-id': linkedinId
@@ -4538,7 +4538,7 @@ const pollForLinkedInId = async () => {
 const startCampaign = async (campaignId) => {
     console.log(`🚀 Starting campaign ${campaignId}...`);
     try {
-        const response = await fetch(`${PLATFROM_URL}/api/campaign/${campaignId}/update`, {
+        const response = await fetch(`${PLATFORM_URL}/api/campaign/${campaignId}/update`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -6381,7 +6381,7 @@ self.setupResponseMonitoringForAcceptedConnections = async () => {
     
     try {
         // Get all campaigns and their accepted leads
-        const campaignsResponse = await fetch(`${PLATFROM_URL}/api/campaigns`, {
+        const campaignsResponse = await fetch(`${PLATFORM_URL}/api/campaigns`, {
             headers: { 'lk-id': linkedinId || 'vicken-concept' }
         });
         
@@ -6400,7 +6400,7 @@ self.setupResponseMonitoringForAcceptedConnections = async () => {
                 console.log(`🔍 Checking campaign ${campaign.id} (${campaign.name})`);
                 
                 // Get leads for this campaign
-                const leadsResponse = await fetch(`${PLATFROM_URL}/api/campaign/${campaign.id}/leads`, {
+                const leadsResponse = await fetch(`${PLATFORM_URL}/api/campaign/${campaign.id}/leads`, {
                     headers: { 'lk-id': linkedinId || 'vicken-concept' }
                 });
                 
@@ -6510,7 +6510,7 @@ self.simulateCallResponse = async (callId, message, isPositive = true) => {
     console.log('🧪 SIMULATING CALL RESPONSE for testing...');
     
     try {
-        const response = await fetch(`${PLATFROM_URL}/api/calls/process-reply`, {
+        const response = await fetch(`${PLATFORM_URL}/api/calls/process-reply`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -6603,7 +6603,7 @@ const checkForCallResponses = async () => {
                             console.log('✅ New response received from lead:', latestMessage.text);
                             
                             // Send message to backend for AI analysis
-                            const analysisResponse = await processCallReplyWithAI(monitoringData.callId, latestMessage.text);
+                            const analysisResponse = await processCallReplyWithAI(monitoringData.callId, latestMessage.text, monitoringData.leadName);
                             
                             if (analysisResponse) {
                                 // Update monitoring status
@@ -6620,7 +6620,7 @@ const checkForCallResponses = async () => {
                                     
                                     try {
                                         // Generate calendar link
-                                        const calendarResponse = await fetch(`${PLATFROM_URL}/api/calls/${monitoringData.connectionId}_${Date.now()}/calendar-link`, {
+                                        const calendarResponse = await fetch(`${PLATFORM_URL}/api/calls/${monitoringData.connectionId}_${Date.now()}/calendar-link`, {
                                             method: 'POST',
                                             headers: {
                                                 'Content-Type': 'application/json',
@@ -6641,22 +6641,34 @@ const checkForCallResponses = async () => {
                                             
                                             const tokenResult = await chrome.storage.local.get(['csrfToken']);
                                             
-                                            const sendMessageResponse = await fetch(`${voyagerApi}/messaging/conversations/${conversationId}/events`, {
+                                            // Use the SAME structure as the working initial message sending
+                                            const messageBody = calendarData.schedulingMessage || `Great! I'd love to schedule a call with you. Please use this link to book a time that works for you: ${calendarData.calendarLink}`;
+                                            const messageEvent = {
+                                                'com.linkedin.voyager.messaging.create.MessageCreate': {
+                                                    body: messageBody,
+                                                    attributedBody: {"text": messageBody, "attributes": []},
+                                                    mediaAttachments: [],
+                                                }
+                                            };
+                                            
+                                            const requestBody = {
+                                                eventCreate: messageEvent
+                                            };
+                                            
+                                            const url = `${voyagerApi}/messaging/conversations/${conversationId}/events?action=create`;
+                                            
+                                            const sendMessageResponse = await fetch(url, {
                                                 method: 'POST',
                                                 headers: {
                                                     'csrf-token': tokenResult.csrfToken,
-                                                    'accept': 'application/vnd.linkedin.normalized+json+2.1',
-                                                    'content-type': 'application/json',
+                                                    'accept': 'text/plain, */*; q=0.01',
+                                                    'content-type': 'application/json; charset=UTF-8',
                                                     'x-li-lang': 'en_US',
-                                                    'x-restli-protocol-version': '2.0.0'
+                                                    'x-li-page-instance': 'urn:li:page:d_flagship3_people_invitations;1ZlPK7kKRNSMi+vkXMyVMw==',
+                                                    'x-li-track': JSON.stringify({"clientVersion":"1.10.1208","osName":"web","timezoneOffset":1,"deviceFormFactor":"DESKTOP","mpName":"voyager-web"}),
+                                                    'x-restli-protocol-version': '2.0.0',
                                                 },
-                                                body: JSON.stringify({
-                                                    eventContent: {
-                                                        'com.linkedin.voyager.messaging.create.MessageCreate': {
-                                                            body: calendarData.schedulingMessage || `Great! I'd love to schedule a call with you. Please use this link to book a time that works for you: ${calendarData.calendarLink}`
-                                                        }
-                                                    }
-                                                })
+                                                body: JSON.stringify(requestBody)
                                             });
                                             
                                             if (sendMessageResponse.ok) {
@@ -6673,9 +6685,63 @@ const checkForCallResponses = async () => {
                                         console.error('❌ Error generating calendar link:', error);
                                     }
                                 }
-                            
                             } else {
-                                console.log('😞 Negative response detected. Handling accordingly...');
+                                console.log('📝 Neutral/Negative response detected. Sending AI-generated follow-up...');
+                                
+                                // Send AI-generated response for neutral/negative messages
+                                if (analysisResponse.suggested_response || analysisResponse['Suggested Response']) {
+                                    try {
+                                        const suggestedResponse = analysisResponse.suggested_response || analysisResponse['Suggested Response'];
+                                        console.log(`📤 Sending AI response to ${monitoringData.leadName}: "${suggestedResponse}"`);
+                                        
+                                        // Use the conversation ID from the connection and send the AI response
+                                        const conversationId = monitoringData.connectionId;
+                                        const voyagerApi = 'https://www.linkedin.com/voyager/api';
+                                        
+                                        const tokenResult = await chrome.storage.local.get(['csrfToken']);
+                                        
+                                        // Use the SAME structure as the working initial message sending
+                                        const messageEvent = {
+                                            'com.linkedin.voyager.messaging.create.MessageCreate': {
+                                                body: suggestedResponse,
+                                                attributedBody: {"text": suggestedResponse, "attributes": []},
+                                                mediaAttachments: [],
+                                            }
+                                        };
+                                        
+                                        const requestBody = {
+                                            eventCreate: messageEvent
+                                        };
+                                        
+                                        const url = `${voyagerApi}/messaging/conversations/${conversationId}/events?action=create`;
+                                        
+                                        const sendMessageResponse = await fetch(url, {
+                                            method: 'POST',
+                                            headers: {
+                                                'csrf-token': tokenResult.csrfToken,
+                                                'accept': 'text/plain, */*; q=0.01',
+                                                'content-type': 'application/json; charset=UTF-8',
+                                                'x-li-lang': 'en_US',
+                                                'x-li-page-instance': 'urn:li:page:d_flagship3_people_invitations;1ZlPK7kKRNSMi+vkXMyVMw==',
+                                                'x-li-track': JSON.stringify({"clientVersion":"1.10.1208","osName":"web","timezoneOffset":1,"deviceFormFactor":"DESKTOP","mpName":"voyager-web"}),
+                                                'x-restli-protocol-version': '2.0.0',
+                                            },
+                                            body: JSON.stringify(requestBody)
+                                        });
+                                        
+                                        if (sendMessageResponse.ok) {
+                                            console.log(`✅ AI response sent successfully to ${monitoringData.leadName}!`);
+                                            monitoringData.status = 'ai_response_sent';
+                                            await chrome.storage.local.set({ [key]: monitoringData });
+                                        } else {
+                                            console.log(`❌ Failed to send AI response: ${sendMessageResponse.status}`);
+                                        }
+                                    } catch (error) {
+                                        console.error('❌ Error sending AI response:', error);
+                                    }
+                                } else {
+                                    console.log('⚠️ No suggested response from AI analysis');
+                                }
                             }
                         } else {
                             // Update last checked message ID to avoid reprocessing
@@ -7079,11 +7145,26 @@ const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => 
 /**
  * Process call reply with AI analysis
  */
-const processCallReplyWithAI = async (callId, messageText) => {
+const processCallReplyWithAI = async (callId, messageText, leadName = null) => {
     try {
         console.log('🤖 Processing call reply with AI analysis...');
         
-        const response = await fetch(`${PLATFROM_URL}/api/calls/analyze-message`, {
+        // If leadName is not provided, try to get it from storage
+        if (!leadName) {
+            const allStorage = await chrome.storage.local.get();
+            const responseKeys = Object.keys(allStorage).filter(key => key.startsWith('call_response_monitoring_'));
+            for (const key of responseKeys) {
+                const monitoringData = allStorage[key];
+                if (monitoringData.callId === callId) {
+                    leadName = monitoringData.leadName;
+                    break;
+                }
+            }
+        }
+        
+        console.log(`🎯 Analyzing message from: ${leadName || 'Unknown Lead'}`);
+        
+        const response = await fetch(`${PLATFORM_URL}/api/calls/analyze-message`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -7091,7 +7172,7 @@ const processCallReplyWithAI = async (callId, messageText) => {
             },
             body: JSON.stringify({
                 message: messageText,
-                leadName: 'LinkedIn Lead',
+                leadName: leadName || 'LinkedIn Lead',
                 context: 'LinkedIn message response analysis'
             })
         });
@@ -7149,7 +7230,7 @@ const processPositiveCallResponse = async (monitoringData, responseData) => {
     
     try {
         // Generate calendar link via backend
-        const calendarResponse = await fetch(`${PLATFROM_URL}/api/calls/${monitoringData.callId}/calendar-link`, {
+        const calendarResponse = await fetch(`${PLATFORM_URL}/api/calls/${monitoringData.callId}/calendar-link`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -7277,12 +7358,12 @@ const checkAllCampaignsForAcceptances = async () => {
     isCheckingAcceptances = true;
     console.log('🔍 STARTING ACCEPTANCE CHECK...');
     console.log('🔑 LinkedIn ID:', linkedinId);
-    console.log('🌐 Platform URL:', PLATFROM_URL);
+    console.log('🌐 Platform URL:', PLATFORM_URL);
     
     try {
         // Get ONLY ACTIVE campaigns that are currently running
         console.log('📡 Fetching campaigns from API...');
-        const response = await fetch(`${PLATFROM_URL}/api/campaigns`, {
+        const response = await fetch(`${PLATFORM_URL}/api/campaigns`, {
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json',

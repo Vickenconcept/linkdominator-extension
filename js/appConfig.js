@@ -15,7 +15,7 @@ const getCookie = (cname) => {
 
 var d=new Date();
 var dInt=new Date(d).getTime();
-var filterApi=PLATFROM_URL+'/api';
+var filterApi=PLATFORM_URL+'/api';
 var voyagerApi=LINKEDIN_URL+'/voyager/api';
 var linkedinBlock=LINKEDIN_URL+'/psettings/member-blocking';
 var voyagerSingleSearchUrl=`${voyagerApi}/voyagerSearchDashReusableTypeahead?decorationId=com.linkedin.voyager.dash.deco.search.typeahead.ReusableTypeaheadCollection-26`;

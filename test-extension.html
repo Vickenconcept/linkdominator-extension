@@ -145,12 +145,12 @@
             let debug = '';
 
             try {
-                debug += `PLATFROM_URL: ${typeof PLATFROM_URL !== 'undefined' ? PLATFROM_URL : 'UNDEFINED'}\n`;
+                debug += `PLATFORM_URL: ${typeof PLATFORM_URL !== 'undefined' ? PLATFORM_URL : 'UNDEFINED'}\n`;
                 debug += `LINKEDIN_URL: ${typeof LINKEDIN_URL !== 'undefined' ? LINKEDIN_URL : 'UNDEFINED'}\n`;
                 debug += `filterApi: ${typeof filterApi !== 'undefined' ? filterApi : 'UNDEFINED'}\n`;
                 debug += `voyagerApi: ${typeof voyagerApi !== 'undefined' ? voyagerApi : 'UNDEFINED'}\n`;
 
-                if (typeof PLATFROM_URL === 'undefined' || typeof filterApi === 'undefined') {
+                if (typeof PLATFORM_URL === 'undefined' || typeof filterApi === 'undefined') {
                     status = '<div class="status-indicator status-error"></div>Configuration missing';
                 }
             } catch (error) {
