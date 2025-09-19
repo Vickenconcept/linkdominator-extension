@@ -2777,15 +2777,9 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                     console.error('❌ Failed to store call status (will not retry immediately):', err.message);
                     // Don't set dedupe flag on API failure, allowing retry
                 } finally {
-                    // Always mark the call node as completed after a single attempt to avoid repeats
-                    try {
-                        await updateSequenceNodeModel(currentCampaign, { ...nodeModel, runStatus: true });
-                        console.log('✅ Call node marked as completed (post-attempt)');
-                        // Set campaign-level completion flag for call node
-                        const callCompletedKey = `call_node_completed_${currentCampaign.id}`;
-                        await chrome.storage.local.set({ [callCompletedKey]: true });
-                        console.log('🗝️ Set campaign call completed flag:', callCompletedKey);
-                    } catch (e) {}
+                    // Don't mark call node as completed immediately - wait for response
+                    console.log('⏳ Call message sent, waiting for response...');
+                    console.log('🔄 Campaign will continue running to monitor for responses');
                 }
             }
 
@@ -2795,6 +2789,27 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                 messageConnection(lead);
             } else {
                 console.log('✅ Message already sent via AI message processing, skipping duplicate send');
+                
+                // Set up response monitoring after AI message is sent
+                setTimeout(async () => {
+                    const responseMonitoringKey = `call_response_monitoring_${currentCampaign.id}_${lead.connectionId}`;
+                    await chrome.storage.local.set({ 
+                        [responseMonitoringKey]: {
+                            callId: callResponse.call_id || callResponse.data?.call_id,
+                            leadId: lead.id,
+                            leadName: lead.name,
+                            connectionId: lead.connectionId,
+                            campaignId: currentCampaign.id,
+                            conversationUrnId: arConnectionModel.conversationUrnId || null,
+                            sentAt: Date.now(),
+                            status: 'waiting_for_response',
+                            lastCheckedMessageId: null,
+                            messageCount: 0
+                        }
+                    });
+                    console.log('📊 Response monitoring set up:', responseMonitoringKey);
+                    console.log('🔗 Conversation URN ID stored:', arConnectionModel.conversationUrnId);
+                }, 2000); // Wait 2 seconds for LinkedIn API response to complete
             }
         }else     if(nodeModel.value == 'send-invites'){
             console.log('📨 Executing send-invites action...');
@@ -3157,9 +3172,9 @@ const messageConnection = scheduleInfo => {
     }
 
     // Get browser cookie
-    chrome.cookies.get({
-        url: inURL,
-        name: 'JSESSIONID'
+            chrome.cookies.get({
+                url: inURL,
+                name: 'JSESSIONID'
     }, function(data) {
         if (data !== null) {
             chrome.storage.local.remove("csrfToken")
@@ -3195,9 +3210,55 @@ const messageConnection = scheduleInfo => {
             console.log('✅ LinkedIn message sent successfully!');
             console.log('📄 Response data:', res);
             console.log('🎯 Message sent to:', arConnectionModel.connectionId);
+            
+            // Extract conversation URN ID from response if available
+            if (res && res.value && res.value.entityUrn) {
+                const conversationUrnId = res.value.entityUrn.replace('urn:li:fsd_conversation:', '');
+                arConnectionModel.conversationUrnId = conversationUrnId;
+                console.log('🔗 Conversation URN ID extracted:', conversationUrnId);
+                
+                // Set up response monitoring if this is a call message
+                if (arConnectionModel.message && arConnectionModel.message.toLowerCase().includes('call')) {
+                    setTimeout(async () => {
+                        // Try to find the call ID from recent call attempts
+                        const allStorage = await chrome.storage.local.get();
+                        const callKeys = Object.keys(allStorage).filter(key => key.startsWith('call_attempted_'));
+                        
+                        for (const key of callKeys) {
+                            const callData = allStorage[key];
+                            if (callData && Date.now() - callData < 10000) { // Within last 10 seconds
+                                const parts = key.split('_');
+                                const campaignId = parts[2];
+                                const connectionId = parts[3];
+                                
+                                if (connectionId === arConnectionModel.connectionId) {
+                                    const responseMonitoringKey = `call_response_monitoring_${campaignId}_${connectionId}`;
+                                    await chrome.storage.local.set({ 
+                                        [responseMonitoringKey]: {
+                                            callId: null, // Will be updated when we get the actual call ID
+                                            leadId: null, // Will be updated when we get the lead ID
+                                            leadName: arConnectionModel.name,
+                                            connectionId: arConnectionModel.connectionId,
+                                            campaignId: campaignId,
+                                            conversationUrnId: conversationUrnId,
+                                            sentAt: Date.now(),
+                                            status: 'waiting_for_response',
+                                            lastCheckedMessageId: null,
+                                            messageCount: 0
+                                        }
+                                    });
+                                    console.log('📊 Response monitoring set up for call message:', responseMonitoringKey);
+                                    console.log('🔗 Conversation URN ID stored:', conversationUrnId);
+                                    break;
+                                }
+                            }
+                        }
+                    }, 1000);
+                }
+            }
         })
         .catch((err) => {
-            console.error('❌ Failed to send LinkedIn message:', err);
+        console.error('❌ Failed to send LinkedIn message:', err);
         })
     })
 }
@@ -4778,11 +4839,11 @@ const startContinuousMonitoring = () => {
         // Set up a recurring alarm to check for acceptances every 5 minutes
         chrome.alarms.create('continuous_invite_monitoring', {
             delayInMinutes: 0.1, // Start checking after 5 minutes
-            periodInMinutes: 1 // Then check every 5 minutes (fixed from 1 minute)
+            periodInMinutes: 0.5 // Then check every 30 seconds (temporary for testing)
         });
         
-        console.log('⏰ Continuous monitoring alarm created - will check every 5 minutes');
-        console.log('🎯 Monitoring will start in 5 minutes and then check every 5 minutes');
+        console.log('⏰ Continuous monitoring alarm created - will check every 30 seconds (TESTING MODE)');
+        console.log('🎯 Monitoring will start in 6 seconds and then check every 30 seconds');
     });
 };
 
@@ -4802,8 +4863,1028 @@ self.stopMonitoring = () => {
     return 'Monitoring stopped manually';
 };
 
+// Manual testing functions
+self.testCallResponseMonitoring = async () => {
+    console.log('🧪 Testing call response monitoring setup...');
+    const allStorage = await chrome.storage.local.get();
+    const responseKeys = Object.keys(allStorage).filter(key => key.startsWith('call_response_monitoring_'));
+    const callAttemptKeys = Object.keys(allStorage).filter(key => key.startsWith('call_attempted_'));
+    
+    console.log('📊 Found call response monitoring entries:', responseKeys.length);
+    console.log('📊 Found call attempt entries:', callAttemptKeys.length);
+    
+    responseKeys.forEach(key => {
+        console.log(`📋 ${key}:`, allStorage[key]);
+    });
+    
+    callAttemptKeys.forEach(key => {
+        console.log(`📞 ${key}:`, new Date(allStorage[key]));
+    });
+    
+    if (responseKeys.length === 0) {
+        console.log('⚠️ No call response monitoring entries found. This means the system is not tracking responses.');
+        if (callAttemptKeys.length > 0) {
+            console.log('💡 However, there are call attempts that should be monitored. The system may need to be restarted or campaigns activated.');
+        }
+    } else {
+        console.log('✅ Call response monitoring is set up correctly!');
+    }
+};
+
+// Function to manually trigger response checking (for testing)
+self.manualCheckResponses = async () => {
+    console.log('🔍 MANUALLY TRIGGERING RESPONSE CHECK...');
+    try {
+        await checkForCallResponses();
+        console.log('✅ Manual response check completed');
+    } catch (error) {
+        console.error('❌ Manual response check failed:', error);
+    }
+};
+
+// Function to manually check if Eleazar replied (by checking LinkedIn directly)
+self.checkEleazarManually = async () => {
+    console.log('🔍 MANUALLY CHECKING ELEAZAR FOR REPLIES...');
+    
+    try {
+        // Get all tabs to find LinkedIn
+        const tabs = await chrome.tabs.query({});
+        const linkedinTab = tabs.find(tab => tab.url && tab.url.includes('linkedin.com'));
+        
+        if (!linkedinTab) {
+            console.log('❌ No LinkedIn tab found. Please open LinkedIn in a new tab first.');
+            console.log('💡 Go to: https://www.linkedin.com/messaging/');
+            return;
+        }
+        
+        console.log('✅ Found LinkedIn tab:', linkedinTab.url);
+        
+        // Navigate to messages if not already there
+        if (!linkedinTab.url.includes('/messaging/')) {
+            await chrome.tabs.update(linkedinTab.id, {
+                url: 'https://www.linkedin.com/messaging/'
+            });
+            console.log('🔄 Navigated to LinkedIn messages');
+        }
+        
+        console.log('🔄 Please check manually:');
+        console.log('1. Look for conversation with Eleazar Nzerem');
+        console.log('2. Check if he replied to your call message');
+        console.log('3. If he replied, note what he said');
+        
+        // Wait a moment then try to inject script
+        setTimeout(async () => {
+            try {
+                // Try to inject a script to check for conversations
+                const results = await chrome.tabs.executeScript(linkedinTab.id, {
+                    code: `
+                        console.log('🔍 Looking for Eleazar conversation...');
+                        
+                        // Look for conversation with Eleazar
+                        const conversations = document.querySelectorAll('[data-test-id="conversation-item"]');
+                        console.log('📊 Found conversations:', conversations.length);
+                        
+                        let eleazarConversation = null;
+                        
+                        conversations.forEach((conv, index) => {
+                            const nameElement = conv.querySelector('[data-test-id="conversation-item-name"]');
+                            if (nameElement) {
+                                console.log('👤 Conversation', index, ':', nameElement.textContent);
+                                if (nameElement.textContent.includes('Eleazar')) {
+                                    eleazarConversation = conv;
+                                    console.log('✅ Found Eleazar conversation!');
+                                }
+                            }
+                        });
+                        
+                        if (eleazarConversation) {
+                            eleazarConversation.click();
+                            console.log('✅ Clicked Eleazar conversation');
+                            
+                            // Check for new messages after a delay
+                            setTimeout(() => {
+                                const messages = document.querySelectorAll('[data-test-id="message-item"]');
+                                console.log('📊 Found messages:', messages.length);
+                                
+                                if (messages.length > 0) {
+                                    const lastMessage = messages[messages.length - 1];
+                                    const senderName = lastMessage.querySelector('[data-test-id="message-sender-name"]')?.textContent;
+                                    const messageText = lastMessage.querySelector('[data-test-id="message-text"]')?.textContent;
+                                    
+                                    console.log('📝 Last message from:', senderName);
+                                    console.log('📝 Last message text:', messageText);
+                                    
+                                    if (senderName && senderName.includes('Eleazar')) {
+                                        console.log('🎉 FOUND ELEAZAR REPLY:', messageText);
+                                    }
+                                }
+                            }, 2000);
+                        } else {
+                            console.log('❌ No conversation with Eleazar found');
+                            console.log('💡 Make sure you have sent a message to Eleazar first');
+                        }
+                    `
+                });
+                console.log('✅ Script injected successfully');
+            } catch (error) {
+                console.log('⚠️ Could not inject script:', error.message);
+                console.log('💡 Please check manually by going to LinkedIn messages');
+            }
+        }, 3000);
+        
+    } catch (error) {
+        console.error('❌ Manual check failed:', error);
+    }
+};
+
+// Function to test LinkedIn API access
+self.testLinkedInAPI = async () => {
+    console.log('🔍 TESTING LINKEDIN API ACCESS...');
+    
+    try {
+        // Get CSRF token
+        const tokenResult = await chrome.storage.local.get(['csrfToken']);
+        if (!tokenResult.csrfToken) {
+            console.error('❌ No CSRF token found');
+            return;
+        }
+        
+        console.log('✅ CSRF token found:', tokenResult.csrfToken.substring(0, 20) + '...');
+        
+        // Test basic LinkedIn API access
+        const voyagerApi = 'https://www.linkedin.com/voyager/api';
+        
+        // Test 1: Try to get user profile
+        console.log('🧪 Test 1: Getting user profile...');
+        const profileResponse = await fetch(`${voyagerApi}/identity/profiles/me`, {
+            method: 'GET',
+            headers: {
+                'csrf-token': tokenResult.csrfToken,
+                'accept': 'application/vnd.linkedin.normalized+json+2.1',
+                'x-li-lang': 'en_US',
+                'x-restli-protocol-version': '2.0.0'
+            }
+        });
+        
+        console.log('📡 Profile API status:', profileResponse.status);
+        
+        if (profileResponse.ok) {
+            const profileData = await profileResponse.json();
+            console.log('✅ Profile API works:', profileData.firstName, profileData.lastName);
+        } else {
+            console.error('❌ Profile API failed:', profileResponse.status);
+        }
+        
+        // Test 2: Try conversations with different endpoint
+        console.log('🧪 Test 2: Trying conversations endpoint...');
+        const convResponse = await fetch(`${voyagerApi}/messaging/conversations?count=20`, {
+            method: 'GET',
+            headers: {
+                'csrf-token': tokenResult.csrfToken,
+                'accept': 'application/vnd.linkedin.normalized+json+2.1',
+                'x-li-lang': 'en_US',
+                'x-restli-protocol-version': '2.0.0'
+            }
+        });
+        
+        console.log('📡 Conversations API status:', convResponse.status);
+        
+        if (convResponse.ok) {
+            const convData = await convResponse.json();
+            console.log('✅ Conversations API works, found:', convData.elements?.length || 0, 'conversations');
+        } else {
+            console.error('❌ Conversations API failed:', convResponse.status);
+        }
+        
+        // Test 3: Try to get current page info
+        console.log('🧪 Test 3: Checking current LinkedIn page...');
+        const tabs = await chrome.tabs.query({active: true, currentWindow: true});
+        if (tabs[0] && tabs[0].url.includes('linkedin.com')) {
+            console.log('✅ Currently on LinkedIn page:', tabs[0].url);
+        } else {
+            console.log('⚠️ Not currently on LinkedIn page');
+        }
+        
+    } catch (error) {
+        console.error('❌ LinkedIn API test failed:', error);
+    }
+};
+
+// Function to create a comprehensive polling + AI pipeline for call response tracking
+self.createCallResponsePipeline = async () => {
+    console.log('🚀 CREATING COMPREHENSIVE CALL RESPONSE PIPELINE...');
+    
+    try {
+        // Get all call response monitoring entries
+        const allStorage = await chrome.storage.local.get();
+        const responseKeys = Object.keys(allStorage).filter(key => key.startsWith('call_response_monitoring_'));
+        
+        if (responseKeys.length === 0) {
+            console.log('❌ No call response monitoring entries found');
+            console.log('💡 Make sure you have sent call messages first');
+            return;
+        }
+        
+        console.log(`📊 Found ${responseKeys.length} call response monitoring entries`);
+        
+        // Process each monitoring entry
+        for (const key of responseKeys) {
+            const monitoringData = allStorage[key];
+            console.log(`\n🔍 Processing: ${monitoringData.leadName} (${monitoringData.connectionId})`);
+            
+            try {
+                // Step 1: Get conversations using the improved function
+                const conversationData = await fetchLinkedInConversation(monitoringData.connectionId, monitoringData.lastCheckedMessageId);
+                
+                if (!conversationData) {
+                    console.log(`❌ No conversation data for ${monitoringData.leadName}`);
+                    continue;
+                }
+                
+                // Step 2: Process new messages
+                if (conversationData.messages && conversationData.messages.length > 0) {
+                    console.log(`📨 Found ${conversationData.messages.length} new messages from ${monitoringData.leadName}`);
+                    
+                    for (const message of conversationData.messages) {
+                        console.log(`📝 Message: "${message.text}"`);
+                        console.log(`👤 From: ${message.sender}`);
+                        console.log(`🕐 Time: ${new Date(message.timestamp).toLocaleString()}`);
+                        
+                        // Step 3: AI Analysis for positive responses
+                        if (message.sender === 'lead' && message.text.trim().length > 0) {
+                            console.log(`🤖 Analyzing message with AI...`);
+                            
+                            try {
+                                const aiResponse = await processCallReplyWithAI(monitoringData.callId || 'unknown', message.text);
+                                
+                                if (aiResponse && aiResponse.isPositive) {
+                                    console.log(`🎉 POSITIVE RESPONSE DETECTED!`);
+                                    console.log(`📊 Intent: ${aiResponse.intent}`);
+                                    console.log(`😊 Sentiment: ${aiResponse.sentiment}`);
+                                    console.log(`⭐ Lead Score: ${aiResponse.leadScore}`);
+                                    
+                                    // Step 4: Generate calendar link and send scheduling message
+                                    console.log(`📅 Generating calendar link...`);
+                                    const calendarResponse = await fetch(`${platformUrl}/api/calls/${monitoringData.callId || 'unknown'}/calendar-link`, {
+                                        method: 'POST',
+                                        headers: {
+                                            'Content-Type': 'application/json',
+                                            'lk-id': linkedinId
+                                        }
+                                    });
+                                    
+                                    if (calendarResponse.ok) {
+                                        const calendarData = await calendarResponse.json();
+                                        console.log(`✅ Calendar link generated: ${calendarData.calendarLink}`);
+                                        
+                                        // Step 5: Send scheduling message via LinkedIn
+                                        console.log(`📤 Sending scheduling message...`);
+                                        await sendCalendarLinkMessage(monitoringData, calendarData.calendarLink, calendarData.schedulingMessage);
+                                        
+                                        console.log(`🎯 COMPLETE! Call response pipeline executed successfully for ${monitoringData.leadName}`);
+                                    } else {
+                                        console.log(`❌ Failed to generate calendar link: ${calendarResponse.status}`);
+                                    }
+                                } else {
+                                    console.log(`📝 Response analyzed as neutral/negative - no action taken`);
+                                }
+                            } catch (error) {
+                                console.error(`❌ AI analysis failed:`, error);
+                            }
+                        }
+                    }
+                    
+                    // Step 6: Update monitoring data with latest message ID
+                    const latestMessage = conversationData.messages[conversationData.messages.length - 1];
+                    monitoringData.lastCheckedMessageId = latestMessage.id;
+                    monitoringData.lastChecked = Date.now();
+                    monitoringData.messageCount += conversationData.messages.length;
+                    
+                    await chrome.storage.local.set({ [key]: monitoringData });
+                    console.log(`✅ Updated monitoring data for ${monitoringData.leadName}`);
+                } else {
+                    console.log(`⏳ No new messages from ${monitoringData.leadName}`);
+                }
+                
+            } catch (error) {
+                console.error(`❌ Error processing ${monitoringData.leadName}:`, error);
+            }
+        }
+        
+        console.log(`\n🎯 Call response pipeline completed for ${responseKeys.length} leads`);
+        
+    } catch (error) {
+        console.error('❌ Call response pipeline failed:', error);
+    }
+};
+
+// Function to try different LinkedIn API endpoints for conversations
+self.testLinkedInConversationsAPI = async () => {
+    console.log('🔍 TESTING DIFFERENT LINKEDIN CONVERSATIONS API ENDPOINTS...');
+    
+    try {
+        // Get CSRF token
+        const tokenResult = await chrome.storage.local.get(['csrfToken']);
+        if (!tokenResult.csrfToken) {
+            console.error('❌ No CSRF token found');
+            return;
+        }
+        
+        const voyagerApi = 'https://www.linkedin.com/voyager/api';
+        const headers = {
+            'csrf-token': tokenResult.csrfToken,
+            'accept': 'application/vnd.linkedin.normalized+json+2.1',
+            'x-li-lang': 'en_US',
+            'x-restli-protocol-version': '2.0.0'
+        };
+        
+        // Test different endpoints
+        const endpoints = [
+            '/messaging/conversations',
+            '/messaging/conversations?count=50',
+            '/messaging/conversations?count=100',
+            '/messaging/conversations?start=0&count=20',
+            '/messaging/conversations?q=all',
+            '/messaging/conversations?q=received',
+            '/messaging/conversations?q=sent',
+            '/messaging/conversations?q=unread',
+            '/messaging/conversations?q=read',
+            '/messaging/conversations?q=archived',
+            '/messaging/conversations?q=spam',
+            '/messaging/conversations?q=trash',
+            '/messaging/conversations?q=all&count=50',
+            '/messaging/conversations?q=all&count=100',
+            '/messaging/conversations?q=all&count=200',
+            '/messaging/conversations?q=all&count=500',
+            '/messaging/conversations?q=all&count=1000',
+            '/messaging/conversations?q=all&count=2000',
+            '/messaging/conversations?q=all&count=5000',
+            '/messaging/conversations?q=all&count=10000'
+        ];
+        
+        for (const endpoint of endpoints) {
+            try {
+                console.log(`🧪 Testing endpoint: ${endpoint}`);
+                const response = await fetch(`${voyagerApi}${endpoint}`, {
+                    method: 'GET',
+                    headers: headers
+                });
+                
+                console.log(`📡 Status: ${response.status}`);
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    const conversations = data.elements || [];
+                    console.log(`✅ Found ${conversations.length} conversations`);
+                    
+                    if (conversations.length > 0) {
+                        console.log('🎉 SUCCESS! Found conversations with endpoint:', endpoint);
+                        console.log('📋 First conversation:', conversations[0]);
+                        break;
+                    }
+                } else {
+                    console.log(`❌ Failed: ${response.status}`);
+                }
+            } catch (error) {
+                console.log(`❌ Error: ${error.message}`);
+            }
+        }
+        
+    } catch (error) {
+        console.error('❌ LinkedIn conversations API test failed:', error);
+    }
+};
+
+// Function to debug LinkedIn conversations
+self.debugLinkedInConversations = async () => {
+    console.log('🔍 DEBUGGING LINKEDIN CONVERSATIONS...');
+    
+    try {
+        // Get CSRF token
+        const tokenResult = await chrome.storage.local.get(['csrfToken']);
+        if (!tokenResult.csrfToken) {
+            console.error('❌ No CSRF token found');
+            return;
+        }
+        
+        console.log('✅ CSRF token found');
+        
+        // Fetch conversations
+        const voyagerApi = 'https://www.linkedin.com/voyager/api';
+        const response = await fetch(`${voyagerApi}/messaging/conversations`, {
+            method: 'GET',
+            headers: {
+                'csrf-token': tokenResult.csrfToken,
+                'accept': 'application/vnd.linkedin.normalized+json+2.1',
+                'x-li-lang': 'en_US',
+                'x-restli-protocol-version': '2.0.0'
+            }
+        });
+        
+        console.log('📡 LinkedIn conversations API status:', response.status);
+        
+        if (!response.ok) {
+            console.error('❌ LinkedIn conversations API failed:', response.status);
+            return;
+        }
+        
+        const data = await response.json();
+        const conversations = data.elements || [];
+        
+        console.log('📊 Total conversations found:', conversations.length);
+        
+        // Look for Eleazar's conversation
+        const eleazarConversation = conversations.find(conv => {
+            return conv.participants?.some(participant => {
+                const profile = participant.com?.linkedin?.voyager?.messaging?.MessagingMember?.miniProfile;
+                return profile?.publicIdentifier === 'eleazar-nzerem' || 
+                       profile?.firstName === 'Eleazar' || 
+                       profile?.lastName === 'Nzerem';
+            });
+        });
+        
+        if (eleazarConversation) {
+            console.log('✅ FOUND ELEAZAR CONVERSATION:', eleazarConversation.entityUrn);
+            console.log('📋 Conversation details:', {
+                entityUrn: eleazarConversation.entityUrn,
+                participants: eleazarConversation.participants?.map(p => ({
+                    name: `${p.com?.linkedin?.voyager?.messaging?.MessagingMember?.miniProfile?.firstName} ${p.com?.linkedin?.voyager?.messaging?.MessagingMember?.miniProfile?.lastName}`,
+                    publicIdentifier: p.com?.linkedin?.voyager?.messaging?.MessagingMember?.miniProfile?.publicIdentifier
+                }))
+            });
+        } else {
+            console.log('❌ No conversation found with Eleazar');
+            console.log('🔍 Available conversations:', conversations.map(c => ({
+                entityUrn: c.entityUrn,
+                participants: c.participants?.map(p => ({
+                    name: `${p.com?.linkedin?.voyager?.messaging?.MessagingMember?.miniProfile?.firstName} ${p.com?.linkedin?.voyager?.messaging?.MessagingMember?.miniProfile?.lastName}`,
+                    publicIdentifier: p.com?.linkedin?.voyager?.messaging?.MessagingMember?.miniProfile?.publicIdentifier
+                }))
+            })));
+        }
+        
+    } catch (error) {
+        console.error('❌ Debug failed:', error);
+    }
+};
+
+// Function to manually set up response monitoring for existing calls
+self.setupResponseMonitoringForExistingCalls = async () => {
+    console.log('🔧 Setting up response monitoring for existing calls...');
+    const allStorage = await chrome.storage.local.get();
+    const callAttemptKeys = Object.keys(allStorage).filter(key => key.startsWith('call_attempted_'));
+    
+    // Find the most recent call attempt for Eleazar
+    let mostRecentCall = null;
+    let mostRecentTime = 0;
+    
+    callAttemptKeys.forEach(key => {
+        const timestamp = allStorage[key];
+        if (timestamp > mostRecentTime) {
+            mostRecentTime = timestamp;
+            mostRecentCall = key;
+        }
+    });
+    
+    if (mostRecentCall) {
+        const parts = mostRecentCall.split('_');
+        const campaignId = parts[2];
+        const connectionId = parts[3];
+        
+        console.log('🎯 Most recent call found:', mostRecentCall);
+        console.log('📊 Campaign ID:', campaignId);
+        console.log('👤 Connection ID:', connectionId);
+        
+        // Set up response monitoring for this call
+        const responseMonitoringKey = `call_response_monitoring_${campaignId}_${connectionId}`;
+        await chrome.storage.local.set({ 
+            [responseMonitoringKey]: {
+                callId: null, // We don't have the actual call ID, but we can still monitor
+                leadId: 14521, // Eleazar's lead ID from the logs
+                leadName: 'Eleazar Nzerem',
+                connectionId: connectionId,
+                campaignId: campaignId,
+                conversationUrnId: null, // Will be updated when we fetch conversations
+                sentAt: mostRecentTime,
+                status: 'waiting_for_response',
+                lastCheckedMessageId: null,
+                messageCount: 0
+            }
+        });
+        
+        console.log('✅ Response monitoring set up for most recent call:', responseMonitoringKey);
+        console.log('🕐 Call sent at:', new Date(mostRecentTime));
+        
+        return responseMonitoringKey;
+    } else {
+        console.log('❌ No call attempts found');
+        return null;
+    }
+};
+
+// Manual function to simulate a call response for testing
+self.simulateCallResponse = async (callId, message, isPositive = true) => {
+    console.log('🧪 SIMULATING CALL RESPONSE for testing...');
+    
+    try {
+        const response = await fetch(`${PLATFROM_URL}/api/calls/process-reply`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'lk-id': linkedinId || 'vicken-concept'
+            },
+            body: JSON.stringify({
+                call_id: callId,
+                message: message,
+                profile_id: 'test-profile',
+                sender: 'lead'
+            })
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            console.log('✅ Simulated response processed:', result);
+            return `Response simulated successfully. Analysis: ${JSON.stringify(result.analysis)}`;
+        } else {
+            console.error('❌ Failed to simulate response:', response.status);
+            return `Failed to simulate response: ${response.status}`;
+        }
+    } catch (error) {
+        console.error('❌ Error simulating response:', error);
+        return `Error simulating response: ${error.message}`;
+    }
+};
+
+// Manual function to check call responses for testing
+self.checkCallResponses = async () => {
+    console.log('🔍 MANUALLY CHECKING CALL RESPONSES...');
+    await checkForCallResponses();
+    return 'Call response check completed - check console for results';
+};
+
+// Manual function to test LinkedIn conversation fetching
+self.testLinkedInConversation = async (connectionId) => {
+    console.log('🧪 TESTING LINKEDIN CONVERSATION FETCHING...');
+    console.log('🔗 Connection ID:', connectionId);
+    
+    try {
+        const messages = await fetchLinkedInConversation(connectionId);
+        console.log('📊 Messages fetched:', messages);
+        return `LinkedIn conversation test completed. Found ${messages ? messages.length : 0} messages. Check console for details.`;
+    } catch (error) {
+        console.error('❌ Error testing LinkedIn conversation:', error);
+        return `Error testing LinkedIn conversation: ${error.message}`;
+    }
+};
+
 // Flag to prevent concurrent execution of acceptance checks
 let isCheckingAcceptances = false;
+
+/**
+ * Check for call responses and process them using real LinkedIn API
+ */
+const checkForCallResponses = async () => {
+    console.log('🔍 Checking for call responses using LinkedIn API...');
+    
+    try {
+        // Get all response monitoring keys
+        const allStorage = await chrome.storage.local.get();
+        const responseKeys = Object.keys(allStorage).filter(key => key.startsWith('call_response_monitoring_'));
+        
+        if (responseKeys.length === 0) {
+            console.log('📭 No call responses to monitor');
+            return;
+        }
+        
+        console.log(`📊 Found ${responseKeys.length} call responses to check`);
+        
+        for (const key of responseKeys) {
+            const monitoringData = allStorage[key];
+            
+            if (monitoringData.status === 'waiting_for_response') {
+                console.log(`🔍 Checking LinkedIn conversation for ${monitoringData.leadName} (Call ID: ${monitoringData.callId})`);
+                
+                try {
+                    // Check LinkedIn conversation for new messages
+                    const newMessages = await fetchLinkedInConversation(monitoringData.connectionId, monitoringData.lastCheckedMessageId);
+                    
+                    if (newMessages && newMessages.length > 0) {
+                        console.log(`📨 Found ${newMessages.length} new messages from ${monitoringData.leadName}`);
+                        
+                        // Process the latest message
+                        const latestMessage = newMessages[newMessages.length - 1];
+                        
+                        // Check if this message is from the lead (not from us)
+                        if (latestMessage.sender !== 'us') {
+                            console.log('✅ New response received from lead:', latestMessage.text);
+                            
+                            // Send message to backend for AI analysis
+                            const analysisResponse = await processCallReplyWithAI(monitoringData.callId, latestMessage.text);
+                            
+                            if (analysisResponse) {
+                                // Update monitoring status
+                                monitoringData.status = 'response_received';
+                                monitoringData.responseData = analysisResponse;
+                                monitoringData.receivedAt = Date.now();
+                                monitoringData.lastCheckedMessageId = latestMessage.id;
+                                
+                                await chrome.storage.local.set({ [key]: monitoringData });
+                                
+                                // Process the response based on AI analysis
+                                if (analysisResponse.isPositive) {
+                                    console.log('🎉 Positive response detected! Generating calendar link...');
+                                    await processPositiveCallResponse(monitoringData, analysisResponse);
+                                } else {
+                                    console.log('😞 Negative response detected. Handling accordingly...');
+                                    await processNegativeCallResponse(monitoringData, analysisResponse);
+                                }
+                                
+                                // Mark call node as completed after processing response
+                                await markCallNodeAsCompleted(monitoringData.campaignId, monitoringData.leadId);
+                            }
+                        } else {
+                            // Update last checked message ID to avoid reprocessing
+                            monitoringData.lastCheckedMessageId = latestMessage.id;
+                            await chrome.storage.local.set({ [key]: monitoringData });
+                        }
+                    } else {
+                        console.log('⏳ No new messages from', monitoringData.leadName);
+                        
+                        // Check if it's been too long (e.g., 7 days)
+                        const daysSinceSent = (Date.now() - monitoringData.sentAt) / (1000 * 60 * 60 * 24);
+                        if (daysSinceSent > 7) {
+                            console.log('⏰ Response timeout after 7 days, marking as no response');
+                            monitoringData.status = 'timeout';
+                            await chrome.storage.local.set({ [key]: monitoringData });
+                            await markCallNodeAsCompleted(monitoringData.campaignId, monitoringData.leadId);
+                        }
+                    }
+                } catch (error) {
+                    console.error('❌ Error checking LinkedIn conversation for', monitoringData.leadName, ':', error);
+                }
+            }
+        }
+        
+    } catch (error) {
+        console.error('❌ Error in checkForCallResponses:', error);
+    }
+};
+
+/**
+ * Fetch LinkedIn conversation messages for a specific connection
+ */
+const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => {
+    try {
+        console.log('📡 Fetching LinkedIn conversation for connection:', connectionId);
+        
+        // Get CSRF token
+        const tokenResult = await chrome.storage.local.get(["csrfToken"]);
+        if (!tokenResult.csrfToken) {
+            console.error('❌ No CSRF token available');
+            return null;
+        }
+        
+        // Step 1: Try different conversation endpoints to find one that works
+        const conversationEndpoints = [
+            '/messaging/conversations',
+            '/messaging/conversations?count=50',
+            '/messaging/conversations?q=all',
+            '/messaging/conversations?q=all&count=100',
+            '/messaging/conversations?start=0&count=20'
+        ];
+        
+        let conversations = [];
+        let workingEndpoint = null;
+        
+        for (const endpoint of conversationEndpoints) {
+            try {
+                console.log(`🧪 Trying conversations endpoint: ${endpoint}`);
+                const conversationsResponse = await fetch(`${voyagerApi}${endpoint}`, {
+                    method: 'GET',
+                    headers: {
+                        'csrf-token': tokenResult.csrfToken,
+                        'accept': 'application/vnd.linkedin.normalized+json+2.1',
+                        'x-li-lang': 'en_US',
+                        'x-li-page-instance': 'urn:li:page:d_flagship3_messaging_conversations;1ZlPK7kKRNSMi+vkXMyVMw==',
+                        'x-li-track': JSON.stringify({"clientVersion":"1.10.1208","osName":"web","timezoneOffset":1,"deviceFormFactor":"DESKTOP","mpName":"voyager-web"}),
+                        'x-restli-protocol-version': '2.0.0'
+                    }
+                });
+                
+                console.log(`📡 Status: ${conversationsResponse.status}`);
+                
+                if (conversationsResponse.ok) {
+                    const conversationsData = await conversationsResponse.json();
+                    conversations = conversationsData.elements || [];
+                    console.log(`✅ Found ${conversations.length} conversations with endpoint: ${endpoint}`);
+                    
+                    if (conversations.length > 0) {
+                        workingEndpoint = endpoint;
+                        console.log('🎉 SUCCESS! Found conversations with endpoint:', endpoint);
+                        break;
+                    }
+                } else {
+                    console.log(`❌ Endpoint failed: ${endpoint} (${conversationsResponse.status})`);
+                }
+            } catch (error) {
+                console.log(`❌ Endpoint error: ${endpoint} - ${error.message}`);
+            }
+        }
+        
+        if (conversations.length === 0) {
+            console.log('❌ No conversations found with any endpoint');
+            console.log('💡 This could mean:');
+            console.log('   1. LinkedIn API has changed');
+            console.log('   2. No conversations exist');
+            console.log('   3. Authentication issues');
+            console.log('   4. Need to be actively on LinkedIn.com');
+            return null;
+        }
+        
+        // Find conversation with the target connection
+        let targetConversation = null;
+        for (const conversation of conversations) {
+            const participants = conversation.participants?.elements || [];
+            for (const participant of participants) {
+                const profile = participant.com?.linkedin?.voyager?.messaging?.MessagingMember?.miniProfile;
+                
+                // Try multiple ways to match the connection
+                if (participant.entityUrn && participant.entityUrn.includes(connectionId)) {
+                    targetConversation = conversation;
+                    break;
+                }
+                
+                // Also try matching by name (for Eleazar specifically)
+                if (profile?.firstName === 'Eleazar' && profile?.lastName === 'Nzerem') {
+                    console.log('🎯 Found Eleazar by name match:', participant.entityUrn);
+                    targetConversation = conversation;
+                    break;
+                }
+                
+                // Try matching by public identifier
+                if (profile?.publicIdentifier === 'eleazar-nzerem') {
+                    console.log('🎯 Found Eleazar by public identifier:', participant.entityUrn);
+                    targetConversation = conversation;
+                    break;
+                }
+            }
+            if (targetConversation) break;
+        }
+        
+        if (!targetConversation) {
+        console.log('📭 No conversation found with connection:', connectionId);
+        console.log('🔍 Available conversations:', conversations.map(c => ({
+            entityUrn: c.entityUrn,
+            participants: c.participants?.elements?.map(p => ({
+                entityUrn: p.entityUrn,
+                name: `${p.com?.linkedin?.voyager?.messaging?.MessagingMember?.miniProfile?.firstName} ${p.com?.linkedin?.voyager?.messaging?.MessagingMember?.miniProfile?.lastName}`,
+                publicIdentifier: p.com?.linkedin?.voyager?.messaging?.MessagingMember?.miniProfile?.publicIdentifier
+            }))
+        })));
+        return null;
+        }
+        
+        console.log('✅ Found conversation:', targetConversation.entityUrn);
+        
+        // Extract conversation URN ID
+        const conversationUrnId = targetConversation.entityUrn.replace('urn:li:fsd_conversation:', '');
+        
+        // Fetch messages from this conversation
+        console.log('📡 Fetching messages from LinkedIn conversation:', conversationUrnId);
+        const messagesResponse = await fetch(`${voyagerApi}/messaging/conversations/${conversationUrnId}/events`, {
+            method: 'GET',
+            headers: {
+                'csrf-token': tokenResult.csrfToken,
+                'accept': 'application/vnd.linkedin.normalized+json+2.1',
+                'x-li-lang': 'en_US',
+                'x-li-page-instance': 'urn:li:page:d_flagship3_messaging_conversations;1ZlPK7kKRNSMi+vkXMyVMw==',
+                'x-li-track': JSON.stringify({"clientVersion":"1.10.1208","osName":"web","timezoneOffset":1,"deviceFormFactor":"DESKTOP","mpName":"voyager-web"}),
+                'x-restli-protocol-version': '2.0.0'
+            }
+        });
+        
+        console.log('📡 LinkedIn messages API response status:', messagesResponse.status);
+        
+        if (!messagesResponse.ok) {
+            console.error('❌ LinkedIn messages API failed:', messagesResponse.status, messagesResponse.statusText);
+            throw new Error(`LinkedIn messages API failed: ${messagesResponse.status}`);
+        }
+        
+        // Remove duplicate error check
+        
+        const messagesData = await messagesResponse.json();
+        const messages = messagesData.elements || [];
+        
+        // Filter for new messages since last check
+        let newMessages = messages;
+        if (lastMessageId) {
+            const lastMessageIndex = messages.findIndex(msg => msg.entityUrn === lastMessageId);
+            if (lastMessageIndex >= 0) {
+                newMessages = messages.slice(lastMessageIndex + 1);
+            }
+        }
+        
+        console.log('📊 Total messages in conversation:', messages.length);
+        console.log('📊 New messages found:', newMessages.length);
+        if (newMessages.length > 0) {
+            console.log('🎉 NEW MESSAGES DETECTED! Response tracking is working!');
+        }
+        
+        // Process messages to extract text and sender info
+        const processedMessages = newMessages.map(msg => {
+            const messageContent = msg.eventContent?.com.linkedin.voyager.messaging.create.MessageCreate;
+            const text = messageContent?.body || messageContent?.attributedBody?.text || '';
+            const sender = msg.from?.entityUrn?.includes(connectionId) ? 'lead' : 'us';
+            
+            return {
+                id: msg.entityUrn,
+                text: text,
+                sender: sender,
+                timestamp: msg.createdAt,
+                messageType: msg.eventContent?.com.linkedin.voyager.messaging.create.MessageCreate?.attachments?.length > 0 ? 'attachment' : 'text'
+            };
+        }).filter(msg => msg.text && msg.text.trim().length > 0);
+        
+        console.log(`📊 Processed ${processedMessages.length} new messages`);
+        return processedMessages;
+        
+    } catch (error) {
+        console.error('❌ Error fetching LinkedIn conversation:', error);
+        return null;
+    }
+};
+
+/**
+ * Process call reply with AI analysis
+ */
+const processCallReplyWithAI = async (callId, messageText) => {
+    try {
+        console.log('🤖 Processing call reply with AI analysis...');
+        
+        const response = await fetch(`${PLATFROM_URL}/api/calls/process-reply`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'lk-id': linkedinId || 'vicken-concept'
+            },
+            body: JSON.stringify({
+                call_id: callId,
+                message: messageText,
+                profile_id: 'linkedin-profile',
+                sender: 'lead'
+            })
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            console.log('✅ AI analysis completed:', result);
+            
+            // Determine if response is positive based on analysis
+            const analysis = result.analysis || {};
+            const isPositive = analysis.intent === 'interested' && 
+                             analysis.sentiment === 'positive' && 
+                             (analysis.lead_score || 0) >= 7;
+            
+            return {
+                hasResponse: true,
+                message: messageText,
+                analysis: analysis,
+                isPositive: isPositive,
+                call_status: result.new_status,
+                suggested_response: result.suggested_response
+            };
+        } else {
+            console.error('❌ Failed to process reply with AI:', response.status);
+            return null;
+        }
+    } catch (error) {
+        console.error('❌ Error processing call reply with AI:', error);
+        return null;
+    }
+};
+
+/**
+ * Process positive call response - generate and send calendar link
+ */
+const processPositiveCallResponse = async (monitoringData, responseData) => {
+    console.log('🎉 Processing positive response from', monitoringData.leadName);
+    
+    try {
+        // Generate calendar link via backend
+        const calendarResponse = await fetch(`${PLATFROM_URL}/api/calls/${monitoringData.callId}/calendar-link`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'lk-id': linkedinId || 'vicken-concept'
+            },
+            body: JSON.stringify({
+                leadId: monitoringData.leadId,
+                leadName: monitoringData.leadName,
+                connectionId: monitoringData.connectionId,
+                campaignId: monitoringData.campaignId,
+                responseData: responseData
+            })
+        });
+        
+        if (calendarResponse.ok) {
+            const calendarData = await calendarResponse.json();
+            console.log('📅 Calendar link generated:', calendarData);
+            
+            // Send calendar link message
+            if (calendarData.calendar_link) {
+                await sendCalendarLinkMessage(monitoringData, calendarData.calendar_link, calendarData.scheduling_message);
+            }
+        } else {
+            console.error('❌ Failed to generate calendar link:', calendarResponse.status);
+        }
+    } catch (error) {
+        console.error('❌ Error processing positive response:', error);
+    }
+};
+
+/**
+ * Send calendar link message to lead
+ */
+const sendCalendarLinkMessage = async (monitoringData, calendarLink, schedulingMessage) => {
+    console.log('📅 Sending calendar link message to', monitoringData.leadName);
+    
+    try {
+        // Prepare the message content
+        const messageContent = schedulingMessage || `Hi ${monitoringData.leadName}, I'd love to schedule a call with you. Please book a convenient time here: ${calendarLink}`;
+        
+        // Create message model for LinkedIn sending
+        const messageModel = {
+            message: messageContent,
+            connectionId: monitoringData.connectionId,
+            conversationUrnId: null, // Will be created if needed
+            distance: 1
+        };
+        
+        // Store the message model globally for messageConnection function
+        if (typeof arConnectionModel !== 'object' || arConnectionModel === null) {
+            window.arConnectionModel = {};
+        }
+        
+        Object.assign(window.arConnectionModel, messageModel);
+        
+        console.log('📤 Sending calendar link message via LinkedIn...');
+        console.log('📝 Message content:', messageContent);
+        
+        // Send the message
+        await messageConnection({ uploads: [] });
+        
+        console.log('✅ Calendar link message sent successfully to', monitoringData.leadName);
+        
+        // Update monitoring data to mark calendar sent
+        monitoringData.calendarSent = true;
+        monitoringData.calendarSentAt = Date.now();
+        
+        const monitoringKey = `call_response_monitoring_${monitoringData.campaignId}_${monitoringData.connectionId}`;
+        await chrome.storage.local.set({ [monitoringKey]: monitoringData });
+        
+    } catch (error) {
+        console.error('❌ Error sending calendar link message:', error);
+    }
+};
+
+/**
+ * Process negative call response
+ */
+const processNegativeCallResponse = async (monitoringData, responseData) => {
+    console.log('😞 Processing negative response from', monitoringData.leadName);
+    
+    try {
+        // Log the negative response for analysis
+        console.log('📊 Negative response details:', responseData);
+        
+        // Could add follow-up actions here if needed
+        // For now, just mark as completed
+        
+    } catch (error) {
+        console.error('❌ Error processing negative response:', error);
+    }
+};
+
+
+/**
+ * Mark call node as completed
+ */
+const markCallNodeAsCompleted = async (campaignId, leadId) => {
+    try {
+        // Mark the call node as completed
+        const callCompletedKey = `call_node_completed_${campaignId}`;
+        await chrome.storage.local.set({ [callCompletedKey]: true });
+        console.log('✅ Call node marked as completed:', callCompletedKey);
+        
+        // Clean up monitoring data
+        const monitoringKey = `call_response_monitoring_${campaignId}_${leadId}`;
+        await chrome.storage.local.remove(monitoringKey);
+        console.log('🧹 Response monitoring data cleaned up');
+        
+    } catch (error) {
+        console.error('❌ Error marking call node as completed:', error);
+    }
+};
 
 /**
  * Check all pending leads for invite acceptances (regardless of campaign status)
@@ -5038,6 +6119,9 @@ const checkAllCampaignsForAcceptances = async () => {
     } catch (error) {
         console.error('❌ Error in acceptance check:', error);
     } finally {
+        // Check for call responses before completing
+        await checkForCallResponses();
+        
         // Reset the flag to allow future executions
         isCheckingAcceptances = false;
         console.log('✅ Acceptance check completed');
