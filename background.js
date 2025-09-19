@@ -2026,6 +2026,28 @@ const setCampaignAlarm = async (campaign) => {
                                 } catch (updateError) {
                                     console.error(`❌ Failed to update database for ${lead.name}:`, updateError);
                                 }
+                                
+                                // Automatically create call response monitoring for accepted connections
+                                try {
+                                    const responseMonitoringKey = `call_response_monitoring_${campaign.id}_${lead.connectionId}`;
+                                    await chrome.storage.local.set({ 
+                                        [responseMonitoringKey]: {
+                                            callId: `${lead.connectionId}_${Date.now()}`, // Generate temporary call ID
+                                            leadId: lead.id,
+                                            leadName: lead.name,
+                                            connectionId: lead.connectionId,
+                                            campaignId: campaign.id,
+                                            conversationUrnId: null, // Will be updated when we fetch conversations
+                                            sentAt: Date.now(),
+                                            status: 'waiting_for_response',
+                                            lastCheckedMessageId: null,
+                                            messageCount: 0
+                                        }
+                                    });
+                                    console.log(`📊 Auto-created response monitoring for ${lead.name}: ${responseMonitoringKey}`);
+                                } catch (monitoringError) {
+                                    console.error(`❌ Failed to create response monitoring for ${lead.name}:`, monitoringError);
+                                }
                             }
                             
                             lead.acceptedStatus = wasAccepted;
@@ -5870,10 +5892,10 @@ self.testEleazarAIAnalysis = async () => {
             const leadScore = aiAnalysis.leadScore || aiAnalysis['Lead Score'] || aiAnalysis.lead_score;
             const isPositiveFlag = aiAnalysis.isPositive || aiAnalysis['Is Positive'];
             
-            const isPositive = isPositiveFlag || 
+            const isPositive = (isPositiveFlag === true) || 
                               (intent && intent.toLowerCase().includes('interested')) ||
                               (sentiment && sentiment.toLowerCase().includes('positive')) ||
-                              (leadScore && leadScore >= 7);
+                              (leadScore && leadScore >= 8);
             
             console.log(`📊 Analysis for "${reply.text}":`);
             console.log(`   - Intent: ${aiAnalysis.intent || aiAnalysis.Intent || 'Unknown'}`);
@@ -6350,6 +6372,82 @@ self.debugLinkedInConversations = async () => {
         
     } catch (error) {
         console.error('❌ Debug failed:', error);
+    }
+};
+
+// Function to manually set up response monitoring for all accepted connections
+self.setupResponseMonitoringForAcceptedConnections = async () => {
+    console.log('🔧 Setting up response monitoring for all accepted connections...');
+    
+    try {
+        // Get all campaigns and their accepted leads
+        const campaignsResponse = await fetch(`${PLATFROM_URL}/api/campaigns`, {
+            headers: { 'lk-id': linkedinId || 'vicken-concept' }
+        });
+        
+        if (!campaignsResponse.ok) {
+            console.error('❌ Failed to fetch campaigns');
+            return;
+        }
+        
+        const campaignsData = await campaignsResponse.json();
+        const campaigns = campaignsData.data || [];
+        
+        console.log(`📊 Found ${campaigns.length} campaigns to check`);
+        
+        for (const campaign of campaigns) {
+            if (campaign.status === 'running' || campaign.status === 'stop') {
+                console.log(`🔍 Checking campaign ${campaign.id} (${campaign.name})`);
+                
+                // Get leads for this campaign
+                const leadsResponse = await fetch(`${PLATFROM_URL}/api/campaign/${campaign.id}/leads`, {
+                    headers: { 'lk-id': linkedinId || 'vicken-concept' }
+                });
+                
+                if (leadsResponse.ok) {
+                    const leadsData = await leadsResponse.json();
+                    const leads = leadsData.data || [];
+                    
+                    console.log(`👥 Found ${leads.length} leads in campaign ${campaign.id}`);
+                    
+                    for (const lead of leads) {
+                        if (lead.acceptedStatus === true && lead.connectionId) {
+                            console.log(`✅ Lead ${lead.name} is accepted - setting up monitoring`);
+                            
+                            // Create monitoring entry for this accepted lead
+                            const responseMonitoringKey = `call_response_monitoring_${campaign.id}_${lead.connectionId}`;
+                            
+                            // Check if monitoring already exists
+                            const existingMonitoring = await chrome.storage.local.get([responseMonitoringKey]);
+                            if (!existingMonitoring[responseMonitoringKey]) {
+                                await chrome.storage.local.set({ 
+                                    [responseMonitoringKey]: {
+                                        callId: `${lead.connectionId}_${Date.now()}`, // Generate temporary call ID
+                                        leadId: lead.id,
+                                        leadName: lead.name,
+                                        connectionId: lead.connectionId,
+                                        campaignId: campaign.id,
+                                        conversationUrnId: null, // Will be updated when we fetch conversations
+                                        sentAt: Date.now(),
+                                        status: 'waiting_for_response',
+                                        lastCheckedMessageId: null,
+                                        messageCount: 0
+                                    }
+                                });
+                                console.log(`📊 Created response monitoring for ${lead.name}: ${responseMonitoringKey}`);
+                            } else {
+                                console.log(`⏭️ Monitoring already exists for ${lead.name}`);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        console.log('✅ Response monitoring setup completed for all accepted connections');
+        
+    } catch (error) {
+        console.error('❌ Error setting up response monitoring:', error);
     }
 };
 
@@ -7014,10 +7112,10 @@ const processCallReplyWithAI = async (callId, messageText) => {
             const leadScore = analysis.leadScore || analysis['Lead Score'] || analysis.lead_score;
             const isPositiveFlag = analysis.isPositive || analysis['Is Positive'];
             
-            const isPositive = isPositiveFlag || 
+            const isPositive = (isPositiveFlag === true) || 
                               (intent && intent.toLowerCase().includes('interested')) ||
                               (sentiment && sentiment.toLowerCase().includes('positive')) ||
-                              (leadScore && leadScore >= 7);
+                              (leadScore && leadScore >= 8);
             
             console.log(`🎯 Response Analysis:`);
             console.log(`   - Intent: ${intent || 'Unknown'}`);
