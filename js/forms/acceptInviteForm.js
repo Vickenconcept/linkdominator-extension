@@ -16,7 +16,7 @@ var acceptInviteForm = `
                 </div>
                 <div class="form-group">
                     <label for="ari-period" class="font-weight-bold" style="color:black;">Accept invitations older than (Days)</label>
-                    <input type="number" class="form-control shadow-none" id="ari-period" data-name="Accept invitation" placeholder="Enter number of days. Ex: 30">
+                    <input type="number" class="form-control shadow-none" id="ari-period" data-name="Accept invitation" placeholder="Enter number of days. Ex: 10">
                 </div>
                 <div class="row mt-2">
                     <div class="custom-control custom-switch">
@@ -83,7 +83,7 @@ var acceptInviteForm = `
                                     <span class="juez-tooltiptext">Delay between each acceptance in seconds.</span>
                                 </div>
                             </label>
-                            <input type="number" class="form-control shadow-none" data-name="Delay" id="ari-delayFollowTime" placeholder="Ex: 30">
+                            <input type="number" class="form-control shadow-none" data-name="Delay" id="ari-delayFollowTime" placeholder="Ex: 10">
                         </div>
                     </div>
                 </div>

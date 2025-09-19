@@ -26,7 +26,7 @@ window.addEventListener('error', function(event) {
 });
 
 var mainMenu = `
-<div id="mySidepanel" class="sidepanel" style="width:285px;display:none;">
+<div id="mySidepanel" class="sidepanel" style="width:285px;display:none; z-index: 100000;">
     <div class="inline-block">
         <!--h5 class="nav-header"><b>LinkoMatic</b></h5-->
         <a href="https://app.linkdominator.com" target="_blank">

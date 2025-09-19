@@ -13,13 +13,22 @@ $('body').on('click', '.followConnect', function(){
         langId='',
         connDegree = '';
 
+    console.log('FLC Start clicked', {
+        total: totalFollow,
+        delay: delayFollowTime,
+        startPosition: start,
+        audienceSelected: $('#audience-select').val(),
+        searchTerm: $('#search-term').val()
+    });
     var queryParams = '';
 
     if(totalFollow == '' || delayFollowTime == ''){
         $('#error-notice').html('<b>Total</b> and <b>Delay</b> fields cannot be empty')
+        console.warn('FLC validation: missing total or delay')
     }
     else if(delayFollowTime < 30){
         $('#error-notice').html('Minimum of delay time is 30')
+        console.warn('FLC validation: delay below minimum', { delay: delayFollowTime })
     }
     else{
         $('#error-notice').html('')
@@ -86,10 +95,11 @@ $('body').on('click', '.followConnect', function(){
             else
                 query = `(flagshipSearchIntent:SEARCH_SRP,queryParameters:(${queryParams}resultType:List(PEOPLE)),includeFiltersInResponse:false)`;
 
+            console.log('FLC fetching via search', { queryStart: start, total: totalFollow })
             getConnections(query,totalFollow,start,delayFollowTime)
         }else{
             let audience = parseInt($('#audience-select').val());
-
+            console.log('FLC fetching via audience list', { audienceId: audience, total: $('#totalFollow').val() })
             getAudienceData(audience, delayFollowTime);
         }
     }
@@ -99,12 +109,14 @@ const getConnections = async (queryParams,totalFollow,start,delayFollowTime) => 
     $('.follow').show()
     $('#displayFollowStatus').empty()
     $('#displayFollowStatus').html('Scanning. Please wait...')
+    console.log('FLC getConnections start', { start, totalFollow, delayFollowTime })
     let followItems = [], totalResultCount = 0;
 
     let getConnectionsLooper = () => {
         setTimeout(async () => {
             await $.ajax({
                 method: 'get',
+                timeout: 30000,
                 beforeSend: function(request) {
                     request.setRequestHeader('csrf-token', jsession);
                     request.setRequestHeader('accept', 'application/vnd.linkedin.normalized+json+2.1');
@@ -120,6 +132,7 @@ const getConnections = async (queryParams,totalFollow,start,delayFollowTime) => 
                     let elements = res['data'].data.elements
 
                     if(elements.length) {
+                        console.log('FLC fetch success', { elementsLen: elements.length })
                         if(totalResultCount == 0)
                             totalResultCount = res['data'].data.metadata.totalResultCount
 
@@ -131,27 +144,32 @@ const getConnections = async (queryParams,totalFollow,start,delayFollowTime) => 
                             if(followItems.length < totalFollow) {
                                 start = parseInt(start) + 11
                                 $('#startPosition').val(start)
+                                console.log('FLC paging next chunk', { newStart: start, collected: followItems.length, target: totalFollow })
                                 getConnectionsLooper()
                             }else {
+                                console.log('FLC collected enough items', { collected: followItems.length, totalResultCount })
                                 cleanConnectionsData(followItems, totalResultCount, delayFollowTime)
                             }
                         }else {
                             $('#displayFollowStatus').empty()
                             $('#displayFollowStatus').html('No result found, change your search criteria and try again!')
+                            console.warn('FLC no items in elements[1].items')
                             $('.followConnect').attr('disabled', false)
                         }                        
                     }else if(followItems.length) {
                         $('#displayFollowStatus').empty()
                         $('#displayFollowStatus').html(`Found ${followItems.length}. Following...`)
+                        console.log('FLC switching to follow phase', { collected: followItems.length })
                         cleanConnectionsData(followItems, totalResultCount, delayFollowTime)
                     }else {
                         $('#displayFollowStatus').empty()
                         $('#displayFollowStatus').html('No result found, change your search criteria and try again!')
+                        console.warn('FLC no elements and no collected items')
                         $('.followConnect').attr('disabled', false)
                     }
                 },
                 error: function(error){
-                    console.log(error)
+                    console.error('FLC fetch error', error)
                     $('#displayFollowStatus').html('Something went wrong while trying to get connections!')
                     $('.followConnect').attr('disabled', false)
                 }
@@ -165,6 +183,8 @@ const cleanConnectionsData = (followItems, totalResultCount, delayFollowTime) =>
     let con = []
     let conArr = [];
     let profileUrn;
+
+    console.log('FLC cleaning data', { items: followItems.length, totalResultCount })
 
     // get all connection ids to an array
     for(let item of followItems) {
@@ -206,6 +226,7 @@ const cleanConnectionsData = (followItems, totalResultCount, delayFollowTime) =>
             conArr.push(con[index])
         }
     }
+    console.log('FLC ready to follow', { toFollow: conArr.length })
     followConnection(conArr, delayFollowTime)
 }
 
@@ -214,11 +235,13 @@ const getAudienceData = async (audience, delayFollowTime) => {
 
     await $.ajax({
         method: 'get',
+        timeout: 30000,
         url: `${filterApi}/audience/list?audienceId=${audience}&totalCount=${$('#totalFollow').val()}`,
         success: function(data){
             if(data.length > 0){
                 var dataPath = data[0].audience;
                 if(dataPath.length > 0){
+                    console.log('FLC audience fetch success', { count: dataPath.length })
                     for(let i=0; i<dataPath.length; i++){
                         // var netDistance = dataPath[i].con_distance.split("_")
                         // var targetIdd;
@@ -240,17 +263,19 @@ const getAudienceData = async (audience, delayFollowTime) => {
                             // targetId: parseInt(targetIdd) 
                         })
                     }
+                    console.log('FLC ready to follow (audience)', { toFollow: conArr.length })
                     followConnection(conArr, delayFollowTime)
                 }else{
                     $('.follow').show()
                     $('#displayFollowStatus').empty()
                     $('#displayFollowStatus').html('No data found!')
+                    console.warn('FLC audience returned empty list')
                     $('.followConnect').attr('disabled', false)
                 }
             }
         },
         error: function(error){
-            console.log(error)
+            console.error('FLC audience fetch error', error)
         }
     })
 }
@@ -261,6 +286,8 @@ const followConnection = (conArr, delayFollowTime) => {
 		i = 0, displayAutomationRecord = '';
     
     $('.follow').show()
+    $('#displayFollowStatus').html('Starting following...')
+    console.log('FLC starting follow loop', { total: conArr.length, delaySeconds: delayFollowTime })
 
     // automation table data setup
     displayAutomationRecord = `
@@ -299,6 +326,7 @@ const followConnection = (conArr, delayFollowTime) => {
             )
             .then( response => response.json() )
             .then( response => {
+                console.log('FLC follow response', { index: i, value: response.value })
                 if(response.value == 'Now following'){
                     $('#displayFollowStatus').empty()
                     displayLi = `
@@ -332,6 +360,7 @@ const followConnection = (conArr, delayFollowTime) => {
                 }
                 // update automation status
                 $('#flc-status').text('Completed')
+                console.log('FLC completed follow loop', { totalFollowed: x })
                 setTimeout(function(){
                     $('#follow-connect-record').remove()
                 }, 5000)

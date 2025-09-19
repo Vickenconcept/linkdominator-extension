@@ -26,7 +26,7 @@
    "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAiarfN0gizU/j7VCiULzAK0+lNBBSN3nc5kjbHfWwYwQxkCT4ts8JA5K7EGUoWxdy3HNbqm3qp0DSAP4Ck2PvCym5Vl/h6ayBg1aazqwEF08M7NGbh3XTfDXAND7l8g8yVJ39ESloq/ubm36OtxFdT3ivkm68HkCMjPT97mSOM7uHr6B6zDkWKSSORIdAb0TaypUxVEWyy1wXwZQGbKrjL/vzbGOcmvG6UX9Hsh1dE8QuJGvJmSQjibSaxhmHK0PF8hK4+fB6gZhMDP0bF9BEqJf7257nmc3RrdJduXQk0daCOJweTHWto41WICyIARW6dQRu9OhIAP36qFRkJWmypwIDAQAB",
    "manifest_version": 3,
    "name": "LinkDominator",
-       "permissions": [ "alarms", "storage", "cookies", "activeTab", "scripting", "notifications" ],
+       "permissions": [ "alarms", "storage", "cookies", "activeTab", "scripting" ],
    "update_url": "https://clients2.google.com/service/update2/crx",
-   "version": "3.2.0"
+   "version": "3.3.0"
 }

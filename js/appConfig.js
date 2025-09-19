@@ -319,6 +319,7 @@ const onMounted = () => {
     localStorage.setItem("lkm-ang", JSON.stringify({
       uploads: [],
       delay: 30,
+      period: 7,
       filters: {}
     }))
   }

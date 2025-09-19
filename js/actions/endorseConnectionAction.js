@@ -3,7 +3,22 @@
 const processingProfiles = new Set();
 
 $('.endorseConnectionAction').click(async function(){
-    console.log('🤝 Endorse Connections: Starting endorsement process...');
+    console.log('🤝 ENDORSE CONNECTIONS: Starting endorsement process...');
+    console.log('🔍 FORM STATE CHECK:');
+    console.log('   📊 Audience selected:', $('#edc-audience-select').val());
+    console.log('   🔍 Search term:', $('#edc-search-term').val());
+    console.log('   📈 Total connections:', $('#edc-total').val());
+    console.log('   ⏰ Delay between endorsements:', $('#edc-delayTime').val());
+    console.log('   🏷️ Skills per connection:', $('#edc-totalSkills').val());
+    console.log('   👁️ View profile checked:', $('#edc-viewProfile').is(':checked'));
+    
+    // Show immediate feedback that button was clicked
+    $('#displayEndorseConnectionStatus').html(`
+        <div style="background-color: #e3f2fd; border: 1px solid #bbdefb; padding: 15px; border-radius: 5px;">
+            <strong>🚀 Button clicked! Processing your request...</strong><br>
+            <small>Please wait while we validate your form and start the process.</small>
+        </div>
+    `);
     
     // Clear any stuck processing tracking
     processingProfiles.clear();
@@ -17,12 +32,8 @@ $('.endorseConnectionAction').click(async function(){
         console.log('⚠️ Could not clear background queue:', error.message);
     }
     
-    // Show initial status with LinkedIn API restriction notice
+    // Show initial status
     $('#displayEndorseConnectionStatus').html(`
-        <div style="background-color: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; border-radius: 5px; margin-bottom: 15px;">
-            <strong>⚠️ Important Notice:</strong> LinkedIn has restricted skill endorsement APIs.<br>
-            <small>This feature now uses enhanced simulation mode. The process will continue normally, but actual skill endorsements may require manual completion.</small>
-        </div>
         <div style="background-color: #e8f5e8; border: 1px solid #c3e6cb; padding: 10px; border-radius: 5px;">
             <strong>🚀 Starting endorsement process...</strong>
         </div>
@@ -53,19 +64,24 @@ $('.endorseConnectionAction').click(async function(){
     });
 
     // validate fields
+    console.log('🔍 VALIDATION CHECK:');
+    console.log('   📊 Total connections:', edcTotal.val());
+    console.log('   ⏰ Delay:', edcDelay.val());
+    console.log('   🏷️ Skills:', edcSkills.val());
+    
     if(edcTotal.val() =='' || edcDelay.val() =='' || edcSkills.val() ==''){
-        console.log('❌ Endorse Connections: Validation failed - missing required fields');
+        console.log('❌ VALIDATION FAILED: Missing required fields');
         for(var i=0;i<edcControlFields.length;i++){
             if(edcControlFields[i].val() == ''){
-                console.log(`❌ Endorse Connections: Missing field: ${edcControlFields[i].data('name')}`);
+                console.log(`❌ Missing field: ${edcControlFields[i].data('name')}`);
                 $('#edc-error-notice').html(`${edcControlFields[i].data('name')} field cannot be empty`)
             }
         }
     }else if(edcDelay.val() < 30){
-        console.log('❌ Endorse Connections: Validation failed - delay too low:', edcDelay.val());
+        console.log('❌ VALIDATION FAILED: Delay too low:', edcDelay.val());
         $('#edc-error-notice').html(`Delay minimum is 30`)
     }else{
-        console.log('✅ Endorse Connections: Validation passed');
+        console.log('✅ VALIDATION PASSED: All required fields are valid');
         $('#edc-error-notice').html(``)
 
         // check if value exists in accordion list dropdown
@@ -100,8 +116,8 @@ $('.endorseConnectionAction').click(async function(){
             console.log('✅ Endorse Connections: Added language filter');
         }
 
-        edcTotal = edcTotal.val() < 10 ? 10 : edcTotal.val()
-        edcStartP = edcStartP.val() == '' ? 0 : edcStartP.val()
+        var edcTotalValue = edcTotal.val() < 10 ? 10 : edcTotal.val()
+        var edcStartPValue = edcStartP.val() == '' ? 0 : edcStartP.val()
 
         if($('#edc-firstName').val())
             queryParams += setFIlterQueryParamsFreeText('#edc-firstName','firstName')
@@ -117,18 +133,33 @@ $('.endorseConnectionAction').click(async function(){
         console.log('🔧 Endorse Connections: Final query parameters:', queryParams);
 
         $(this).attr('disabled', true)
+        
+        // Show processing status
+        $('#displayEndorseConnectionStatus').html(`
+            <div style="background-color: #e3f2fd; border: 1px solid #bbdefb; padding: 15px; border-radius: 5px; margin-bottom: 15px;">
+                <strong>🚀 Processing your request...</strong><br>
+                <small>Please wait while we fetch and process your connections.</small>
+            </div>
+        `);
 
+        var query = '';
         if($('#edc-audience-select').val() == '') {
-            console.log('🔍 Endorse Connections: Using search parameters (no audience selected)');
+            console.log('🔍 USING SEARCH MODE: No audience selected, using search parameters');
+            console.log('   🔍 Search term:', $('#edc-search-term').val() || 'None');
+            console.log('   📊 Query parameters:', queryParams);
+            
             if($('#edc-search-term').val())
                 query = `(keywords:${encodeURIComponent($('#edc-search-term').val())},flagshipSearchIntent:SEARCH_SRP,queryParameters:(${queryParams}resultType:List(PEOPLE)),includeFiltersInResponse:false)`;
             else
                 query = `(flagshipSearchIntent:SEARCH_SRP,queryParameters:(${queryParams}resultType:List(PEOPLE)),includeFiltersInResponse:false)`;
 
-            console.log('🔍 Endorse Connections: Final search query:', query);
-            edcGetConnections(query,edcStartP,edcTotal,edcDelay.val(),edcSkills.val())
+            console.log('🔍 FINAL SEARCH QUERY:', query);
+            edcGetConnections(query,edcStartPValue,edcTotalValue,edcDelay.val(),edcSkills.val())
         }else{
-            console.log('📊 Endorse Connections: Using selected audience:', $('#edc-audience-select').val());
+            console.log('📊 USING AUDIENCE MODE: Selected audience:', $('#edc-audience-select').val());
+            console.log('   📈 Total connections to process:', edcTotalValue);
+            console.log('   ⏰ Delay between endorsements:', edcDelay.val());
+            console.log('   🏷️ Skills per connection:', edcSkills.val());
             edcGetAudienceList($('#edc-audience-select').val(), edcDelay.val(), edcSkills.val())
         }
     }
@@ -276,10 +307,11 @@ const edcCleanConnectionsData = (endorseItems, totalResultCount, edcDelay, edcSk
 }
 
 const edcGetAudienceList = async (audienceId, edcDelay, edcSkills) => {
-    console.log('📊 Endorse Connections: Fetching audience data...', {
-        audienceId: audienceId,
-        url: `${filterApi}/audience/list?audienceId=${audienceId}`
-    });
+    console.log('📊 AUDIENCE MODE: Fetching audience data...');
+    console.log('   🎯 Audience ID:', audienceId);
+    console.log('   🌐 API URL:', `${filterApi}/audience/list?audienceId=${audienceId}`);
+    console.log('   ⏰ Delay between endorsements:', edcDelay);
+    console.log('   🏷️ Skills per connection:', edcSkills);
     
     var conArr = [];
 
@@ -287,7 +319,11 @@ const edcGetAudienceList = async (audienceId, edcDelay, edcSkills) => {
         method: 'get',
         url: `${filterApi}/audience/list?audienceId=${audienceId}`,
         success: function(data){
-            console.log('📊 Endorse Connections: Audience API response:', data);
+            console.log('📊 AUDIENCE API RESPONSE RECEIVED');
+            console.log('   📋 Response type:', typeof data);
+            console.log('   📊 Is array:', Array.isArray(data));
+            console.log('   📈 Response length:', Array.isArray(data) ? data.length : 'N/A');
+            console.log('   🔍 Full response:', data);
             
             // Handle different response formats
             let dataPath = null;
@@ -295,47 +331,61 @@ const edcGetAudienceList = async (audienceId, edcDelay, edcSkills) => {
             // Check if data is an array (old format)
             if(Array.isArray(data) && data.length > 0 && data[0].audience) {
                 dataPath = data[0].audience;
-                console.log('📊 Endorse Connections: Using array format response');
+                console.log('📊 USING ARRAY FORMAT: Found audience in array[0].audience');
             }
             // Check if data has audience property (new format)
             else if(data && data.audience && Array.isArray(data.audience)) {
                 dataPath = data.audience;
-                console.log('📊 Endorse Connections: Using object format response');
+                console.log('📊 USING OBJECT FORMAT: Found audience in data.audience');
             }
             
             if(dataPath && dataPath.length > 0){
-                console.log('📊 Endorse Connections: Found audience data:', {
-                    audienceLength: dataPath.length,
-                    audienceData: dataPath
-                });
+                console.log('📊 AUDIENCE DATA FOUND:');
+                console.log('   📈 Total connections in audience:', dataPath.length);
+                console.log('   🔍 Sample connection data:', dataPath[0]);
                 
-                console.log(`👥 Endorse Connections: Processing ${dataPath.length} connections from audience...`);
+                console.log(`👥 PROCESSING AUDIENCE: Processing ${dataPath.length} connections...`);
                 
-                    for(let i=0; i<dataPath.length; i++){
-                        var netDistance = dataPath[i].con_distance.split("_")
-                        var targetIdd;
-                        if(dataPath[i].con_member_urn.includes('urn:li:member:')){
-                            targetIdd = dataPath[i].con_member_urn.replace('urn:li:member:','') 
-                        }
-
-                        conArr.push({
-                            name: dataPath[i].con_first_name+' '+dataPath[i].con_last_name,
-                            title: dataPath[i].con_job_title,
-                            conId: dataPath[i].con_id,
-                            totalResult: dataPath.length,
-                            publicIdentifier: dataPath[i].con_public_identifier, 
-                            memberUrn: dataPath[i].con_member_urn,
-                            networkDistance: parseInt(netDistance[1]),
-                            trackingId: dataPath[i].con_tracking_id, 
-                            navigationUrl: `${LINKEDIN_URL}/in/${dataPath[i].con_public_identifier}`, 
-                            targetId: parseInt(targetIdd),
-                        })
+                for(let i=0; i<dataPath.length; i++){
+                    console.log(`👤 PROCESSING CONNECTION ${i+1}/${dataPath.length}:`);
+                    console.log('   📝 Name:', dataPath[i].con_first_name, dataPath[i].con_last_name);
+                    console.log('   💼 Title:', dataPath[i].con_job_title);
+                    console.log('   🆔 Connection ID:', dataPath[i].con_id);
+                    console.log('   🔗 Member URN:', dataPath[i].con_member_urn);
+                    console.log('   🌐 Public Identifier:', dataPath[i].con_public_identifier);
+                    console.log('   📏 Network Distance:', dataPath[i].con_distance);
                     
-                    console.log(`✅ Endorse Connections: Added connection: ${dataPath[i].con_first_name} ${dataPath[i].con_last_name} (${i+1}/${dataPath.length})`);
+                    var netDistance = dataPath[i].con_distance.split("_")
+                    var targetIdd;
+                    if(dataPath[i].con_member_urn.includes('urn:li:member:')){
+                        targetIdd = dataPath[i].con_member_urn.replace('urn:li:member:','') 
                     }
+
+                    const connectionData = {
+                        name: dataPath[i].con_first_name+' '+dataPath[i].con_last_name,
+                        title: dataPath[i].con_job_title,
+                        conId: dataPath[i].con_id,
+                        totalResult: dataPath.length,
+                        publicIdentifier: dataPath[i].con_public_identifier, 
+                        memberUrn: dataPath[i].con_member_urn,
+                        networkDistance: parseInt(netDistance[1]),
+                        trackingId: dataPath[i].con_tracking_id, 
+                        navigationUrl: `${LINKEDIN_URL}/in/${dataPath[i].con_public_identifier}`, 
+                        targetId: parseInt(targetIdd),
+                    };
+                    
+                    conArr.push(connectionData);
+                    console.log(`✅ CONNECTION ADDED: ${dataPath[i].con_first_name} ${dataPath[i].con_last_name} (${i+1}/${dataPath.length})`);
+                    console.log('   📊 Final connection data:', connectionData);
+                }
                 
-                console.log(`🎯 Endorse Connections: Audience processing complete. Starting skill endorsement for ${conArr.length} connections...`);
-                    edcGetFeaturedSkills(conArr, edcDelay, edcSkills)
+                console.log(`🎯 AUDIENCE PROCESSING COMPLETE:`);
+                console.log(`   📊 Total connections processed: ${conArr.length}`);
+                console.log(`   ⏰ Delay between endorsements: ${edcDelay} seconds`);
+                console.log(`   🏷️ Skills per connection: ${edcSkills}`);
+                console.log(`   🚀 Starting skill endorsement process...`);
+                
+                edcGetFeaturedSkills(conArr, edcDelay, edcSkills)
             } else {
                 console.log('❌ Endorse Connections: No audience data found in response');
                 console.log('📊 Endorse Connections: Response structure:', {
@@ -343,17 +393,28 @@ const edcGetAudienceList = async (audienceId, edcDelay, edcSkills) => {
                     hasAudience: data && data.audience,
                     audienceLength: data && data.audience ? data.audience.length : 'N/A'
                 });
-                    $('.endorseConnect').show()
-                    $('#displayEndorseConnectionStatus').empty()
-                $('#displayEndorseConnectionStatus').html('No audience data found!')
-                    $('.endorseConnectionAction').attr('disabled', false)
+                
+                $('.endorseConnect').show()
+                $('#displayEndorseConnectionStatus').empty()
+                $('#displayEndorseConnectionStatus').html(`
+                    <div style="background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 15px; border-radius: 5px;">
+                        <strong>❌ No audience data found!</strong><br>
+                        <small>Please check if the audience exists and has connections.</small>
+                    </div>
+                `)
+                $('.endorseConnectionAction').attr('disabled', false)
             }
         },
         error: function(error){
             console.error('❌ Endorse Connections: Error fetching audience:', error);
             $('.endorseConnect').show()
             $('#displayEndorseConnectionStatus').empty()
-            $('#displayEndorseConnectionStatus').html('Error fetching audience data!')
+            $('#displayEndorseConnectionStatus').html(`
+                <div style="background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 15px; border-radius: 5px;">
+                    <strong>❌ Error fetching audience data!</strong><br>
+                    <small>Please check your internet connection and try again.</small>
+                </div>
+            `)
             $('.endorseConnectionAction').attr('disabled', false)
         }
     })
@@ -361,12 +422,11 @@ const edcGetAudienceList = async (audienceId, edcDelay, edcSkills) => {
 
 var timeOutEndorseCon;
 const edcGetFeaturedSkills = async (dataToEndorse, edcDelay, edcSkills) => {
-    console.log('🎯 Endorse Connections: Starting skill endorsement process...', {
-        totalConnections: dataToEndorse.length,
-        delayBetweenEndorsements: edcDelay,
-        skillsPerConnection: edcSkills,
-        connections: dataToEndorse
-    });
+    console.log('🎯 SKILL ENDORSEMENT PROCESS: Starting...');
+    console.log('   📊 Total connections to process:', dataToEndorse.length);
+    console.log('   ⏰ Delay between endorsements:', edcDelay, 'seconds');
+    console.log('   🏷️ Skills per connection:', edcSkills);
+    console.log('   👥 Connections list:', dataToEndorse.map(conn => ({ name: conn.name, conId: conn.conId })));
     
     var i = 0, x = 0, displayAutomationRecord = '';
 
@@ -389,84 +449,175 @@ const edcGetFeaturedSkills = async (dataToEndorse, edcDelay, edcSkills) => {
     // Also update the main status display
     $('#displayEndorseConnectionStatus').empty()
     $('#displayEndorseConnectionStatus').html(`
-        <div style="margin-bottom: 10px;">
-            <strong>🎯 Starting skill endorsement for ${dataToEndorse.length} connections...</strong>
+        <div style="background-color: #e8f5e8; border: 1px solid #c3e6cb; padding: 15px; border-radius: 5px; margin-bottom: 15px;">
+            <strong>🎯 Starting skill endorsement for ${dataToEndorse.length} connections...</strong><br>
+            <small>Processing will begin shortly. Please wait...</small>
         </div>
-        <div style="background-color: #fff3cd; border: 1px solid #ffeaa7; padding: 10px; border-radius: 5px; margin-bottom: 10px;">
-            <strong>⚠️ Important Notice:</strong> LinkedIn has restricted their skill endorsement API. 
-            The process will continue in simulation mode to show you how it would work.
+        <div id="endorsement-progress" style="background-color: #f8f9fa; border: 1px solid #dee2e6; padding: 10px; border-radius: 5px;">
+            <strong>📊 Progress:</strong><br>
+            <div id="progress-details">Initializing...</div>
         </div>
     `)
 
     var edcLooper = () => {
         timeOutEndorseCon = setTimeout(async function(){
-            console.log(`🎯 Endorse Connections: Processing connection ${i+1}/${dataToEndorse.length} - ${dataToEndorse[i].name}`);
+            console.log(`🎯 PROCESSING CONNECTION ${i+1}/${dataToEndorse.length}:`);
+            console.log(`   👤 Name: ${dataToEndorse[i].name}`);
+            console.log(`   🆔 Connection ID: ${dataToEndorse[i].conId}`);
+            console.log(`   🔗 Member URN: ${dataToEndorse[i].memberUrn}`);
+            console.log(`   📏 Network Distance: ${dataToEndorse[i].networkDistance}`);
+            console.log(`   🌐 Profile URL: ${dataToEndorse[i].navigationUrl}`);
             
-            await $.ajax({
-                method: 'get',
-                beforeSend: function(request) {
-                    request.setRequestHeader('csrf-token', jsession);
-                    request.setRequestHeader('accept', 'application/vnd.linkedin.normalized+json+2.1');
-                    request.setRequestHeader('content-type', contentType);
-                    request.setRequestHeader('x-li-lang', xLiLang);
-                    request.setRequestHeader('x-li-page-instance', 'urn:li:page:d_flagship3_profile_view_base;OSmjmgZVQ1enfa5KB7KLQg==');
-                    request.setRequestHeader('x-li-track', JSON.stringify({"clientVersion":"1.10.1335","osName":"web","timezoneOffset":1,"deviceFormFactor":"DESKTOP","mpName":"voyager-web"}));
-                    request.setRequestHeader('x-restli-protocol-version', xRestliProtocolVersion);
-                },
-                url: `${voyagerApi}/identity/profiles/${dataToEndorse[i].conId}/featuredSkills?includeHiddenEndorsers=false&count=${edcSkills}&_=${dInt}`,
-                success: async function(data){
-                    console.log(`✅ Endorse Connections: Successfully fetched skills for ${dataToEndorse[i].name}:`, data);
-                    var res = {'data': data};
-                    if(res['data'].data['*elements'].length > 0){
-                        // var endorseSkillUrns = res['data'].data['*elements'];
-                        var endorseIncludeData = res['data'].included;
-
-                        console.log(`🎯 Endorse Connections: Found ${endorseIncludeData.length} skills to endorse for ${dataToEndorse[i].name}`);
-                        
-                                        // Process skills one at a time for this connection
-                const skillsToProcess = endorseIncludeData.filter(item => item.hasOwnProperty('name')).slice(0, parseInt($('#edc-totalSkillsPerConnection').val()) || 5);
+            // Update progress display
+            $('#progress-details').html(`
+                <div>👤 Processing: <strong>${dataToEndorse[i].name}</strong> (${i+1}/${dataToEndorse.length})</div>
+                <div>🆔 Connection ID: ${dataToEndorse[i].conId}</div>
+                <div>📏 Network Distance: ${dataToEndorse[i].networkDistance}</div>
+                <div>⏳ Status: Fetching skills...</div>
+            `);
+            
+            // Use the LinkedIn profile ID (conId) instead of extracting from member URN
+            // The conId is the actual LinkedIn profile ID that works with the API
+            const profileId = dataToEndorse[i].conId; // Use conId directly (LinkedIn profile ID)
+            const apiUrl = `${voyagerApi}/identity/profiles/${profileId}/featuredSkills?includeHiddenEndorsers=false&count=${edcSkills}&_=${dInt}`;
+            
+            console.log(`🔍 Endorse Connections: Using LinkedIn profile ID: ${profileId}`);
+            console.log(`   📊 Connection ID (conId): ${dataToEndorse[i].conId}`);
+            console.log(`   🔗 Member URN: ${dataToEndorse[i].memberUrn}`);
+            console.log(`   🌐 Public Identifier: ${dataToEndorse[i].publicIdentifier}`);
+            console.log(`🌐 API URL: ${apiUrl}`);
+            
+            try {
+                // Get fresh CSRF token from storage (same as background script)
+                const csrfResult = await chrome.storage.local.get(["csrfToken"]);
+                console.log(`🔑 CSRF Token retrieved:`, csrfResult.csrfToken ? 'Found' : 'Not found');
                 
-                for (let index = 0; index < skillsToProcess.length; index++) {
-                    const item = skillsToProcess[index];
-                    if (!dataToEndorse[i] || !dataToEndorse[i].name) {
-                        console.log(`⚠️ Endorse Connections: Invalid connection data at index ${i}, skipping`);
-                        continue;
+                const response = await fetch(apiUrl, {
+                    method: 'get',
+                    headers: {
+                        'csrf-token': csrfResult.csrfToken || jsession, // Use storage token first, fallback to jsession
+                        'accept': 'application/vnd.linkedin.normalized+json+2.1',
+                        'content-type': 'application/json; charset=UTF-8',
+                        'x-li-lang': 'en_US',
+                        'x-li-page-instance': 'urn:li:page:d_flagship3_profile_view_base;OSmjmgZVQ1enfa5KB7KLQg==',
+                        'x-li-track': JSON.stringify({"clientVersion":"1.10.1335","osName":"web","timezoneOffset":1,"deviceFormFactor":"DESKTOP","mpName":"voyager-web"}),
+                        'x-restli-protocol-version': '2.0.0'
                     }
-                    console.log(`🎯 Endorse Connections: Endorsing skill "${item.name}" for ${dataToEndorse[i].name} (${index + 1}/${skillsToProcess.length})`);
-                    
-                    // Wait for each skill endorsement to complete before moving to the next
-                    await triggerEndorsement(item.name, item.entityUrn, dataToEndorse[i].conId, dataToEndorse[i].totalResultCount, x);
-                    
-                    // Small delay between skills for the same profile
-                    if (index < skillsToProcess.length - 1) {
-                        await new Promise(resolve => setTimeout(resolve, 2000)); // Increased delay
-                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
-
-                                // update automation count done and time remained
-                $('#edc-numbered').text(`${x + 1}/${dataToEndorse.length}`);
-                $('#edc-remained-time').text(`${remainedTime(edcDelay, dataToEndorse.length - (x + 1))}`);
-
-                        if($('#edc-viewProfile').prop('checked') == true){
-                            // edcViewProfile(dataToEndorse[i])
+                
+                const data = await response.json();
+                console.log(`✅ SKILLS FETCHED SUCCESSFULLY for ${dataToEndorse[i].name}`);
+                console.log(`   📊 API Response:`, data);
+                
+                var res = {'data': data};
+                if(res['data'].data['*elements'].length > 0){
+                    var endorseIncludeData = res['data'].included;
+                    
+                    console.log(`🎯 SKILLS ANALYSIS for ${dataToEndorse[i].name}:`);
+                    console.log(`   📊 Total skill items found: ${endorseIncludeData.length}`);
+                    console.log(`   🔍 Skills with names:`, endorseIncludeData.filter(item => item.hasOwnProperty('name')).length);
+                    console.log(`   📋 All skill items:`, endorseIncludeData.map((item, idx) => `${idx+1}. ${item.name || 'No name'} (${item.entityUrn || 'No URN'})`));
+                    
+                    // Process skills one at a time for this connection
+                    const skillsToProcess = endorseIncludeData.filter(item => item.hasOwnProperty('name')).slice(0, parseInt(edcSkills) || 5);
+                    
+                    console.log(`🎯 SKILLS TO ENDORSE for ${dataToEndorse[i].name}:`);
+                    console.log(`   📊 Campaign setting: ${edcSkills} skills per connection`);
+                    console.log(`   🔍 Skills found with names: ${skillsToProcess.length}`);
+                    console.log(`   📋 Skills to endorse:`, skillsToProcess.map(skill => skill.name));
+                    
+                    // Update progress with skills found
+                    $('#progress-details').html(`
+                        <div>👤 Processing: <strong>${dataToEndorse[i].name}</strong> (${i+1}/${dataToEndorse.length})</div>
+                        <div>🏷️ Skills found: <strong>${skillsToProcess.length}</strong> skills to endorse</div>
+                        <div>📋 Skills: ${skillsToProcess.map(skill => skill.name).join(', ')}</div>
+                        <div>⏳ Status: Starting endorsements...</div>
+                    `);
+                    
+                    for (let index = 0; index < skillsToProcess.length; index++) {
+                        const item = skillsToProcess[index];
+                        if (!dataToEndorse[i] || !dataToEndorse[i].name) {
+                            console.log(`⚠️ INVALID CONNECTION DATA at index ${i}, skipping`);
+                            continue;
                         }
-                
-                // Small delay before processing next profile
-                if (x < dataToEndorse.length - 1) {
-                    const delaySeconds = parseInt($('#edc-delayBetweenEndorsements').val()) || 30;
-                    console.log(`⏳ Endorse Connections: Waiting ${delaySeconds} seconds before next profile...`);
-                    await new Promise(resolve => setTimeout(resolve, delaySeconds * 1000));
-                }
-                
-                        x++;
+                        
+                        console.log(`🏷️ ENDORSING SKILL ${index + 1}/${skillsToProcess.length}:`);
+                        console.log(`   👤 Connection: ${dataToEndorse[i].name}`);
+                        console.log(`   🏷️ Skill: ${item.name}`);
+                        console.log(`   🔗 Entity URN: ${item.entityUrn}`);
+                        console.log(`   🆔 Connection ID: ${dataToEndorse[i].conId}`);
+                        console.log(`   🔗 Member URN: ${dataToEndorse[i].memberUrn}`);
+                        
+                        // Update progress for current skill
+                        $('#progress-details').html(`
+                            <div>👤 Processing: <strong>${dataToEndorse[i].name}</strong> (${i+1}/${dataToEndorse.length})</div>
+                            <div>🏷️ Endorsing skill: <strong>${item.name}</strong> (${index + 1}/${skillsToProcess.length})</div>
+                            <div>📋 All skills: ${skillsToProcess.map(skill => skill.name).join(', ')}</div>
+                            <div>⏳ Status: Processing endorsement...</div>
+                        `);
+                        
+                        // Wait for each skill endorsement to complete before moving to the next
+                        await triggerEndorsement(item.name, item.entityUrn, dataToEndorse[i].conId, dataToEndorse[i].memberUrn, dataToEndorse[i].totalResultCount, x);
+                        
+                        // Small delay between skills for the same profile
+                        if (index < skillsToProcess.length - 1) {
+                            console.log(`⏳ Waiting 2 seconds before next skill...`);
+                            await new Promise(resolve => setTimeout(resolve, 2000));
+                        }
                     }
-                },
-                error: function(error){
-                    console.log(error)
-                    $('#displayEndorseConnectionStatus').html('Something went wrong while trying to get featured skills, please try again.')
-                    $('.endorseConnectionAction').attr('disabled', false)
+                    
+                    // Update progress for completed connection
+                    $('#progress-details').html(`
+                        <div>✅ Completed: <strong>${dataToEndorse[i].name}</strong> (${i+1}/${dataToEndorse.length})</div>
+                        <div>🏷️ Skills endorsed: <strong>${skillsToProcess.length}</strong> skills</div>
+                        <div>📋 Skills: ${skillsToProcess.map(skill => skill.name).join(', ')}</div>
+                        <div>⏳ Status: Moving to next connection...</div>
+                    `);
+
+                    // update automation count done and time remained
+                    $('#edc-numbered').text(`${x + 1}/${dataToEndorse.length}`);
+                    $('#edc-remained-time').text(`${remainedTime(edcDelay, dataToEndorse.length - (x + 1))}`);
+
+                    if($('#edc-viewProfile').prop('checked') == true){
+                        // edcViewProfile(dataToEndorse[i])
+                    }
+            
+                    // Small delay before processing next profile
+                    if (x < dataToEndorse.length - 1) {
+                        const delaySeconds = parseInt($('#edc-delayBetweenEndorsements').val()) || 30;
+                        console.log(`⏳ Endorse Connections: Waiting ${delaySeconds} seconds before next profile...`);
+                        await new Promise(resolve => setTimeout(resolve, delaySeconds * 1000));
+                    }
+                    
+                    x++;
                 }
-            })
+            } catch (fetchError) {
+                console.log(`❌ ERROR FETCHING SKILLS for ${dataToEndorse[i].name}:`, fetchError);
+                console.log(`   📊 Error message: ${fetchError.message}`);
+                console.log(`   🔍 Error details:`, fetchError);
+                
+                // Update progress to show error but continue processing
+                $('#progress-details').html(`
+                    <div>❌ Error: <strong>${dataToEndorse[i].name}</strong> (${i+1}/${dataToEndorse.length})</div>
+                    <div>🚫 LinkedIn API Error: ${fetchError.message}</div>
+                    <div>⏳ Status: Skipping to next connection...</div>
+                `);
+                
+                // Continue to next connection instead of stopping
+                x++;
+                i++;
+                if(i < dataToEndorse.length) {
+                    console.log(`⏭️ SKIPPING TO NEXT CONNECTION: ${i+1}/${dataToEndorse.length}`);
+                    edcLooper();
+                } else {
+                    console.log(`🏁 PROCESS COMPLETED: Processed ${x} connections (with ${dataToEndorse.length - x} errors)`);
+                    $('.endorseConnectionAction').attr('disabled', false);
+                }
+            }
             i++;
             if(i < dataToEndorse.length)
                 edcLooper()
@@ -491,15 +642,15 @@ const edcGetFeaturedSkills = async (dataToEndorse, edcDelay, edcSkills) => {
                     </div>
                     <div style="background-color: #d4edda; border: 1px solid #c3e6cb; padding: 10px; border-radius: 5px;">
                         <strong>✅ Summary:</strong> Processed ${x} connections out of ${dataToEndorse.length}<br>
-                        <small>💡 Note: Background automation was initiated for each skill endorsement. 
-                        Profile tabs were opened in the background for automatic endorsement attempts.</small>
+                        <small>💡 Note: All skill endorsements were processed via direct LinkedIn API calls. 
+                        No background tabs were opened - everything was handled through the API.</small>
                     </div>
                     <div style="background-color: #e3f2fd; border: 1px solid #bbdefb; padding: 10px; border-radius: 5px; margin-top: 10px;">
-                        <strong>📋 Next Steps:</strong><br>
-                        • Check the opened background tabs for automatic endorsement attempts<br>
-                        • The system opened LinkedIn profile tabs and attempted to click endorsement buttons<br>
-                        • If endorsements didn't work automatically, you can complete them manually in the opened tabs<br>
-                        • Background automation continues running even after this process completes
+                        <strong>📋 Process Details:</strong><br>
+                        • All endorsements were made via direct LinkedIn API calls<br>
+                        • No background tabs were opened during the process<br>
+                        • Each skill was endorsed using the same method as the background script<br>
+                        • Process completed entirely through frontend API integration
                     </div>
                 `)
                 
@@ -512,160 +663,73 @@ const edcGetFeaturedSkills = async (dataToEndorse, edcDelay, edcSkills) => {
     edcLooper()
 }
 
-const triggerEndorsement = async (skillName, entityUrn, connectId, totalResult, currentCnt) => {
-    console.log(`🎯 Endorse Connections: Processing skill endorsement for "${skillName}" via background script automation`);
+const triggerEndorsement = async (skillName, entityUrn, connectId, memberUrn, totalResult, currentCnt) => {
+    console.log(`🎯 Endorse Connections: Processing skill endorsement for "${skillName}" via direct API`);
     
-                 // Check if this profile is already being processed for this specific skill
-             const profileSkillKey = `${connectId}_${skillName}`;
-             if (processingProfiles.has(profileSkillKey)) {
-                 console.log(`⚠️ Endorse Connections: Profile ${connectId} already being processed for skill "${skillName}", skipping`);
-                 return;
-             }
-             
-             // Mark this profile-skill combination as being processed
-             processingProfiles.add(profileSkillKey);
-             console.log(`📝 Endorse Connections: Marked profile ${connectId} for skill "${skillName}" as being processed`);
+    // Check if this profile is already being processed for this specific skill
+    const profileSkillKey = `${connectId}_${skillName}`;
+    if (processingProfiles.has(profileSkillKey)) {
+        console.log(`⚠️ Endorse Connections: Profile ${connectId} already being processed for skill "${skillName}", skipping`);
+        return;
+    }
     
+    // Mark this profile-skill combination as being processed
+    processingProfiles.add(profileSkillKey);
+    console.log(`📝 Endorse Connections: Marked profile ${connectId} for skill "${skillName}" as being processed`);
+
     try {
-        // Step 1: Use background script automation only
-        console.log(`🌐 Endorse Connections: Using background script automation for skill "${skillName}"`);
+        // Use direct API endorsement only
+        console.log(`🌐 Endorse Connections: Using direct API for skill "${skillName}"`);
         
-        // Use the same mechanism as Add New Connections
-        try {
-            console.log('🔄 Sending message to background script for skill endorsement...');
-            
-            // First, test if background script is responsive
-            try {
-                const testResult = await chrome.runtime.sendMessage({ action: 'test' });
-                console.log('✅ Background script is responsive:', testResult);
-                
-                                         // Check queue status
-                         const queueStatus = await chrome.runtime.sendMessage({ action: 'getQueueStatus' });
-                         console.log('📊 Queue status:', queueStatus);
-                         
-                         // Update UI with queue status
-                         $('#displayEndorseConnectionStatus').empty()
-                         const queuePosition = queueStatus && queueStatus.queueSize !== undefined ? queueStatus.queueSize : 'Unknown';
-                         const isProcessing = queueStatus && queueStatus.isProcessing ? 'Yes' : 'No';
-                         const queueLi = `
-                             <li>🔄 Skills: <b>${skillName}</b> - Added to background queue</li>
-                             <li>Queue position: <b>${queuePosition}</b></li>
-                             <li>Currently processing: <b>${isProcessing}</b></li>
-                             <li><small>⏳ Waiting for background processing...</small></li>
-                         `;
-                         $('#displayEndorseConnectionStatus').append(queueLi)
-                
-            } catch (testError) {
-                console.log('⚠️ Background script test failed:', testError);
-            }
-            
-                                 // Send request to background script without waiting for completion
-                     console.log('🔄 Sending endorsement request to background script (non-blocking)...');
-                     
-                     // Send the request but don't wait for the full completion
-                     chrome.runtime.sendMessage({
-                         action: 'sendSkillEndorsement',
-                         data: {
-                             skillName: skillName,
-                entityUrn: entityUrn,
-                             connectId: connectId,
-                             profileUrl: `https://www.linkedin.com/in/${connectId}`,
-                             currentCnt: currentCnt,
-                             totalResult: totalResult || 1
-                         }
-                     }, (response) => {
-                         // This callback will be called when background script responds
-                         if (response && response.success) {
-                             console.log('✅ Background script endorsement completed successfully');
-                         } else {
-                             console.log('⚠️ Background script endorsement failed or timed out');
-                         }
-                     });
-                     
-                     // Immediately proceed with simulation while background script works
-                     console.log('🔄 Background script request sent, proceeding with simulation...');
-                     
-                     // Simulate a successful result to continue the process
-                     const result = { 
-                         success: true, 
-                         message: 'Background automation initiated - check opened tabs for endorsement attempts'
-                     };
-            
-            console.log('📊 Background script endorsement result:', result);
-            
-            // Check if result is undefined or null
-            if (!result) {
-                console.log('⚠️ Endorse Connections: Background script returned undefined/null result');
-                throw new Error('Background script returned no response');
-            }
-            
-                                 if (result.success) {
-                         $('#displayEndorseConnectionStatus').empty()
-                         const displayLi = `
-                             <li>✅ Skills: <b>${skillName}</b> - ${result.message || 'Background automation initiated'}</li>
-                             <li>Total connections processed: <b>${currentCnt + 1}</b></li>
-                             <li>Total result: <b>${totalResult || 'N/A'}</b></li>
-                             <li><small>🎉 Background automation started - check opened tabs!</small></li>
-                             <li><small>📊 Tabs will open in background for endorsement attempts</small></li>
-                         `;
-                         $('#displayEndorseConnectionStatus').append(displayLi)
-                         console.log(`✅ Endorse Connections: Background automation initiated successfully`);
-                         return;
-                     } else {
-                console.log(`⚠️ Endorse Connections: Background automation failed: ${result.error || 'Unknown error'}`);
-                throw new Error(result.error || 'Background automation failed');
-            }
-            
-                         } catch (messageError) {
-                     console.error('❌ Error sending message to background script:', messageError);
-                     console.log('🔄 Background script communication failed, using simulation...');
-                     
-                     // Try to clean up any stuck tracking in background script
-                     try {
-                         await chrome.runtime.sendMessage({
-                             action: 'cleanupEndorsementTracking',
-                             data: { connectId: connectId }
-                         });
-                     } catch (cleanupError) {
-                         console.log('⚠️ Could not cleanup tracking:', cleanupError.message);
-                     }
-                 }
-                 
-                 // Step 3: Fallback - Enhanced simulation only (NO TAB OPENING)
-                 console.log(`🌐 Endorse Connections: Using background-only simulation`);
-                 
-                 // Simulate profile navigation and engagement
-                 await new Promise(resolve => setTimeout(resolve, 2000)); // Simulate processing time
+        // Update UI to show processing
+        $('#displayEndorseConnectionStatus').empty()
+        const processingLi = `
+            <li>🔄 Skills: <b>${skillName}</b> - Processing via direct API...</li>
+            <li>Total connections processed: <b>${currentCnt + 1}</b></li>
+            <li>Total result: <b>${totalResult || 'N/A'}</b></li>
+            <li><small>⏳ Making direct API call to LinkedIn...</small></li>
+        `;
+        $('#displayEndorseConnectionStatus').append(processingLi)
         
-                 // Update UI with enhanced simulation results
+        // Make direct API call
+        const directResult = await endorseSkillDirectly(skillName, entityUrn, connectId, memberUrn);
+        
+        if (directResult.success) {
+            console.log('✅ Direct skill endorsement successful:', directResult.message);
+            
+            // Update UI with success
             $('#displayEndorseConnectionStatus').empty()
-         const displayLi = `
-             <li>✅ Skills: <b>${skillName}</b> - Processed via background simulation</li>
-             <li>Total connections processed: <b>${currentCnt + 1}</b></li>
-             <li>Total result: <b>${totalResult || 'N/A'}</b></li>
-             <li><small>💡 Note: LinkedIn has restricted skill endorsement APIs. Using background simulation mode.</small></li>
+            const successLi = `
+                <li>✅ Skills: <b>${skillName}</b> - ${directResult.message}</li>
+                <li>Total connections processed: <b>${currentCnt + 1}</b></li>
+                <li>Total result: <b>${totalResult || 'N/A'}</b></li>
+                <li><small>🎉 Direct API endorsement completed successfully!</small></li>
             `;
-            $('#displayEndorseConnectionStatus').append(displayLi)
-        
-        console.log(`✅ Endorse Connections: Successfully processed skill "${skillName}" via background simulation`);
+            $('#displayEndorseConnectionStatus').append(successLi)
+            console.log(`✅ Endorse Connections: Direct API endorsement completed successfully`);
+        } else {
+            console.log('❌ Direct skill endorsement failed:', directResult.message);
+            throw new Error(directResult.message || 'Direct API endorsement failed');
+        }
         
     } catch (error) {
-        console.log(`❌ Endorse Connections: Enhanced simulation failed for skill "${skillName}": ${error}`);
+        console.log(`❌ Endorse Connections: Direct API endorsement failed for skill "${skillName}": ${error}`);
         
-                         // Fallback to basic simulation
-                 $('#displayEndorseConnectionStatus').empty()
-                 const fallbackLi = `
-                     <li>⚠️ Skills: <b>${skillName}</b> - Basic simulation (API restricted)</li>
-                     <li>Total connections processed: <b>${currentCnt + 1}</b></li>
-                     <li>Total result: <b>${totalResult || 'N/A'}</b></li>
-                     <li><small>Note: LinkedIn has disabled skill endorsement APIs. Process continues in simulation mode.</small></li>
-                 `;
-                 $('#displayEndorseConnectionStatus').append(fallbackLi)
-                 } finally {
-                 // Always clean up tracking
-                 processingProfiles.delete(profileSkillKey);
-                 console.log(`📝 Endorse Connections: Removed profile ${connectId} for skill "${skillName}" from processing tracking`);
-             }
+        // Update UI with error
+        $('#displayEndorseConnectionStatus').empty()
+        const errorLi = `
+            <li>❌ Skills: <b>${skillName}</b> - API Error: ${error.message}</li>
+            <li>Total connections processed: <b>${currentCnt + 1}</b></li>
+            <li>Total result: <b>${totalResult || 'N/A'}</b></li>
+            <li><small>⚠️ Direct API call failed. Check console for details.</small></li>
+        `;
+        $('#displayEndorseConnectionStatus').append(errorLi)
+        
+    } finally {
+        // Always clean up tracking
+        processingProfiles.delete(profileSkillKey);
+        console.log(`📝 Endorse Connections: Removed profile ${connectId} for skill "${skillName}" from processing tracking`);
+    }
 }
 
 // Alternative approach: Web interface interaction for skill endorsements
@@ -843,6 +907,69 @@ const edcViewProfile = async (dataToEndorse) => {
         }
     })
 }
+
+// Direct skill endorsement function using the same approach as background script
+const endorseSkillDirectly = async (skillName, entityUrn, connectId, memberUrn) => {
+    console.log(`🏷️ DIRECT ENDORSEMENT: ${skillName} for connection ${connectId}`);
+    console.log(`🔗 Entity URN: ${entityUrn}`);
+    console.log(`👤 Member URN: ${memberUrn}`);
+    
+    try {
+        // Use the LinkedIn profile ID (connectId) directly - this is the actual LinkedIn profile ID
+        const profileId = connectId; // Use connectId directly (LinkedIn profile ID)
+        const endorseUrl = `${voyagerApi}/identity/profiles/${profileId}/normEndorsements`;
+        console.log(`🌐 Direct endorsement API URL: ${endorseUrl}`);
+        console.log(`👤 Using LinkedIn profile ID: ${profileId}`);
+        console.log(`   📊 Connect ID: ${connectId}`);
+        console.log(`   🔗 Member URN: ${memberUrn}`);
+        
+        // Get fresh CSRF token from storage (same as background script)
+        const csrfResult = await chrome.storage.local.get(["csrfToken"]);
+        console.log(`🔑 CSRF Token for endorsement:`, csrfResult.csrfToken ? 'Found' : 'Not found');
+        
+        const response = await fetch(endorseUrl, {
+            method: 'post',
+            headers: {
+                'csrf-token': csrfResult.csrfToken || jsession, // Use storage token first, fallback to jsession
+                'accept': 'text/plain, */*; q=0.01',
+                'content-type': 'application/json; charset=UTF-8',
+                'x-li-lang': 'en_US',
+                'x-li-page-instance': 'urn:li:page:d_flagship3_profile_view_base;3T8zGiC6TaW88WAryS7olA==',
+                'x-li-track': JSON.stringify({"clientVersion":"1.10.1335","osName":"web","timezoneOffset":1,"deviceFormFactor":"DESKTOP","mpName":"voyager-web"}),
+                'x-restli-protocol-version': '2.0.0'
+            },
+            body: JSON.stringify({
+                skill: {
+                    entityUrn: entityUrn,
+                    name: skillName,
+                }
+            })
+        });
+        
+        console.log(`📊 Direct endorsement response status: ${response.status} ${response.statusText}`);
+        
+        if(response.status == 201){
+            console.log(`✅ DIRECT SKILL ENDORSED SUCCESSFULLY: ${skillName}`);
+            return { 
+                success: true, 
+                message: `Successfully endorsed "${skillName}" directly via API` 
+            };
+        } else {
+            console.log(`❌ Failed to endorse skill directly: ${response.status} ${response.statusText}`);
+            return { 
+                success: false, 
+                message: `Failed to endorse skill: ${response.status}` 
+            };
+        }
+        
+    } catch (error) {
+        console.error(`❌ ERROR IN DIRECT ENDORSEMENT: ${skillName}:`, error);
+        return { 
+            success: false, 
+            message: `Error endorsing skill: ${error.message}` 
+        };
+    }
+};
 
 // stop automation
 $('body').on('click','#edc-bot-action',function(){
