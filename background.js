@@ -5733,6 +5733,187 @@ self.findEleazarReplies = async () => {
     }
 };
 
+// Function to test the backend API directly
+self.testBackendAPI = async () => {
+    console.log('🧪 TESTING BACKEND API DIRECTLY...');
+    
+    try {
+        const platformUrl = 'https://app.linkdominator.com';
+        const linkedinId = 'vicken-concept';
+        
+        const testResponse = await fetch(`${platformUrl}/api/calls/analyze-message`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'lk-id': linkedinId
+            },
+            body: JSON.stringify({
+                message: 'Hi, William',
+                leadName: 'Eleazar Nzerem',
+                context: 'LinkedIn message response analysis'
+            })
+        });
+        
+        console.log(`📡 API Response Status: ${testResponse.status}`);
+        
+        if (testResponse.ok) {
+            const result = await testResponse.json();
+            console.log('✅ API Response:', result);
+            return { success: true, result: result };
+        } else {
+            const errorText = await testResponse.text();
+            console.log('❌ API Error Response:', errorText);
+            return { success: false, error: errorText };
+        }
+        
+    } catch (error) {
+        console.error('❌ API Test Error:', error);
+        return { success: false, error: error.message };
+    }
+};
+
+// Function to test AI analysis only (without calendar generation)
+self.testEleazarAIAnalysis = async () => {
+    console.log('🤖 TESTING AI ANALYSIS FOR ELEAZAR\'S REPLIES...');
+    
+    try {
+        // First, find all of Eleazar's replies
+        const repliesResult = await self.findEleazarReplies();
+        
+        if (!repliesResult.found || !repliesResult.replies) {
+            console.log('❌ No replies from Eleazar found');
+            return { success: false, reason: 'No replies found' };
+        }
+        
+        console.log(`📊 Found ${repliesResult.replies.length} replies from Eleazar`);
+        
+        // Filter out the AI-generated messages (long messages) and focus on Eleazar's actual replies
+        const eleazarActualReplies = repliesResult.replies.filter(reply => {
+            const text = reply.text.trim();
+            // Filter out long AI-generated messages and focus on short, casual replies
+            return text.length < 200 && !text.includes('Dear Mr. Nzerem') && !text.includes('[Your Name]');
+        });
+        
+        console.log(`📊 Found ${eleazarActualReplies.length} actual replies from Eleazar (excluding AI messages)`);
+        
+        if (eleazarActualReplies.length === 0) {
+            console.log('❌ No actual replies from Eleazar found (only AI messages)');
+            return { success: false, reason: 'No actual replies found' };
+        }
+        
+        // Analyze each reply from Eleazar
+        const analysisResults = [];
+        
+        for (const reply of eleazarActualReplies) {
+            console.log(`\n🎯 Analyzing reply: "${reply.text}"`);
+            
+            // Send to AI for analysis
+            const platformUrl = 'https://app.linkdominator.com';
+            const linkedinId = 'vicken-concept';
+            
+            const aiResponse = await fetch(`${platformUrl}/api/calls/analyze-message`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'lk-id': linkedinId
+                },
+                body: JSON.stringify({
+                    message: reply.text,
+                    leadName: 'Eleazar Nzerem',
+                    context: 'LinkedIn message response analysis'
+                })
+            });
+            
+            if (!aiResponse.ok) {
+                console.log(`❌ AI analysis failed for "${reply.text}": ${aiResponse.status}`);
+                analysisResults.push({
+                    reply: reply.text,
+                    success: false,
+                    error: `HTTP ${aiResponse.status}`
+                });
+                continue;
+            }
+            
+            const aiResponseData = await aiResponse.json();
+            console.log(`🔍 Raw AI Response for "${reply.text}":`, aiResponseData);
+            
+            if (!aiResponseData.success) {
+                console.log(`❌ AI analysis failed for "${reply.text}": ${aiResponseData.message}`);
+                analysisResults.push({
+                    reply: reply.text,
+                    success: false,
+                    error: aiResponseData.message
+                });
+                continue;
+            }
+            
+            const aiAnalysis = aiResponseData.analysis || {};
+            console.log(`🔍 Parsed AI Analysis for "${reply.text}":`, aiAnalysis);
+            
+            // Check if the response is positive (handle all field name formats)
+            const intent = aiAnalysis.intent || aiAnalysis.Intent;
+            const sentiment = aiAnalysis.sentiment || aiAnalysis.Sentiment;
+            const leadScore = aiAnalysis.leadScore || aiAnalysis['Lead Score'] || aiAnalysis.lead_score;
+            const isPositiveFlag = aiAnalysis.isPositive || aiAnalysis['Is Positive'];
+            
+            const isPositive = isPositiveFlag || 
+                              (intent && intent.toLowerCase().includes('interested')) ||
+                              (sentiment && sentiment.toLowerCase().includes('positive')) ||
+                              (leadScore && leadScore >= 7);
+            
+            console.log(`📊 Analysis for "${reply.text}":`);
+            console.log(`   - Intent: ${aiAnalysis.intent || aiAnalysis.Intent || 'Unknown'}`);
+            console.log(`   - Sentiment: ${aiAnalysis.sentiment || aiAnalysis.Sentiment || 'Unknown'}`);
+            console.log(`   - Lead Score: ${leadScore || 'Unknown'}`);
+            console.log(`   - Is Positive: ${isPositive}`);
+            console.log(`   - Next Action: ${aiAnalysis.nextAction || aiAnalysis['Next Action'] || 'Unknown'}`);
+            console.log(`   - Suggested Response: ${aiAnalysis.suggestedResponse || aiAnalysis['Suggested Response'] || 'None'}`);
+            
+                analysisResults.push({
+                    reply: reply.text,
+                    timestamp: reply.timestamp,
+                    success: true,
+                    analysis: aiAnalysis,
+                    isPositive: isPositive
+                });
+                
+                // If this is a positive response, trigger the full analysis with action
+                if (isPositive) {
+                    console.log(`🎉 POSITIVE RESPONSE DETECTED! "${reply.text}" - Triggering automatic follow-up...`);
+                    // Call the full analysis function that will send calendar links
+                    setTimeout(() => {
+                        self.analyzeEleazarRepliesWithAI();
+                    }, 1000);
+                }
+        }
+        
+        // Summary
+        const positiveReplies = analysisResults.filter(r => r.success && r.isPositive);
+        console.log(`\n📊 SUMMARY:`);
+        console.log(`   - Total replies analyzed: ${analysisResults.length}`);
+        console.log(`   - Positive replies: ${positiveReplies.length}`);
+        console.log(`   - Negative/neutral replies: ${analysisResults.length - positiveReplies.length}`);
+        
+        if (positiveReplies.length > 0) {
+            console.log(`\n🎉 POSITIVE REPLIES FOUND:`);
+            positiveReplies.forEach((result, index) => {
+                console.log(`   ${index + 1}. "${result.reply}" - ${result.analysis.intent} (Score: ${result.analysis.leadScore})`);
+            });
+        }
+        
+        return {
+            success: true,
+            totalReplies: analysisResults.length,
+            positiveReplies: positiveReplies.length,
+            results: analysisResults
+        };
+        
+    } catch (error) {
+        console.error('❌ Error testing AI analysis:', error);
+        return { success: false, reason: 'Analysis failed', error: error.message };
+    }
+};
+
 // Function to analyze Eleazar's replies with AI and trigger appropriate actions
 self.analyzeEleazarRepliesWithAI = async () => {
     console.log('🤖 ANALYZING ELEAZAR\'S REPLIES WITH AI...');
@@ -5770,14 +5951,13 @@ self.analyzeEleazarRepliesWithAI = async () => {
         const platformUrl = 'https://app.linkdominator.com';
         const linkedinId = 'vicken-concept';
         
-        const aiResponse = await fetch(`${platformUrl}/api/calls/process-reply`, {
+        const aiResponse = await fetch(`${platformUrl}/api/calls/analyze-message`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'lk-id': linkedinId
             },
             body: JSON.stringify({
-                callId: 'eleazar_' + Date.now(), // Generate a temporary call ID
                 message: latestReply.text,
                 leadName: 'Eleazar Nzerem',
                 context: 'LinkedIn message response analysis'
@@ -5789,19 +5969,31 @@ self.analyzeEleazarRepliesWithAI = async () => {
             return { success: false, reason: 'AI analysis failed' };
         }
         
-        const aiAnalysis = await aiResponse.json();
-        console.log('🤖 AI Analysis Result:', aiAnalysis);
+        const aiResponseData = await aiResponse.json();
+        console.log('🤖 AI Analysis Result:', aiResponseData);
         
-        // Check if the response is positive
-        const isPositive = aiAnalysis.isPositive || 
-                          (aiAnalysis.intent && aiAnalysis.intent.toLowerCase().includes('interested')) ||
-                          (aiAnalysis.sentiment && aiAnalysis.sentiment.toLowerCase().includes('positive')) ||
-                          (aiAnalysis.leadScore && aiAnalysis.leadScore >= 7);
+        if (!aiResponseData.success) {
+            console.log(`❌ AI analysis failed: ${aiResponseData.message}`);
+            return { success: false, reason: 'AI analysis failed', error: aiResponseData.message };
+        }
+        
+        const aiAnalysis = aiResponseData.analysis;
+        
+        // Check if the response is positive (handle all field name formats)
+        const intent = aiAnalysis.intent || aiAnalysis.Intent;
+        const sentiment = aiAnalysis.sentiment || aiAnalysis.Sentiment;
+        const leadScore = aiAnalysis.leadScore || aiAnalysis['Lead Score'] || aiAnalysis.lead_score;
+        const isPositiveFlag = aiAnalysis.isPositive || aiAnalysis['Is Positive'];
+        
+        const isPositive = isPositiveFlag || 
+                          (intent && intent.toLowerCase().includes('interested')) ||
+                          (sentiment && sentiment.toLowerCase().includes('positive')) ||
+                          (leadScore && leadScore >= 7);
         
         console.log(`🎯 Response Analysis:`);
-        console.log(`   - Intent: ${aiAnalysis.intent || 'Unknown'}`);
-        console.log(`   - Sentiment: ${aiAnalysis.sentiment || 'Unknown'}`);
-        console.log(`   - Lead Score: ${aiAnalysis.leadScore || 'Unknown'}`);
+        console.log(`   - Intent: ${intent || 'Unknown'}`);
+        console.log(`   - Sentiment: ${sentiment || 'Unknown'}`);
+        console.log(`   - Lead Score: ${leadScore || 'Unknown'}`);
         console.log(`   - Is Positive: ${isPositive}`);
         
         if (isPositive) {
@@ -6430,36 +6622,70 @@ const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => 
                             const processedMessages = messages.map((msg, index) => {
                                 console.log(`🔍 Processing message ${index + 1}:`, msg);
                                 
-                                // Try multiple ways to extract message content
+                                // Extract text using multiple methods (same as working function)
                                 let text = '';
-                                let sender = 'unknown';
                                 
-                                // Method 1: Standard message structure
+                                // Method 1: Standard structure
                                 if (msg.eventContent?.com?.linkedin?.voyager?.messaging?.create?.MessageCreate) {
                                     const messageCreate = msg.eventContent.com.linkedin.voyager.messaging.create.MessageCreate;
                                     text = messageCreate.body || messageCreate.attributedBody?.text || '';
                                 }
                                 
-                                // Method 2: Alternative message structure
+                                // Method 2: Alternative structure
                                 if (!text && msg.eventContent?.com?.linkedin?.voyager?.messaging?.EventContent) {
                                     const eventContent = msg.eventContent.com.linkedin.voyager.messaging.EventContent;
                                     text = eventContent.attributedBody?.text || '';
                                 }
                                 
-                                // Method 3: Direct body access
+                                // Method 3: Direct body
                                 if (!text && msg.body) {
                                     text = msg.body;
                                 }
                                 
-                                // Extract sender information
+                                // Method 4: Search in eventContent JSON
+                                if (!text && msg.eventContent) {
+                                    const eventContentStr = JSON.stringify(msg.eventContent);
+                                    const textMatch = eventContentStr.match(/"text":"([^"]+)"/);
+                                    if (textMatch) {
+                                        text = textMatch[1];
+                                    }
+                                }
+                                
+                                let sender = 'unknown';
+                                
+                                // Extract sender with enhanced detection (same as working function)
+                                console.log('🔍 Raw sender data:', msg.from);
+                                
                                 if (msg.from?.com?.linkedin?.voyager?.messaging?.MessagingMember) {
                                     const member = msg.from.com.linkedin.voyager.messaging.MessagingMember;
+                                    console.log('🔍 MessagingMember data:', member);
+                                    
                                     if (member.name) {
                                         sender = member.name;
                                     } else if (member.miniProfile) {
                                         sender = `${member.miniProfile.firstName || ''} ${member.miniProfile.lastName || ''}`.trim();
                                     }
                                 }
+                                
+                                // Enhanced Eleazar detection
+                                const isFromEleazar = 
+                                    // Check by name
+                                    sender.toLowerCase().includes('eleazar') || 
+                                    sender.toLowerCase().includes('nzerem') ||
+                                    // Check by entity URN
+                                    msg.from?.entityUrn?.includes('ACoAADt-s1EBpDjmzFwFx9B') ||
+                                    // Check by profile ID in various fields
+                                    (msg.from && JSON.stringify(msg.from).includes('ACoAADt-s1EBpDjmzFwFx9B')) ||
+                                    // Check if this is NOT from us (William Victor) and has meaningful text
+                                    (!sender.toLowerCase().includes('william') && 
+                                     !sender.toLowerCase().includes('victor') && 
+                                     !msg.from?.entityUrn?.includes('vicken-concept') &&
+                                     text && text.trim().length > 0 && text.length < 1000);
+                                
+                                console.log('🔍 Sender detection details:');
+                                console.log('   - sender:', sender);
+                                console.log('   - entityUrn:', msg.from?.entityUrn);
+                                console.log('   - isFromEleazar:', isFromEleazar);
                                 
                                 console.log(`📝 Processed message ${index + 1}: "${text}" from ${sender}`);
                                 
@@ -6468,6 +6694,7 @@ const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => 
                                     text: text,
                                     sender: sender,
                                     timestamp: msg.createdAt,
+                                    isFromEleazar: isFromEleazar,
                                     rawMessage: msg
                                 };
                             }).filter(msg => msg.text && msg.text.trim().length > 0);
