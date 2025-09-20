@@ -6591,6 +6591,13 @@ const checkForCallResponses = async () => {
                     // Check LinkedIn conversation for new messages
                     const conversationData = await fetchLinkedInConversation(monitoringData.connectionId, monitoringData.lastCheckedMessageId);
                     
+                    // Update monitoring data with conversation URN ID if found
+                    if (conversationData && conversationData.conversationUrnId && !monitoringData.conversationUrnId) {
+                        console.log(`🔗 Updating monitoring data with conversation URN ID: ${conversationData.conversationUrnId}`);
+                        monitoringData.conversationUrnId = conversationData.conversationUrnId;
+                        await chrome.storage.local.set({ [key]: monitoringData });
+                    }
+                    
                     if (conversationData && conversationData.messages && conversationData.messages.length > 0) {
                         const newMessages = conversationData.messages;
                         console.log(`📨 Found ${newMessages.length} new messages from ${monitoringData.leadName}`);
@@ -6606,106 +6613,87 @@ const checkForCallResponses = async () => {
                             const analysisResponse = await processCallReplyWithAI(monitoringData.callId, latestMessage.text, monitoringData.leadName);
                             
                             if (analysisResponse) {
-                                // Update monitoring status
-                                monitoringData.status = 'response_received';
+                            // Update monitoring status
+                            monitoringData.status = 'response_received';
                                 monitoringData.responseData = analysisResponse;
-                                monitoringData.receivedAt = Date.now();
+                            monitoringData.receivedAt = Date.now();
                                 monitoringData.lastCheckedMessageId = latestMessage.id;
+                            
+                            await chrome.storage.local.set({ [key]: monitoringData });
+                            
+                                // Send AI-generated response (backend handles positive/negative logic)
+                                console.log('📤 Sending AI-generated response to lead...');
                                 
-                                await chrome.storage.local.set({ [key]: monitoringData });
-                                
-                                // Handle positive responses
-                                if (analysisResponse.isPositive) {
-                                    console.log('🎉 POSITIVE RESPONSE DETECTED! Generating calendar link...');
-                                    
-                                    try {
-                                        // Generate calendar link
-                                        const calendarResponse = await fetch(`${PLATFORM_URL}/api/calls/${monitoringData.connectionId}_${Date.now()}/calendar-link`, {
-                                            method: 'POST',
-                                            headers: {
-                                                'Content-Type': 'application/json',
-                                                'lk-id': linkedinId || 'vicken-concept'
-                                            }
-                                        });
-                                        
-                                        if (calendarResponse.ok) {
-                                            const calendarData = await calendarResponse.json();
-                                            console.log('✅ Calendar link generated:', calendarData.calendarLink);
-                                            
-                                            // Send the scheduling message to the lead
-                                            console.log(`📤 Sending scheduling message to ${monitoringData.leadName}...`);
-                                            
-                                            // Use the conversation ID from the connection and send the scheduling message
-                                            const conversationId = monitoringData.connectionId;
-                                            const voyagerApi = 'https://www.linkedin.com/voyager/api';
-                                            
-                                            const tokenResult = await chrome.storage.local.get(['csrfToken']);
-                                            
-                                            // Use the SAME structure as the working initial message sending
-                                            const messageBody = calendarData.schedulingMessage || `Great! I'd love to schedule a call with you. Please use this link to book a time that works for you: ${calendarData.calendarLink}`;
-                                            const messageEvent = {
-                                                'com.linkedin.voyager.messaging.create.MessageCreate': {
-                                                    body: messageBody,
-                                                    attributedBody: {"text": messageBody, "attributes": []},
-                                                    mediaAttachments: [],
-                                                }
-                                            };
-                                            
-                                            const requestBody = {
-                                                eventCreate: messageEvent
-                                            };
-                                            
-                                            const url = `${voyagerApi}/messaging/conversations/${conversationId}/events?action=create`;
-                                            
-                                            const sendMessageResponse = await fetch(url, {
-                                                method: 'POST',
-                                                headers: {
-                                                    'csrf-token': tokenResult.csrfToken,
-                                                    'accept': 'text/plain, */*; q=0.01',
-                                                    'content-type': 'application/json; charset=UTF-8',
-                                                    'x-li-lang': 'en_US',
-                                                    'x-li-page-instance': 'urn:li:page:d_flagship3_people_invitations;1ZlPK7kKRNSMi+vkXMyVMw==',
-                                                    'x-li-track': JSON.stringify({"clientVersion":"1.10.1208","osName":"web","timezoneOffset":1,"deviceFormFactor":"DESKTOP","mpName":"voyager-web"}),
-                                                    'x-restli-protocol-version': '2.0.0',
-                                                },
-                                                body: JSON.stringify(requestBody)
-                                            });
-                                            
-                                            if (sendMessageResponse.ok) {
-                                                console.log(`✅ Scheduling message sent successfully to ${monitoringData.leadName}!`);
-                                                monitoringData.status = 'scheduling_initiated';
-                                                await chrome.storage.local.set({ [key]: monitoringData });
-                                            } else {
-                                                console.log(`❌ Failed to send scheduling message: ${sendMessageResponse.status}`);
-                                            }
-                                        } else {
-                                            console.log(`❌ Failed to generate calendar link: ${calendarResponse.status}`);
-                                        }
-                                    } catch (error) {
-                                        console.error('❌ Error generating calendar link:', error);
-                                    }
-                                }
-                            } else {
-                                console.log('📝 Neutral/Negative response detected. Sending AI-generated follow-up...');
-                                
-                                // Send AI-generated response for neutral/negative messages
+                                // Always send the AI response regardless of positive/negative
                                 if (analysisResponse.suggested_response || analysisResponse['Suggested Response']) {
                                     try {
                                         const suggestedResponse = analysisResponse.suggested_response || analysisResponse['Suggested Response'];
                                         console.log(`📤 Sending AI response to ${monitoringData.leadName}: "${suggestedResponse}"`);
+                                        console.log(`🔍 Full analysis response:`, analysisResponse);
                                         
-                                        // Use the conversation ID from the connection and send the AI response
-                                        const conversationId = monitoringData.connectionId;
                                         const voyagerApi = 'https://www.linkedin.com/voyager/api';
+                                        
+                                        // Use the conversation URN ID if available, otherwise fall back to connection ID
+                                        let conversationId = monitoringData.conversationUrnId || monitoringData.connectionId;
+                                        console.log(`🔍 Using conversation ID for follow-up message: ${conversationId}`);
+                                        
+                                        // If we don't have a conversation URN ID, try to find it from LinkedIn API
+                                        if (!monitoringData.conversationUrnId) {
+                                            console.log('🔍 No conversation URN ID found, attempting to find conversation...');
+                                            try {
+                                                const conversationsUrl = `${voyagerApi}/messaging/conversations?keyVersion=LEGACY_INBOX&q=participants&start=0&count=20`;
+                                                const conversationsResponse = await fetch(conversationsUrl, {
+                                                    method: 'GET',
+                                                    headers: {
+                                                        'csrf-token': tokenResult.csrfToken,
+                                                        'accept': 'application/vnd.linkedin.normalized+json+2.1',
+                                                        'x-li-lang': 'en_US',
+                                                        'x-restli-protocol-version': '2.0.0',
+                                                    }
+                                                });
+                                                
+                                                if (conversationsResponse.ok) {
+                                                    const conversationsData = await conversationsResponse.json();
+                                                    console.log('📊 Conversations data:', conversationsData);
+                                                    
+                                                    // Look for conversation with this connection
+                                                    if (conversationsData.elements) {
+                                                        for (const conv of conversationsData.elements) {
+                                                            if (conv.participants && conv.participants.elements) {
+                                                                for (const participant of conv.participants.elements) {
+                                                                    if (participant.messagingMember && 
+                                                                        participant.messagingMember['com.linkedin.voyager.messaging.MessagingMember'] &&
+                                                                        participant.messagingMember['com.linkedin.voyager.messaging.MessagingMember'].miniProfile &&
+                                                                        participant.messagingMember['com.linkedin.voyager.messaging.MessagingMember'].miniProfile.publicIdentifier === monitoringData.connectionId) {
+                                                                        conversationId = conv.entityUrn.replace('urn:li:fsd_conversation:', '');
+                                                                        console.log('✅ Found conversation URN ID:', conversationId);
+                                                                        
+                                                                        // Update monitoring data with the found conversation URN ID
+                                                                        monitoringData.conversationUrnId = conversationId;
+                                                                        await chrome.storage.local.set({ [key]: monitoringData });
+                                                                        break;
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            } catch (error) {
+                                                console.error('❌ Error finding conversation URN ID:', error);
+                                            }
+                                        }
                                         
                                         const tokenResult = await chrome.storage.local.get(['csrfToken']);
                                         
                                         // Use the SAME structure as the working initial message sending
                                         const messageEvent = {
-                                            'com.linkedin.voyager.messaging.create.MessageCreate': {
-                                                body: suggestedResponse,
-                                                attributedBody: {"text": suggestedResponse, "attributes": []},
-                                                mediaAttachments: [],
+                                            value: {
+                                                'com.linkedin.voyager.messaging.create.MessageCreate': {
+                                                    attachments: [],
+                                                    body: suggestedResponse,
+                                                    attributedBody: {"text": suggestedResponse, "attributes": []},
+                                                    mediaAttachments: [],
+                                                }
                                             }
                                         };
                                         
@@ -6714,9 +6702,11 @@ const checkForCallResponses = async () => {
                                         };
                                         
                                         const url = `${voyagerApi}/messaging/conversations/${conversationId}/events?action=create`;
+                                        console.log(`🔍 Final API URL for follow-up message: ${url}`);
+                                        console.log(`🔍 Final conversation ID being used: ${conversationId}`);
                                         
                                         const sendMessageResponse = await fetch(url, {
-                                            method: 'POST',
+                                            method: 'post',
                                             headers: {
                                                 'csrf-token': tokenResult.csrfToken,
                                                 'accept': 'text/plain, */*; q=0.01',
@@ -6734,13 +6724,27 @@ const checkForCallResponses = async () => {
                                             monitoringData.status = 'ai_response_sent';
                                             await chrome.storage.local.set({ [key]: monitoringData });
                                         } else {
+                                            const errorText = await sendMessageResponse.text();
                                             console.log(`❌ Failed to send AI response: ${sendMessageResponse.status}`);
+                                            console.log(`❌ Error response:`, errorText);
+                                            console.log(`🔍 Request details:`, {
+                                                url: url,
+                                                method: 'post',
+                                                body: JSON.stringify(requestBody),
+                                                headers: {
+                                                    'csrf-token': tokenResult.csrfToken,
+                                                    'accept': 'text/plain, */*; q=0.01',
+                                                    'content-type': 'application/json; charset=UTF-8',
+                                                    'x-li-lang': 'en_US',
+                                                    'x-li-page-instance': 'urn:li:page:d_flagship3_people_invitations;1ZlPK7kKRNSMi+vkXMyVMw==',
+                                                    'x-li-track': JSON.stringify({"clientVersion":"1.10.1208","osName":"web","timezoneOffset":1,"deviceFormFactor":"DESKTOP","mpName":"voyager-web"}),
+                                                    'x-restli-protocol-version': '2.0.0',
+                                                }
+                                            });
                                         }
                                     } catch (error) {
                                         console.error('❌ Error sending AI response:', error);
                                     }
-                                } else {
-                                    console.log('⚠️ No suggested response from AI analysis');
                                 }
                             }
                         } else {
@@ -7210,7 +7214,7 @@ const processCallReplyWithAI = async (callId, messageText, leadName = null) => {
                 analysis: analysis,
                 isPositive: isPositive,
                 call_status: isPositive ? 'scheduling_initiated' : 'response_received',
-                suggested_response: analysis.suggestedResponse || 'Thank you for your response.'
+                suggested_response: analysis.suggested_response || analysis.suggestedResponse || 'Thank you for your response.'
             };
         } else {
             console.error('❌ Failed to process reply with AI:', response.status);
