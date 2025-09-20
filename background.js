@@ -2041,7 +2041,9 @@ const setCampaignAlarm = async (campaign) => {
                                             sentAt: Date.now(),
                                             status: 'waiting_for_response',
                                             lastCheckedMessageId: null,
-                                            messageCount: 0
+                                            messageCount: 0,
+                                            responseCount: 0, // Track how many times we've responded
+                                            lastResponseSentAt: null // Track when we last sent a response
                                         }
                                     });
                                     console.log(`📊 Auto-created response monitoring for ${lead.name}: ${responseMonitoringKey}`);
@@ -3266,7 +3268,9 @@ const messageConnection = scheduleInfo => {
                                             sentAt: Date.now(),
                                             status: 'waiting_for_response',
                                             lastCheckedMessageId: null,
-                                            messageCount: 0
+                                            messageCount: 0,
+                                            responseCount: 0, // Track how many times we've responded
+                                            lastResponseSentAt: null // Track when we last sent a response
                                         }
                                     });
                                     console.log('📊 Response monitoring set up for call message:', responseMonitoringKey);
@@ -6607,6 +6611,26 @@ const checkForCallResponses = async () => {
                         
                         // Check if this message is from the lead (not from us) - works for any LinkedIn user
                         if (latestMessage.isFromLead) {
+                            // Additional check: Make sure we haven't already responded to this message
+                            if (monitoringData.lastCheckedMessageId === latestMessage.id) {
+                                console.log(`⏭️ Already processed this message from ${monitoringData.leadName}, skipping...`);
+                                continue;
+                            }
+                            
+                            // Check if we were the last to respond (to prevent back-to-back messaging)
+                            if (monitoringData.lastResponseSentAt && monitoringData.lastResponseSentAt > latestMessage.timestamp) {
+                                console.log(`⏭️ We were the last to respond to ${monitoringData.leadName}, waiting for their reply...`);
+                                continue;
+                            }
+                            
+                            // Check if we've already sent too many responses (max 3 responses per lead)
+                            const maxResponses = 3;
+                            if (monitoringData.responseCount && monitoringData.responseCount >= maxResponses) {
+                                console.log(`⏭️ Already sent ${monitoringData.responseCount} responses to ${monitoringData.leadName}, max limit reached (${maxResponses})`);
+                                monitoringData.status = 'max_responses_reached';
+                                await chrome.storage.local.set({ [key]: monitoringData });
+                                continue;
+                            }
                             console.log('✅ New response received from lead:', latestMessage.text);
                             
                             // Send message to backend for AI analysis
@@ -6721,7 +6745,15 @@ const checkForCallResponses = async () => {
                                         
                                         if (sendMessageResponse.ok) {
                                             console.log(`✅ AI response sent successfully to ${monitoringData.leadName}!`);
+                                            
+                                            // Update monitoring data with response tracking
                                             monitoringData.status = 'ai_response_sent';
+                                            monitoringData.lastResponseSentAt = Date.now();
+                                            monitoringData.responseCount = (monitoringData.responseCount || 0) + 1;
+                                            monitoringData.lastCheckedMessageId = latestMessage.id;
+                                            
+                                            console.log(`📊 Response count for ${monitoringData.leadName}: ${monitoringData.responseCount}`);
+                                            
                                             await chrome.storage.local.set({ [key]: monitoringData });
                                         } else {
                                             const errorText = await sendMessageResponse.text();
