@@ -4919,12 +4919,12 @@ const startContinuousMonitoring = () => {
         
         // Set up a recurring alarm to check for acceptances every 5 minutes
         chrome.alarms.create('continuous_invite_monitoring', {
-            delayInMinutes: 0.1, // Start checking after 5 minutes
-            periodInMinutes: 0.5 // Then check every 30 seconds (temporary for testing)
+            delayInMinutes: 0.1, // Start checking after 6 seconds
+            periodInMinutes: 0.2 // Then check every 12 seconds (frequent for testing)
         });
         
-        console.log('⏰ Continuous monitoring alarm created - will check every 30 seconds (TESTING MODE)');
-        console.log('🎯 Monitoring will start in 6 seconds and then check every 30 seconds');
+        console.log('⏰ Continuous monitoring alarm created - will check every 12 seconds (TESTING MODE)');
+        console.log('🎯 Monitoring will start in 6 seconds and then check every 12 seconds');
     });
 };
 
@@ -6604,6 +6604,44 @@ self.checkCallResponses = async () => {
     return 'Call response check completed - check console for results';
 };
 
+// Manual function to force check call responses immediately
+self.forceCheckResponses = async () => {
+    console.log('🚀 FORCING IMMEDIATE CALL RESPONSE CHECK...');
+    try {
+        await checkForCallResponses();
+        console.log('✅ Forced call response check completed');
+        return 'Forced call response check completed - check console for results';
+    } catch (error) {
+        console.error('❌ Forced call response check failed:', error);
+        return 'Forced call response check failed - check console for errors';
+    }
+};
+
+// Manual function to check specific lead's monitoring data
+self.checkLeadMonitoring = async (leadName) => {
+    console.log(`🔍 CHECKING MONITORING DATA FOR: ${leadName}`);
+    try {
+        const allStorage = await chrome.storage.local.get();
+        const responseKeys = Object.keys(allStorage).filter(key => key.startsWith('call_response_monitoring_'));
+        
+        console.log('📊 All monitoring keys:', responseKeys);
+        
+        for (const key of responseKeys) {
+            const monitoringData = allStorage[key];
+            if (monitoringData.leadName && monitoringData.leadName.toLowerCase().includes(leadName.toLowerCase())) {
+                console.log(`🎯 FOUND MONITORING DATA FOR ${leadName}:`, monitoringData);
+                return monitoringData;
+            }
+        }
+        
+        console.log(`❌ No monitoring data found for ${leadName}`);
+        return null;
+    } catch (error) {
+        console.error('❌ Error checking lead monitoring:', error);
+        return null;
+    }
+};
+
 // Manual function to test LinkedIn conversation fetching
 self.testLinkedInConversation = async (connectionId) => {
     console.log('🧪 TESTING LINKEDIN CONVERSATION FETCHING...');
@@ -6639,12 +6677,17 @@ const checkForCallResponses = async () => {
         }
         
         console.log(`📊 Found ${responseKeys.length} call responses to check`);
+        console.log('🔍 Response monitoring keys:', responseKeys);
         
         for (const key of responseKeys) {
             const monitoringData = allStorage[key];
+            console.log(`🔍 Checking monitoring data for key: ${key}`, monitoringData);
             
             if (monitoringData.status === 'waiting_for_response') {
                 console.log(`🔍 Checking LinkedIn conversation for ${monitoringData.leadName} (Call ID: ${monitoringData.callId})`);
+                console.log(`🔍 Monitoring data status: ${monitoringData.status}`);
+                console.log(`🔍 Lead name: ${monitoringData.leadName}`);
+                console.log(`🔍 Connection ID: ${monitoringData.connectionId}`);
                 
                 try {
                     // Check LinkedIn conversation for new messages
@@ -6852,6 +6895,8 @@ const checkForCallResponses = async () => {
                 } catch (error) {
                     console.error('❌ Error checking LinkedIn conversation for', monitoringData.leadName, ':', error);
                 }
+            } else {
+                console.log(`⏭️ Skipping ${monitoringData.leadName} - Status: ${monitoringData.status} (not waiting_for_response)`);
             }
         }
         
