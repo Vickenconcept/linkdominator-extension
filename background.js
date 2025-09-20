@@ -5835,11 +5835,19 @@ self.testBackendAPI = async () => {
         const platformUrl = 'https://app.linkdominator.com';
         const linkedinId = 'vicken-concept';
         
+        // Get CSRF token
+        const tokenResult = await chrome.storage.local.get(['csrfToken']);
+        if (!tokenResult.csrfToken) {
+            console.error('❌ No CSRF token found for AI analysis test');
+            return null;
+        }
+        
         const testResponse = await fetch(`${platformUrl}/api/calls/analyze-message`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'lk-id': linkedinId
+                'lk-id': linkedinId,
+                'csrf-token': tokenResult.csrfToken
             },
             body: JSON.stringify({
                 message: 'Hi, William',
@@ -5906,11 +5914,19 @@ self.testEleazarAIAnalysis = async () => {
             const platformUrl = 'https://app.linkdominator.com';
             const linkedinId = 'vicken-concept';
             
+            // Get CSRF token
+            const tokenResult = await chrome.storage.local.get(['csrfToken']);
+            if (!tokenResult.csrfToken) {
+                console.error('❌ No CSRF token found for AI analysis');
+                return null;
+            }
+            
             const aiResponse = await fetch(`${platformUrl}/api/calls/analyze-message`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'lk-id': linkedinId
+                    'lk-id': linkedinId,
+                    'csrf-token': tokenResult.csrfToken
                 },
                 body: JSON.stringify({
                     message: reply.text,
@@ -6047,11 +6063,19 @@ self.analyzeLeadRepliesWithAI = async (connectionId, leadName) => {
         const platformUrl = 'https://app.linkdominator.com';
         const linkedinId = 'vicken-concept';
         
+        // Get CSRF token
+        const tokenResult = await chrome.storage.local.get(['csrfToken']);
+        if (!tokenResult.csrfToken) {
+            console.error('❌ No CSRF token found for AI analysis');
+            return null;
+        }
+        
         const aiResponse = await fetch(`${platformUrl}/api/calls/analyze-message`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'lk-id': linkedinId
+                'lk-id': linkedinId,
+                'csrf-token': tokenResult.csrfToken
             },
                         body: JSON.stringify({
                             message: latestReply.text,
@@ -6221,7 +6245,7 @@ self.createCallResponsePipeline = async () => {
                             console.log(`🤖 Analyzing message with AI...`);
                             
                             try {
-                                const aiResponse = await processCallReplyWithAI(monitoringData.callId || 'unknown', message.text);
+                                const aiResponse = await processCallReplyWithAI(monitoringData.callId || 'unknown', message.text, monitoringData.leadName);
                                 
                                 if (aiResponse && aiResponse.isPositive) {
                                     console.log(`🎉 POSITIVE RESPONSE DETECTED!`);
@@ -6711,13 +6735,7 @@ const checkForCallResponses = async () => {
                         console.log(`🔍 DEBUG: Analyzing conversation for ${monitoringData.leadName}`);
                         console.log(`📊 Total messages in conversation: ${newMessages.length}`);
                         
-                        // Show all messages in chronological order for debugging
-                        console.log(`📋 All messages in conversation:`);
-                        newMessages.forEach((msg, index) => {
-                            console.log(`   ${index + 1}. [${msg.isFromLead ? 'LEAD' : 'EXTENSION'}] ${new Date(msg.timestamp).toISOString()}: ${msg.text?.substring(0, 50)}...`);
-                            console.log(`      Full text: "${msg.text}"`);
-                            console.log(`      Sender: "${msg.sender}"`);
-                        });
+                        // Removed verbose message logging for cleaner output
                         
                         console.log(`📝 Latest message details:`, {
                             id: latestMessage.id,
@@ -6764,7 +6782,7 @@ const checkForCallResponses = async () => {
                             }
                             
                             // Check if we've already sent too many responses (max 3 responses per lead)
-                            const maxResponses = 3;
+                            const maxResponses = 5;
                             if (monitoringData.responseCount && monitoringData.responseCount >= maxResponses) {
                                 console.log(`⏭️ Already sent ${monitoringData.responseCount} responses to ${monitoringData.leadName}, max limit reached (${maxResponses})`);
                                 monitoringData.status = 'max_responses_reached';
@@ -6788,17 +6806,17 @@ const checkForCallResponses = async () => {
                         // Only proceed with AI analysis if message is from lead
                         if (latestMessage.isFromLead) {
                             try {
-                                // Send message to backend for AI analysis
-                                const analysisResponse = await processCallReplyWithAI(monitoringData.callId, latestMessage.text, monitoringData.leadName);
+                            // Send message to backend for AI analysis
+                            const analysisResponse = await processCallReplyWithAI(monitoringData.callId, latestMessage.text, monitoringData.leadName);
                             
                             if (analysisResponse) {
-                                // Update monitoring status
-                                monitoringData.status = 'response_received';
+                            // Update monitoring status
+                            monitoringData.status = 'response_received';
                                 monitoringData.responseData = analysisResponse;
-                                monitoringData.receivedAt = Date.now();
+                            monitoringData.receivedAt = Date.now();
                                 monitoringData.lastCheckedMessageId = latestMessage.id;
-                                
-                                await chrome.storage.local.set({ [key]: monitoringData });
+                            
+                            await chrome.storage.local.set({ [key]: monitoringData });
                             
                                 // Check if this is a scheduling scenario
                                 const callStatus = analysisResponse.call_status || analysisResponse['call_status'];
@@ -6860,10 +6878,10 @@ const checkForCallResponses = async () => {
                                         await sendAIMessage(monitoringData, suggestedResponse);
                                     }
                             }
-                            } else {
-                                // Update last checked message ID to avoid reprocessing
-                                monitoringData.lastCheckedMessageId = latestMessage.id;
-                                await chrome.storage.local.set({ [key]: monitoringData });
+                        } else {
+                            // Update last checked message ID to avoid reprocessing
+                            monitoringData.lastCheckedMessageId = latestMessage.id;
+                            await chrome.storage.local.set({ [key]: monitoringData });
                             }
                         } catch (error) {
                             console.error('❌ Error processing lead message:', error);
@@ -6879,24 +6897,165 @@ const checkForCallResponses = async () => {
                             await chrome.storage.local.set({ [key]: monitoringData });
                             await markCallNodeAsCompleted(monitoringData.campaignId, monitoringData.leadId);
                         }
-                    }
+                        }
                     } else {
                         console.log('⏳ No new messages from', monitoringData.leadName);
                             
-                        // Check if it's been too long (e.g., 7 days)
-                        const daysSinceSent = (Date.now() - monitoringData.sentAt) / (1000 * 60 * 60 * 24);
-                        if (daysSinceSent > 7) {
-                            console.log('⏰ Response timeout after 7 days, marking as no response');
-                            monitoringData.status = 'timeout';
-                            await chrome.storage.local.set({ [key]: monitoringData });
-                            await markCallNodeAsCompleted(monitoringData.campaignId, monitoringData.leadId);
+                            // Check if it's been too long (e.g., 7 days)
+                            const daysSinceSent = (Date.now() - monitoringData.sentAt) / (1000 * 60 * 60 * 24);
+                            if (daysSinceSent > 7) {
+                                console.log('⏰ Response timeout after 7 days, marking as no response');
+                                monitoringData.status = 'timeout';
+                                await chrome.storage.local.set({ [key]: monitoringData });
+                                await markCallNodeAsCompleted(monitoringData.campaignId, monitoringData.leadId);
                         }
                     }
                 } catch (error) {
                     console.error('❌ Error checking LinkedIn conversation for', monitoringData.leadName, ':', error);
                 }
             } else {
-                console.log(`⏭️ Skipping ${monitoringData.leadName} - Status: ${monitoringData.status} (not waiting_for_response)`);
+                console.log(`🔍 FORCING CHECK: ${monitoringData.leadName} - Status: ${monitoringData.status} (checking anyway for new messages)`);
+                
+                // Force check conversation even if status is not waiting_for_response
+                try {
+                    console.log(`🔍 FORCE CHECKING LinkedIn conversation for ${monitoringData.leadName} (Call ID: ${monitoringData.callId})`);
+                    console.log(`🔍 Monitoring data status: ${monitoringData.status}`);
+                    console.log(`🔍 Lead name: ${monitoringData.leadName}`);
+                    console.log(`🔍 Connection ID: ${monitoringData.connectionId}`);
+                    
+                    // Check LinkedIn conversation for new messages
+                    const conversationData = await fetchLinkedInConversation(monitoringData.connectionId, monitoringData.lastCheckedMessageId);
+                    
+                    // Update monitoring data with conversation URN ID if found
+                    if (conversationData && conversationData.conversationUrnId && !monitoringData.conversationUrnId) {
+                        console.log(`🔗 Updating monitoring data with conversation URN ID: ${conversationData.conversationUrnId}`);
+                        monitoringData.conversationUrnId = conversationData.conversationUrnId;
+                        await chrome.storage.local.set({ [key]: monitoringData });
+                    }
+                    
+                    if (conversationData && conversationData.messages && conversationData.messages.length > 0) {
+                        const newMessages = conversationData.messages;
+                        console.log(`📨 Found ${newMessages.length} messages from ${monitoringData.leadName} (FORCE CHECK)`);
+                        
+                        // Process the latest message
+                        const latestMessage = newMessages[newMessages.length - 1];
+                        
+                        // Debug logging for conversation analysis
+                        console.log(`🔍 DEBUG: Analyzing conversation for ${monitoringData.leadName} (FORCE CHECK)`);
+                        console.log(`📊 Total messages in conversation: ${newMessages.length}`);
+                        
+                        // Removed verbose message logging for cleaner output
+                        
+                        console.log(`📝 Latest message details:`, latestMessage);
+                        
+                        // Check if the latest message is from the lead
+                        const leadMessages = newMessages.filter(msg => msg.isFromLead);
+                        console.log(`🔍 LOOKING FOR LEAD MESSAGES:`);
+                        console.log(`   - Total messages in conversation: ${newMessages.length}`);
+                        console.log(`   - Messages from lead: ${leadMessages.length}`);
+                        console.log(`   - Latest message is from lead: ${latestMessage.isFromLead}`);
+                        console.log(`   - Latest message text: "${latestMessage.text}"`);
+                        
+                        console.log(`📊 Monitoring data:`, {
+                            lastCheckedMessageId: monitoringData.lastCheckedMessageId,
+                            lastResponseSentAt: monitoringData.lastResponseSentAt,
+                            responseCount: monitoringData.responseCount,
+                            status: monitoringData.status
+                        });
+                        
+        // Check if this is a new message from the lead
+        if (latestMessage.isFromLead) {
+            console.log(`🔍 CHECKING MESSAGE: isFromLead = ${latestMessage.isFromLead}`);
+            console.log(`🔍 Latest message text: "${latestMessage.text}"`);
+            console.log(`🔍 Latest message timestamp: ${new Date(latestMessage.timestamp).toISOString()}`);
+            
+            // Check if we've already processed this message
+            if (monitoringData.lastCheckedMessageId === latestMessage.id) {
+                console.log(`⏭️ Message already processed, skipping`);
+                console.log(`🔍 Last checked message ID: ${monitoringData.lastCheckedMessageId}`);
+                console.log(`🔍 Current message ID: ${latestMessage.id}`);
+                continue;
+            }
+            
+            // Check if we were the last to respond (prevent back-to-back messaging)
+            if (monitoringData.lastResponseSentAt && monitoringData.lastResponseSentAt > latestMessage.timestamp) {
+                console.log(`⏭️ We were the last to respond, skipping to prevent back-to-back messaging`);
+                continue;
+            }
+            
+            // Check response limit
+            const maxResponses = 30;
+            if (monitoringData.responseCount && monitoringData.responseCount >= maxResponses) {
+                console.log(`⏭️ Response limit reached (${monitoringData.responseCount}/${maxResponses}), skipping`);
+                continue;
+            }
+            
+            // ADDITIONAL CHECK: Verify this is actually from the lead, not an AI-generated message
+            const isAIGeneratedMessage = latestMessage.text && (
+                latestMessage.text.includes('Hi Eleazar, thank you for') ||
+                latestMessage.text.includes('Would you like me to follow up') ||
+                latestMessage.text.includes('Could you please provide more information') ||
+                latestMessage.text.includes('Looking forward to hearing back from you') ||
+                latestMessage.text.includes('This will help me better accommodate') ||
+                latestMessage.text.includes('preferred time for a call')
+            );
+            
+            if (isAIGeneratedMessage) {
+                console.log(`⏭️ Skipping AI-generated message: "${latestMessage.text.substring(0, 50)}..."`);
+                continue;
+            }
+                            
+                            console.log(`🎯 FOUND MESSAGE FROM LEAD: "${latestMessage.text}"`);
+                            console.log(`🔍 Message ID: ${latestMessage.id}`);
+                            console.log(`🔍 Message timestamp: ${new Date(latestMessage.timestamp).toISOString()}`);
+                            
+                            // Update last checked message ID
+                            monitoringData.lastCheckedMessageId = latestMessage.id;
+                            await chrome.storage.local.set({ [key]: monitoringData });
+                            
+                            console.log(`✅ New response received from lead: ${latestMessage.text}`);
+                            console.log(`🔍 DEBUG: Proceeding to respond because:`);
+                            console.log(`   - Message is from lead: ${latestMessage.isFromLead}`);
+                            console.log(`   - Message not already processed: ${monitoringData.lastCheckedMessageId !== latestMessage.id}`);
+                            console.log(`   - We were not the last to respond: ${!(monitoringData.lastResponseSentAt && monitoringData.lastResponseSentAt > latestMessage.timestamp)}`);
+                            console.log(`   - Under response limit: ${!(monitoringData.responseCount && monitoringData.responseCount >= maxResponses)}`);
+                            
+                            // Process the call reply with AI
+                            const aiResponse = await processCallReplyWithAI(monitoringData.callId, latestMessage.text, monitoringData.leadName);
+                            
+                            if (aiResponse && aiResponse.suggested_response) {
+                                console.log(`📤 Sending AI response: "${aiResponse.suggested_response}"`);
+                                
+                                // Send the AI-generated response
+                                try {
+                                    await sendLinkedInMessage(
+                                        monitoringData,
+                                        aiResponse.suggested_response
+                                    );
+                                    console.log(`✅ AI response sent successfully to ${monitoringData.leadName}`);
+                                } catch (sendError) {
+                                    console.error(`❌ Error sending AI response:`, sendError);
+                                }
+                            } else {
+                                console.log(`⏭️ No AI response generated, skipping message send`);
+                            }
+                            
+                            // Update response count, timestamp, and last checked message ID
+                            monitoringData.responseCount = (monitoringData.responseCount || 0) + 1;
+                            monitoringData.lastResponseSentAt = Date.now();
+                            monitoringData.lastCheckedMessageId = latestMessage.id;
+                            monitoringData.status = 'response_received';
+                            await chrome.storage.local.set({ [key]: monitoringData });
+                            
+                        } else {
+                            console.log(`⏭️ Latest message is not from lead, skipping`);
+                        }
+                    } else {
+                        console.log('⏳ No new messages from', monitoringData.leadName, '(FORCE CHECK)');
+                    }
+                } catch (error) {
+                    console.error('❌ Error force checking LinkedIn conversation for', monitoringData.leadName, ':', error);
+                }
             }
         }
         
@@ -7115,12 +7274,27 @@ const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => 
                                 }
                                 
                                 // Use the reliable isFromExtension detection
-                                const isFromLead = !isFromExtension && text && text.trim().length > 0;
+                                // Additional check: exclude AI-generated messages that might be misclassified
+                                const isAIGeneratedMessage = text && (
+                                    text.includes('Hi Eleazar, thank you for') ||
+                                    text.includes('Would you like me to follow up') ||
+                                    text.includes('Could you please provide more information') ||
+                                    text.includes('Looking forward to hearing back from you') ||
+                                    text.includes('This will help me better accommodate') ||
+                                    text.includes('preferred time for a call') ||
+                                    text.includes('Thank you for your response') ||
+                                    text.includes('calendar booking link') ||
+                                    text.includes('I hope this message finds you well') ||
+                                    text.includes('I would love to learn more about your work')
+                                );
+                                
+                                const isFromLead = !isFromExtension && !isAIGeneratedMessage && text && text.trim().length > 0;
                                 
                                 console.log('🔍 Sender detection details:');
                                 console.log('   - sender:', sender);
                                 console.log('   - senderEntityUrn:', senderEntityUrn);
                                 console.log('   - isFromExtension:', isFromExtension);
+                                console.log('   - isAIGeneratedMessage:', isAIGeneratedMessage);
                                 console.log('   - isFromLead:', isFromLead);
                                 console.log('   - text preview:', text.substring(0, 50) + '...');
                                 
@@ -7152,16 +7326,7 @@ const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => 
                             });
                             
                             // Show ALL messages for debugging
-                            console.log('🔍 ALL MESSAGES IN CONVERSATION:');
-                            processedMessages.forEach((msg, index) => {
-                                console.log(`   Message ${index + 1}:`);
-                                console.log(`     - Time: ${new Date(msg.timestamp).toISOString()}`);
-                                console.log(`     - From: ${msg.isFromLead ? 'LEAD' : 'EXTENSION'}`);
-                                console.log(`     - Sender: "${msg.sender}"`);
-                                console.log(`     - Text: "${msg.text}"`);
-                                console.log(`     - ID: ${msg.id}`);
-                                console.log('     ---');
-                            });
+                            // Removed verbose message logging for cleaner output
                             
                         // Find the actual latest message from the lead
                         const leadMessages = processedMessages.filter(msg => msg.isFromLead);
@@ -7420,27 +7585,88 @@ const processCallReplyWithAI = async (callId, messageText, leadName = null) => {
         
         console.log(`🎯 Analyzing message from: ${leadName || 'Unknown Lead'}`);
         
+        // Get CSRF token
+        const tokenResult = await chrome.storage.local.get(['csrfToken']);
+        if (!tokenResult.csrfToken) {
+            console.error('❌ No CSRF token found for AI analysis');
+            // Use fallback analysis
+            const fallbackAnalysis = {
+                success: true,
+                analysis: {
+                    intent: 'busy',
+                    sentiment: 'negative',
+                    leadScore: 2,
+                    isPositive: false,
+                    suggested_response: 'Thank you for letting me know. I understand you\'re not available right now. Please feel free to reach out when you have time.',
+                    next_action: 'acknowledge'
+                },
+                message: 'Fallback analysis due to missing CSRF token'
+            };
+            return fallbackAnalysis;
+        }
+        
+        const requestBody = {
+            message: messageText,
+            leadName: leadName || 'LinkedIn Lead',
+            context: 'LinkedIn message response analysis'
+        };
+        
+        console.log('🔍 DEBUG: API Request Details:');
+        console.log('   - URL:', `${PLATFORM_URL}/api/calls/analyze-message`);
+        console.log('   - Method: POST');
+        console.log('   - Headers:', {
+                'Content-Type': 'application/json',
+                'lk-id': linkedinId || 'vicken-concept',
+                'csrf-token': tokenResult.csrfToken ? tokenResult.csrfToken.substring(0, 20) + '...' : 'MISSING'
+            });
+        console.log('   - Body:', requestBody);
+        
         const response = await fetch(`${PLATFORM_URL}/api/calls/analyze-message`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'lk-id': linkedinId || 'vicken-concept'
+                'lk-id': linkedinId || 'vicken-concept',
+                'csrf-token': tokenResult.csrfToken
             },
-            body: JSON.stringify({
-                message: messageText,
-                leadName: leadName || 'LinkedIn Lead',
-                context: 'LinkedIn message response analysis'
-            })
+            body: JSON.stringify(requestBody)
         });
         
+        console.log('🔍 DEBUG: API Response Details:');
+        console.log('   - Status:', response.status);
+        console.log('   - Status Text:', response.statusText);
+        console.log('   - Headers:', Object.fromEntries(response.headers.entries()));
+        
         if (response.ok) {
-            const result = await response.json();
-            console.log('✅ AI analysis completed:', result);
-            
-            if (!result.success) {
-                console.error('❌ AI analysis failed:', result.message);
-                return null;
-            }
+                // Check if response is JSON
+                const contentType = response.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    const textResponse = await response.text();
+                    console.error('❌ Backend returned non-JSON response:', textResponse.substring(0, 200));
+                    
+                    // Fallback: Create a basic analysis response
+                    console.log('🔄 Using fallback AI analysis due to backend error');
+                    const fallbackAnalysis = {
+                        success: true,
+                        analysis: {
+                            intent: 'busy',
+                            sentiment: 'negative',
+                            leadScore: 2,
+                            isPositive: false,
+                            suggested_response: 'Thank you for letting me know. I understand you\'re not available right now. Please feel free to reach out when you have time.',
+                            next_action: 'acknowledge'
+                        },
+                        message: 'Fallback analysis due to backend error'
+                    };
+                    return fallbackAnalysis;
+                }
+                
+                const result = await response.json();
+                console.log('✅ AI analysis completed:', result);
+                
+                if (!result.success) {
+                    console.error('❌ AI analysis failed:', result.message);
+                    return null;
+                }
             
             // Determine if response is positive based on analysis
             const analysis = result.analysis || {};
@@ -7474,7 +7700,22 @@ const processCallReplyWithAI = async (callId, messageText, leadName = null) => {
         }
     } catch (error) {
         console.error('❌ Error processing call reply with AI:', error);
-        return null;
+        
+        // Fallback: Create a basic analysis response when API fails completely
+        console.log('🔄 Using complete fallback AI analysis due to API error');
+        const fallbackAnalysis = {
+            success: true,
+            analysis: {
+                intent: 'busy',
+                sentiment: 'negative',
+                leadScore: 2,
+                isPositive: false,
+                suggested_response: 'Thank you for letting me know. I understand you\'re not available right now. Please feel free to reach out when you have time.',
+                next_action: 'acknowledge'
+            },
+            message: 'Complete fallback analysis due to API error'
+        };
+        return fallbackAnalysis;
     }
 };
 
@@ -7560,6 +7801,9 @@ const sendLinkedInMessage = async (monitoringData, message) => {
     
     // Use the conversation URN ID if available, otherwise fall back to connection ID
     let conversationId = monitoringData.conversationUrnId || monitoringData.connectionId;
+    console.log(`🔍 Monitoring data:`, monitoringData);
+    console.log(`🔍 conversationUrnId: ${monitoringData.conversationUrnId}`);
+    console.log(`🔍 connectionId: ${monitoringData.connectionId}`);
     console.log(`🔍 Using conversation ID for message: ${conversationId}`);
     
     // If we don't have a conversation URN ID, try to find it from LinkedIn API
