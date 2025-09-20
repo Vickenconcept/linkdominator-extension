@@ -4,6 +4,55 @@
 // importScripts('./js/actions/campaignAction.js');
 importScripts('./env.js');
 
+// Function to store our LinkedIn profile information for reliable sender detection
+const storeLinkedInProfile = async () => {
+    try {
+        console.log('🔍 Storing LinkedIn profile information...');
+        
+        // Get CSRF token
+        const tokenResult = await chrome.storage.local.get(['csrfToken']);
+        if (!tokenResult.csrfToken) {
+            console.log('⚠️ No CSRF token available for profile detection');
+            return;
+        }
+        
+        // Fetch our LinkedIn profile
+        const profileResponse = await fetch(`${voyagerApi}/identity/profileView`, {
+            method: 'GET',
+            headers: {
+                'csrf-token': tokenResult.csrfToken,
+                'accept': 'application/vnd.linkedin.normalized+json+2.1',
+                'x-li-lang': 'en_US',
+                'x-restli-protocol-version': '2.0.0',
+            }
+        });
+        
+        if (profileResponse.ok) {
+            const profileData = await profileResponse.json();
+            console.log('📊 LinkedIn profile data:', profileData);
+            
+            if (profileData.elements && profileData.elements.length > 0) {
+                const profile = profileData.elements[0];
+                const profileInfo = {
+                    entityUrn: profile.entityUrn,
+                    publicIdentifier: profile.publicIdentifier,
+                    firstName: profile.firstName,
+                    lastName: profile.lastName,
+                    fullName: `${profile.firstName} ${profile.lastName}`.trim(),
+                    storedAt: Date.now()
+                };
+                
+                await chrome.storage.local.set({ linkedinProfile: profileInfo });
+                console.log('✅ LinkedIn profile stored:', profileInfo);
+            }
+        } else {
+            console.log('❌ Failed to fetch LinkedIn profile:', profileResponse.status);
+        }
+    } catch (error) {
+        console.error('❌ Error storing LinkedIn profile:', error);
+    }
+};
+
 // 🚀 KEEP-ALIVE MECHANISM - Prevents service worker from going inactive
 let keepAliveInterval;
 let isServiceWorkerActive = true;
@@ -520,6 +569,12 @@ chrome.runtime.onStartup.addListener(() => {
     try {
         console.log('🚀 Service worker started');
         keepServiceWorkerAlive();
+        
+        // Store LinkedIn profile for reliable sender detection
+        setTimeout(() => {
+            console.log('🔍 Attempting to store LinkedIn profile...');
+            storeLinkedInProfile();
+        }, 2000);
         
         // Initialize active campaigns after a short delay to ensure LinkedIn ID is available
         setTimeout(async () => {
@@ -6609,8 +6664,47 @@ const checkForCallResponses = async () => {
                         // Process the latest message
                         const latestMessage = newMessages[newMessages.length - 1];
                         
+                        // Debug logging for conversation analysis
+                        console.log(`🔍 DEBUG: Analyzing conversation for ${monitoringData.leadName}`);
+                        console.log(`📊 Total messages in conversation: ${newMessages.length}`);
+                        
+                        // Show all messages in chronological order for debugging
+                        console.log(`📋 All messages in conversation:`);
+                        newMessages.forEach((msg, index) => {
+                            console.log(`   ${index + 1}. [${msg.isFromLead ? 'LEAD' : 'EXTENSION'}] ${new Date(msg.timestamp).toISOString()}: ${msg.text?.substring(0, 50)}...`);
+                            console.log(`      Full text: "${msg.text}"`);
+                            console.log(`      Sender: "${msg.sender}"`);
+                        });
+                        
+                        console.log(`📝 Latest message details:`, {
+                            id: latestMessage.id,
+                            text: latestMessage.text?.substring(0, 100) + '...',
+                            timestamp: latestMessage.timestamp,
+                            isFromLead: latestMessage.isFromLead,
+                            sender: latestMessage.sender,
+                            createdAt: new Date(latestMessage.timestamp).toISOString()
+                        });
+                        
+                        // Show what we're looking for
+                        console.log('🔍 LOOKING FOR LEAD MESSAGES:');
+                        console.log(`   - Total messages in conversation: ${newMessages.length}`);
+                        console.log(`   - Messages from lead: ${newMessages.filter(msg => msg.isFromLead).length}`);
+                        console.log(`   - Latest message is from lead: ${latestMessage.isFromLead}`);
+                        console.log(`   - Latest message text: "${latestMessage.text}"`);
+                        console.log(`📊 Monitoring data:`, {
+                            lastCheckedMessageId: monitoringData.lastCheckedMessageId,
+                            lastResponseSentAt: monitoringData.lastResponseSentAt,
+                            responseCount: monitoringData.responseCount,
+                            status: monitoringData.status
+                        });
+                        
                         // Check if this message is from the lead (not from us) - works for any LinkedIn user
+                        console.log(`🔍 CHECKING MESSAGE: isFromLead = ${latestMessage.isFromLead}`);
                         if (latestMessage.isFromLead) {
+                            console.log(`🎯 FOUND MESSAGE FROM LEAD: "${latestMessage.text}"`);
+                            console.log(`🔍 Message ID: ${latestMessage.id}`);
+                            console.log(`🔍 Message timestamp: ${new Date(latestMessage.timestamp).toISOString()}`);
+                            
                             // Additional check: Make sure we haven't already responded to this message
                             if (monitoringData.lastCheckedMessageId === latestMessage.id) {
                                 console.log(`⏭️ Already processed this message from ${monitoringData.leadName}, skipping...`);
@@ -6620,6 +6714,9 @@ const checkForCallResponses = async () => {
                             // Check if we were the last to respond (to prevent back-to-back messaging)
                             if (monitoringData.lastResponseSentAt && monitoringData.lastResponseSentAt > latestMessage.timestamp) {
                                 console.log(`⏭️ We were the last to respond to ${monitoringData.leadName}, waiting for their reply...`);
+                                console.log(`🔍 DEBUG: lastResponseSentAt (${monitoringData.lastResponseSentAt}) > message.timestamp (${latestMessage.timestamp})`);
+                                console.log(`🔍 DEBUG: Last response time: ${new Date(monitoringData.lastResponseSentAt).toISOString()}`);
+                                console.log(`🔍 DEBUG: Message time: ${new Date(latestMessage.timestamp).toISOString()}`);
                                 continue;
                             }
                             
@@ -6631,8 +6728,22 @@ const checkForCallResponses = async () => {
                                 await chrome.storage.local.set({ [key]: monitoringData });
                                 continue;
                             }
-                            console.log('✅ New response received from lead:', latestMessage.text);
                             
+                            console.log('✅ New response received from lead:', latestMessage.text);
+                            console.log(`🔍 DEBUG: Proceeding to respond because:`);
+                            console.log(`   - Message is from lead: ${latestMessage.isFromLead}`);
+                            console.log(`   - Message not already processed: ${monitoringData.lastCheckedMessageId !== latestMessage.id}`);
+                            console.log(`   - We were not the last to respond: ${!(monitoringData.lastResponseSentAt && monitoringData.lastResponseSentAt > latestMessage.timestamp)}`);
+                            console.log(`   - Under response limit: ${!(monitoringData.responseCount && monitoringData.responseCount >= 3)}`);
+                        } else {
+                            console.log(`❌ MESSAGE NOT FROM LEAD: "${latestMessage.text}"`);
+                            console.log(`   - isFromLead: ${latestMessage.isFromLead}`);
+                            console.log(`   - sender: "${latestMessage.sender}"`);
+                            console.log(`   - Skipping this message...`);
+                        }
+                        
+                        // Only proceed with AI analysis if message is from lead
+                        if (latestMessage.isFromLead) {
                             // Send message to backend for AI analysis
                             const analysisResponse = await processCallReplyWithAI(monitoringData.callId, latestMessage.text, monitoringData.leadName);
                             
@@ -6879,14 +6990,35 @@ const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => 
                         console.log('📋 Raw API Response:', messagesData);
                         
                         const messages = messagesData.elements || [];
-                        console.log(`📊 Found ${messages.length} raw messages in API response`);
+                            console.log(`📊 Found ${messages.length} raw messages in API response`);
+                            
+                            // Check if we have any very recent messages (within last 5 minutes)
+                            const now = Date.now();
+                            const recentMessages = messages.filter(msg => {
+                                const messageTime = msg.createdAt;
+                                const ageMinutes = (now - messageTime) / (1000 * 60);
+                                return ageMinutes <= 5;
+                            });
+                            
+                            if (recentMessages.length > 0) {
+                                console.log(`🆕 Found ${recentMessages.length} recent messages (within last 5 minutes)`);
+                            } else {
+                                console.log('⏰ No recent messages found (all messages are older than 5 minutes)');
+                            }
                         
                         if (messages.length > 0) {
                             console.log(`🎉 SUCCESS! Found ${messages.length} messages in direct conversation: ${conversationId}`);
                             console.log('📝 Sample message structure:', messages[0]);
                             
+                            // Show all raw message timestamps to see if we're missing recent messages
+                            console.log('🕐 RAW MESSAGE TIMESTAMPS (API ORDER):');
+                            messages.forEach((msg, index) => {
+                                const timestamp = new Date(msg.createdAt).toISOString();
+                                console.log(`   Message ${index + 1}: ${timestamp}`);
+                            });
+                            
                             // Process messages to extract text and sender info
-                            const processedMessages = messages.map((msg, index) => {
+                            const allProcessedMessages = await Promise.all(messages.map(async (msg, index) => {
                                 console.log(`🔍 Processing message ${index + 1}:`, msg);
                                 
                                 // Extract text using multiple methods (same as working function)
@@ -6919,8 +7051,10 @@ const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => 
                                 }
                                 
                                 let sender = 'unknown';
+                                let senderEntityUrn = null;
+                                let isFromExtension = false;
                                 
-                                // Extract sender with enhanced detection (same as working function)
+                                // Extract sender with enhanced detection
                                 console.log('🔍 Raw sender data:', msg.from);
                                 
                                 if (msg.from?.com?.linkedin?.voyager?.messaging?.MessagingMember) {
@@ -6932,28 +7066,76 @@ const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => 
                                     } else if (member.miniProfile) {
                                         sender = `${member.miniProfile.firstName || ''} ${member.miniProfile.lastName || ''}`.trim();
                                     }
+                                    
+                                    // Get sender's entity URN for reliable identification
+                                    if (member.entityUrn) {
+                                        senderEntityUrn = member.entityUrn;
+                                    } else if (member.miniProfile?.entityUrn) {
+                                        senderEntityUrn = member.miniProfile.entityUrn;
+                                    }
                                 }
                                 
-                                // Enhanced lead detection (generic - works for any LinkedIn user)
-                                const isFromLead = 
-                                    // Check if this is NOT from us (William Victor) and has meaningful text
-                                    (!sender.toLowerCase().includes('william') && 
-                                     !sender.toLowerCase().includes('victor') && 
-                                     !msg.from?.entityUrn?.includes('vicken-concept') &&
-                                     text && text.trim().length > 0 && text.length < 1000 &&
-                                     // Exclude AI-generated messages (they contain template placeholders)
-                                     !text.includes('[Your Name]') &&
-                                     !text.includes('[Your Position]') &&
-                                     !text.includes('[Your Company]') &&
-                                     !text.includes('[Date and Time]') &&
-                                     !text.includes('[Duration]') &&
-                                     !text.includes('Dear Mr.') &&
-                                     !text.includes('Dear Eleazar Nzerem'));
+                                // Get our own LinkedIn profile info for comparison
+                                const ourProfile = await chrome.storage.local.get(['linkedinProfile']);
+                                const ourEntityUrn = ourProfile.linkedinProfile?.entityUrn;
+                                const ourPublicIdentifier = ourProfile.linkedinProfile?.publicIdentifier;
+                                
+                                // Debug profile storage
+                                if (!ourEntityUrn && !ourPublicIdentifier) {
+                                    console.log('⚠️ LinkedIn profile not stored yet - using fallback detection');
+                                    console.log('🔍 Stored profile data:', ourProfile.linkedinProfile);
+                                }
+                                
+                                console.log('🔍 Sender comparison:', {
+                                    senderEntityUrn: senderEntityUrn,
+                                    ourEntityUrn: ourEntityUrn,
+                                    ourPublicIdentifier: ourPublicIdentifier,
+                                    sender: sender,
+                                    textPreview: text.substring(0, 50) + '...'
+                                });
+                                
+                                // Show why isFromExtension is true/false
+                                if (ourEntityUrn && senderEntityUrn) {
+                                    console.log('   → Using entity URN comparison');
+                                } else if (ourPublicIdentifier && sender) {
+                                    console.log('   → Using public identifier comparison');
+                                } else {
+                                    console.log('   → Using text pattern matching (FALLBACK)');
+                                    console.log('   → Text patterns checked:', {
+                                        hasYourName: text.includes('[Your Name]'),
+                                        hasThankYou: text.includes('Thank you for your response'),
+                                        hasThankYouLetting: text.includes('Thank you for letting me know'),
+                                        hasLetsSchedule: text.includes('Let\'s schedule a call'),
+                                        hasHopeMessage: text.includes('I hope this message finds you well')
+                                    });
+                                }
+                                
+                                // Determine if message is from extension using reliable identifiers
+                                if (ourEntityUrn && senderEntityUrn) {
+                                    isFromExtension = senderEntityUrn === ourEntityUrn;
+                                } else if (ourPublicIdentifier && sender) {
+                                    // Fallback to name matching if URNs not available
+                                    isFromExtension = sender.toLowerCase().includes('william') || 
+                                                   sender.toLowerCase().includes('victor') ||
+                                                   sender.toLowerCase().includes('vicken-concept');
+                                } else {
+                                    // Last resort: text pattern matching
+                                    isFromExtension = text.includes('[Your Name]') ||
+                                                   text.includes('Thank you for your response') ||
+                                                   text.includes('Thank you for letting me know') ||
+                                                   text.includes('Let\'s schedule a call') ||
+                                                   text.includes('I hope this message finds you well');
+                                }
+                                
+                                // Use the reliable isFromExtension detection
+                                const isFromLead = !isFromExtension && text && text.trim().length > 0;
                                 
                                 console.log('🔍 Sender detection details:');
                                 console.log('   - sender:', sender);
-                                console.log('   - entityUrn:', msg.from?.entityUrn);
+                                console.log('   - senderEntityUrn:', senderEntityUrn);
+                                console.log('   - isFromExtension:', isFromExtension);
                                 console.log('   - isFromLead:', isFromLead);
+                                console.log('   - text preview:', text.substring(0, 50) + '...');
                                 
                                 console.log(`📝 Processed message ${index + 1}: "${text}" from ${sender}`);
                                 
@@ -6965,9 +7147,60 @@ const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => 
                                     isFromLead: isFromLead,
                                     rawMessage: msg
                                 };
-                            }).filter(msg => msg.text && msg.text.trim().length > 0);
+                            }));
+                            
+                            const processedMessages = allProcessedMessages.filter(msg => msg.text && msg.text.trim().length > 0);
+                            
+                            // Sort messages by timestamp to get correct chronological order
+                            processedMessages.sort((a, b) => a.timestamp - b.timestamp);
                             
                             console.log(`📊 Processed ${processedMessages.length} valid messages`);
+                            console.log('📅 Messages sorted by timestamp (chronological order)');
+                            
+                            // Show sorted timestamps
+                            console.log('🕐 SORTED MESSAGE TIMESTAMPS (CHRONOLOGICAL ORDER):');
+                            processedMessages.forEach((msg, index) => {
+                                const timestamp = new Date(msg.timestamp).toISOString();
+                                console.log(`   Message ${index + 1}: ${timestamp} - ${msg.isFromLead ? 'LEAD' : 'EXTENSION'}`);
+                            });
+                            
+                            // Show ALL messages for debugging
+                            console.log('🔍 ALL MESSAGES IN CONVERSATION:');
+                            processedMessages.forEach((msg, index) => {
+                                console.log(`   Message ${index + 1}:`);
+                                console.log(`     - Time: ${new Date(msg.timestamp).toISOString()}`);
+                                console.log(`     - From: ${msg.isFromLead ? 'LEAD' : 'EXTENSION'}`);
+                                console.log(`     - Sender: "${msg.sender}"`);
+                                console.log(`     - Text: "${msg.text}"`);
+                                console.log(`     - ID: ${msg.id}`);
+                                console.log('     ---');
+                            });
+                            
+                        // Find the actual latest message from the lead
+                        const leadMessages = processedMessages.filter(msg => msg.isFromLead);
+                        if (leadMessages.length > 0) {
+                            const latestLeadMessage = leadMessages[leadMessages.length - 1];
+                            console.log('🎯 LATEST MESSAGE FROM LEAD:');
+                            console.log(`   - Time: ${new Date(latestLeadMessage.timestamp).toISOString()}`);
+                            console.log(`   - Text: "${latestLeadMessage.text}"`);
+                            console.log(`   - Message ID: ${latestLeadMessage.id}`);
+                            
+                            // Check if this is a recent message (within last 10 minutes)
+                            const messageAge = Date.now() - latestLeadMessage.timestamp;
+                            const messageAgeMinutes = Math.floor(messageAge / (1000 * 60));
+                            console.log(`   - Message age: ${messageAgeMinutes} minutes ago`);
+                            
+                            if (messageAgeMinutes > 10) {
+                                console.log('⚠️ Latest lead message is older than 10 minutes - might be missing newer messages');
+                                console.log('🔍 SUGGESTIONS:');
+                                console.log('   1. Check if the message was actually sent in LinkedIn');
+                                console.log('   2. Wait 15-30 minutes for LinkedIn API to update');
+                                console.log('   3. Check if the message is in a different conversation thread');
+                                console.log('   4. Verify the message appears in LinkedIn web interface');
+                            }
+                        } else {
+                            console.log('❌ NO MESSAGES FROM LEAD FOUND');
+                        }
                             
                             // Return the processed messages
                             return {
