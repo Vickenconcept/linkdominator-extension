@@ -6625,9 +6625,9 @@ const checkForCallResponses = async () => {
                                 console.log('📤 Sending AI-generated response to lead...');
                                 
                                 // Always send the AI response regardless of positive/negative
-                                if (analysisResponse.suggested_response || analysisResponse['Suggested Response']) {
+                                if (analysisResponse.suggested_response || analysisResponse['Suggested Response'] || analysisResponse.suggestedResponse) {
                                     try {
-                                        const suggestedResponse = analysisResponse.suggested_response || analysisResponse['Suggested Response'];
+                                        const suggestedResponse = analysisResponse.suggested_response || analysisResponse['Suggested Response'] || analysisResponse.suggestedResponse;
                                         console.log(`📤 Sending AI response to ${monitoringData.leadName}: "${suggestedResponse}"`);
                                         console.log(`🔍 Full analysis response:`, analysisResponse);
                                         
@@ -7214,7 +7214,7 @@ const processCallReplyWithAI = async (callId, messageText, leadName = null) => {
                 analysis: analysis,
                 isPositive: isPositive,
                 call_status: isPositive ? 'scheduling_initiated' : 'response_received',
-                suggested_response: analysis.suggested_response || analysis.suggestedResponse || 'Thank you for your response.'
+                suggested_response: analysis.suggested_response || analysis['Suggested Response'] || analysis.suggestedResponse || 'Thank you for your response.'
             };
         } else {
             console.error('❌ Failed to process reply with AI:', response.status);
