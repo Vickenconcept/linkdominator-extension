@@ -7026,15 +7026,46 @@ const checkForCallResponses = async () => {
                             if (aiResponse && aiResponse.suggested_response) {
                                 console.log(`📤 Sending AI response: "${aiResponse.suggested_response}"`);
                                 
-                                // Send the AI-generated response
-                                try {
-                                    await sendLinkedInMessage(
-                                        monitoringData,
-                                        aiResponse.suggested_response
-                                    );
-                                    console.log(`✅ AI response sent successfully to ${monitoringData.leadName}`);
-                                } catch (sendError) {
-                                    console.error(`❌ Error sending AI response:`, sendError);
+                                // Check if this is a positive response that should trigger calendar link
+                                if (aiResponse.analysis && aiResponse.analysis.isPositive && 
+                                    (aiResponse.analysis.intent === 'available' || aiResponse.analysis.intent === 'scheduling_request')) {
+                                    console.log(`📅 Positive response detected - generating calendar link for ${monitoringData.leadName}`);
+                                    
+                                    try {
+                                        // Generate calendar link
+                                        const calendarLink = `https://calendly.com/vicken-concept/30min`;
+                                        const schedulingMessage = `Perfect! I'd love to schedule a call with you. Please book a convenient time here: ${calendarLink}\n\nLooking forward to speaking with you!`;
+                                        
+                                        await sendLinkedInMessage(
+                                            monitoringData,
+                                            schedulingMessage
+                                        );
+                                        console.log(`✅ Calendar link sent successfully to ${monitoringData.leadName}`);
+                                    } catch (calendarError) {
+                                        console.error(`❌ Error sending calendar link:`, calendarError);
+                                        
+                                        // Fallback to regular AI response
+                                        try {
+                                            await sendLinkedInMessage(
+                                                monitoringData,
+                                                aiResponse.suggested_response
+                                            );
+                                            console.log(`✅ Fallback AI response sent successfully to ${monitoringData.leadName}`);
+                                        } catch (fallbackError) {
+                                            console.error(`❌ Error sending fallback AI response:`, fallbackError);
+                                        }
+                                    }
+                                } else {
+                                    // Send the regular AI-generated response
+                                    try {
+                                        await sendLinkedInMessage(
+                                            monitoringData,
+                                            aiResponse.suggested_response
+                                        );
+                                        console.log(`✅ AI response sent successfully to ${monitoringData.leadName}`);
+                                    } catch (sendError) {
+                                        console.error(`❌ Error sending AI response:`, sendError);
+                                    }
                                 }
                             } else {
                                 console.log(`⏭️ No AI response generated, skipping message send`);
@@ -7274,19 +7305,26 @@ const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => 
                                 }
                                 
                                 // Use the reliable isFromExtension detection
-                                // Additional check: exclude AI-generated messages that might be misclassified
-                                const isAIGeneratedMessage = text && (
-                                    text.includes('Hi Eleazar, thank you for') ||
-                                    text.includes('Would you like me to follow up') ||
-                                    text.includes('Could you please provide more information') ||
-                                    text.includes('Looking forward to hearing back from you') ||
-                                    text.includes('This will help me better accommodate') ||
-                                    text.includes('preferred time for a call') ||
-                                    text.includes('Thank you for your response') ||
-                                    text.includes('calendar booking link') ||
-                                    text.includes('I hope this message finds you well') ||
-                                    text.includes('I would love to learn more about your work')
-                                );
+        // Additional check: exclude AI-generated messages that might be misclassified
+        const isAIGeneratedMessage = text && (
+            text.includes('Hi Eleazar, thank you for') ||
+            text.includes('Would you like me to follow up') ||
+            text.includes('Could you please provide more information') ||
+            text.includes('Looking forward to hearing back from you') ||
+            text.includes('This will help me better accommodate') ||
+            text.includes('preferred time for a call') ||
+            text.includes('Thank you for your response') ||
+            text.includes('calendar booking link') ||
+            text.includes('I hope this message finds you well') ||
+            text.includes('I would love to learn more about your work') ||
+            text.includes('Thank you for your interest, Eleazar!') ||
+            text.includes('Are there any specific days or times that work best for you') ||
+            text.includes('Great! Let\'s schedule a call') ||
+            text.includes('Can you please send me your availability') ||
+            text.includes('Thank you for letting me know') ||
+            text.includes('Is there a better time for us to connect') ||
+            text.includes('Sure, let\'s schedule a call! When are you available?')
+        );
                                 
                                 const isFromLead = !isFromExtension && !isAIGeneratedMessage && text && text.trim().length > 0;
                                 
