@@ -6087,6 +6087,7 @@ self.analyzeLeadRepliesWithAI = async (connectionId, leadName) => {
                             message: latestReply.text,
                             leadName: leadName,
                             context: 'LinkedIn message response analysis',
+                            original_message: null, // Let backend fetch from database
                             call_id: callId || 'test_call_analysis'
                         })
         });
