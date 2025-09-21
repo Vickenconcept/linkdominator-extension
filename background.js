@@ -2802,8 +2802,8 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                             if (aiMessage !== 'No AI message generated yet' && 
                                 aiMessage !== arConnectionModel.message) {
                                 console.log('🤖 Using AI-generated message instead of hardcoded message');
-                                console.log('📝 Original message:', arConnectionModel.message);
-                                console.log('🤖 AI message:', aiMessage);
+                                // console.log('📝 Original message:', arConnectionModel.message);
+                                // console.log('🤖 AI message:', aiMessage);
                                 
                                 // Update the message to use AI-generated content
                                 arConnectionModel.message = aiMessage;
@@ -5968,9 +5968,13 @@ self.testEleazarAIAnalysis = async () => {
             const isPositiveFlag = aiAnalysis.isPositive || aiAnalysis['Is Positive'];
             
             const isPositive = (isPositiveFlag === true) || 
-                              (intent && intent.toLowerCase().includes('interested')) ||
-                              (sentiment && sentiment.toLowerCase().includes('positive')) ||
-                              (leadScore && leadScore >= 8);
+                              (intent && (
+                                  intent.toLowerCase() === 'available' ||
+                                  intent.toLowerCase() === 'interested' ||
+                                  intent.toLowerCase() === 'scheduling_request'
+                              )) ||
+                              (sentiment && sentiment.toLowerCase() === 'positive') ||
+                              (leadScore && leadScore >= 7);
             
             console.log(`📊 Analysis for "${reply.text}":`);
             console.log(`   - Intent: ${aiAnalysis.intent || aiAnalysis.Intent || 'Unknown'}`);
@@ -6106,15 +6110,21 @@ self.analyzeLeadRepliesWithAI = async (connectionId, leadName) => {
         const isPositiveFlag = aiAnalysis.isPositive || aiAnalysis['Is Positive'];
         
         const isPositive = isPositiveFlag || 
-                          (intent && intent.toLowerCase().includes('interested')) ||
-                          (sentiment && sentiment.toLowerCase().includes('positive')) ||
+                          (intent && (
+                              intent.toLowerCase() === 'available' ||
+                              intent.toLowerCase() === 'interested' ||
+                              intent.toLowerCase() === 'scheduling_request'
+                          )) ||
+                          (sentiment && sentiment.toLowerCase() === 'positive') ||
                           (leadScore && leadScore >= 7);
         
         console.log(`🎯 Response Analysis:`);
         console.log(`   - Intent: ${intent || 'Unknown'}`);
         console.log(`   - Sentiment: ${sentiment || 'Unknown'}`);
         console.log(`   - Lead Score: ${leadScore || 'Unknown'}`);
-        console.log(`   - Is Positive: ${isPositive}`);
+        console.log(`   - Is Positive Flag: ${isPositiveFlag}`);
+        console.log(`   - Is Positive (calculated): ${isPositive}`);
+        console.log(`   - Analysis Object:`, JSON.stringify(aiAnalysis, null, 2));
         
         if (isPositive) {
             console.log('🎉 POSITIVE RESPONSE DETECTED! Generating calendar link...');
@@ -7020,6 +7030,24 @@ const checkForCallResponses = async () => {
                             console.log(`   - We were not the last to respond: ${!(monitoringData.lastResponseSentAt && monitoringData.lastResponseSentAt > latestMessage.timestamp)}`);
                             console.log(`   - Under response limit: ${!(monitoringData.responseCount && monitoringData.responseCount >= maxResponses)}`);
                             
+                            // Additional check: don't respond to messages sent by the extension itself
+                            const messageAge = Date.now() - latestMessage.timestamp;
+                            const isRecentMessage = messageAge < 10000; // 10 seconds
+                            const isLikelyAIMessage = latestMessage.text && (
+                                latestMessage.text.includes('I\'d be happy to') ||
+                                latestMessage.text.includes('Looking forward to') ||
+                                latestMessage.text.includes('Great!') ||
+                                latestMessage.text.includes('Thank you for your') ||
+                                latestMessage.text.includes('booked a time') ||
+                                latestMessage.text.includes('calendar') ||
+                                latestMessage.text.includes('specific information')
+                            );
+                            
+                            if (isRecentMessage && isLikelyAIMessage) {
+                                console.log(`⚠️ Skipping response - message appears to be from AI (sent ${Math.round(messageAge / 1000)}s ago)`);
+                                continue;
+                            }
+                            
                             // Process the call reply with AI
                             const aiResponse = await processCallReplyWithAI(monitoringData.callId, latestMessage.text, monitoringData.leadName);
                             
@@ -7027,8 +7055,13 @@ const checkForCallResponses = async () => {
                                 console.log(`📤 Sending AI response: "${aiResponse.suggested_response}"`);
                                 
                                 // Check if this is a positive response that should trigger calendar link
-                                if (aiResponse.analysis && aiResponse.analysis.isPositive && 
-                                    (aiResponse.analysis.intent === 'available' || aiResponse.analysis.intent === 'scheduling_request')) {
+                                if (aiResponse.isPositive || 
+                                    (aiResponse.analysis && (
+                                        aiResponse.analysis.intent === 'available' || 
+                                        aiResponse.analysis.intent === 'interested' ||
+                                        aiResponse.analysis.intent === 'scheduling_request' ||
+                                        aiResponse.analysis.sentiment === 'positive'
+                                    ))) {
                                     console.log(`📅 Positive response detected - generating calendar link for ${monitoringData.leadName}`);
                                     
                                     try {
@@ -7307,6 +7340,7 @@ const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => 
                                 // Use the reliable isFromExtension detection
         // Additional check: exclude AI-generated messages that might be misclassified
         const isAIGeneratedMessage = text && (
+            // Original patterns
             text.includes('Hi Eleazar, thank you for') ||
             text.includes('Would you like me to follow up') ||
             text.includes('Could you please provide more information') ||
@@ -7323,18 +7357,55 @@ const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => 
             text.includes('Can you please send me your availability') ||
             text.includes('Thank you for letting me know') ||
             text.includes('Is there a better time for us to connect') ||
-            text.includes('Sure, let\'s schedule a call! When are you available?')
+            text.includes('Sure, let\'s schedule a call! When are you available?') ||
+            // New AI response patterns
+            text.includes('Sure! I\'d be happy to share more details') ||
+            text.includes('What specific information are you looking for') ||
+            text.includes('Great! I\'ve booked a time on your calendar') ||
+            text.includes('Looking forward to our conversation') ||
+            text.includes('Great! I will go ahead and book a time') ||
+            text.includes('works for both of us') ||
+            text.includes('Thanks for your willingness to share more details') ||
+            text.includes('I\'m looking for information on your recent projects') ||
+            text.includes('Could you provide some insights on that') ||
+            text.includes('Perfect! I\'d love to schedule a call with you') ||
+            text.includes('Please book a convenient time here') ||
+            text.includes('Looking forward to speaking with you') ||
+            // Generic AI response patterns
+            text.includes('I\'d be happy to') ||
+            text.includes('Looking forward to') ||
+            text.includes('Thank you for your') ||
+            text.includes('Great!') && text.includes('schedule') ||
+            text.includes('booked a time') ||
+            text.includes('calendar') && text.includes('link') ||
+            text.includes('convenient time') ||
+            text.includes('specific information') ||
+            text.includes('recent projects') ||
+            text.includes('insights on that')
         );
                                 
-                                const isFromLead = !isFromExtension && !isAIGeneratedMessage && text && text.trim().length > 0;
+                                // Additional check: if message was sent very recently and matches AI patterns, it's likely from AI
+                                const messageAge = Date.now() - msg.createdAt;
+                                const isRecentAIMessage = messageAge < 30000 && isAIGeneratedMessage; // 30 seconds
+                                
+                                const isFromLead = !isFromExtension && !isAIGeneratedMessage && !isRecentAIMessage && text && text.trim().length > 0;
                                 
                                 console.log('🔍 Sender detection details:');
                                 console.log('   - sender:', sender);
                                 console.log('   - senderEntityUrn:', senderEntityUrn);
                                 console.log('   - isFromExtension:', isFromExtension);
                                 console.log('   - isAIGeneratedMessage:', isAIGeneratedMessage);
+                                console.log('   - isRecentAIMessage:', isRecentAIMessage);
+                                console.log('   - messageAge:', Math.round(messageAge / 1000) + ' seconds ago');
                                 console.log('   - isFromLead:', isFromLead);
                                 console.log('   - text preview:', text.substring(0, 50) + '...');
+                                
+                                if (isAIGeneratedMessage) {
+                                    console.log('🤖 Message filtered as AI-generated');
+                                }
+                                if (isRecentAIMessage) {
+                                    console.log('🤖 Message filtered as recent AI message');
+                                }
                                 
                                 console.log(`📝 Processed message ${index + 1}: "${text}" from ${sender}`);
                                 
@@ -7706,23 +7777,30 @@ const processCallReplyWithAI = async (callId, messageText, leadName = null) => {
                     return null;
                 }
             
-            // Determine if response is positive based on analysis
+            // Determine if response is positive based on new AI analysis
             const analysis = result.analysis || {};
             const intent = analysis.intent || analysis.Intent;
             const sentiment = analysis.sentiment || analysis.Sentiment;
             const leadScore = analysis.leadScore || analysis['Lead Score'] || analysis.lead_score;
             const isPositiveFlag = analysis.isPositive || analysis['Is Positive'];
             
+            // Updated logic for new AI analysis - check for positive intents and sentiment
             const isPositive = (isPositiveFlag === true) || 
-                              (intent && intent.toLowerCase().includes('interested')) ||
-                              (sentiment && sentiment.toLowerCase().includes('positive')) ||
-                              (leadScore && leadScore >= 8);
+                              (intent && (
+                                  intent.toLowerCase() === 'available' ||
+                                  intent.toLowerCase() === 'interested' ||
+                                  intent.toLowerCase() === 'scheduling_request'
+                              )) ||
+                              (sentiment && sentiment.toLowerCase() === 'positive') ||
+                              (leadScore && leadScore >= 7);
             
             console.log(`🎯 Response Analysis:`);
             console.log(`   - Intent: ${intent || 'Unknown'}`);
             console.log(`   - Sentiment: ${sentiment || 'Unknown'}`);
             console.log(`   - Lead Score: ${leadScore || 'Unknown'}`);
-            console.log(`   - Is Positive: ${isPositive}`);
+            console.log(`   - Is Positive Flag: ${isPositiveFlag}`);
+            console.log(`   - Is Positive (calculated): ${isPositive}`);
+            console.log(`   - Analysis Object:`, JSON.stringify(analysis, null, 2));
             
             return {
                 hasResponse: true,
