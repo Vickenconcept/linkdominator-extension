@@ -7048,6 +7048,17 @@ const checkForCallResponses = async () => {
                                 continue;
                             }
                             
+                            // Store the lead's message in conversation history
+                            await storeConversationMessage({
+                                call_id: monitoringData.callId,
+                                message: latestMessage.text,
+                                sender: 'lead',
+                                message_type: 'text',
+                                lead_name: monitoringData.leadName,
+                                connection_id: monitoringData.connectionId,
+                                conversation_urn_id: monitoringData.conversationUrnId
+                            });
+
                             // Process the call reply with AI
                             const aiResponse = await processCallReplyWithAI(monitoringData.callId, latestMessage.text, monitoringData.leadName);
                             
@@ -7073,6 +7084,19 @@ const checkForCallResponses = async () => {
                                             monitoringData,
                                             schedulingMessage
                                         );
+                                        
+                                        // Store the AI response with calendar link in conversation history
+                                        await storeConversationMessage({
+                                            call_id: monitoringData.callId,
+                                            message: schedulingMessage,
+                                            sender: 'ai',
+                                            message_type: 'calendar_link',
+                                            ai_analysis: aiResponse.analysis,
+                                            lead_name: monitoringData.leadName,
+                                            connection_id: monitoringData.connectionId,
+                                            conversation_urn_id: monitoringData.conversationUrnId
+                                        });
+                                        
                                         console.log(`✅ Calendar link sent successfully to ${monitoringData.leadName}`);
                                     } catch (calendarError) {
                                         console.error(`❌ Error sending calendar link:`, calendarError);
@@ -7083,6 +7107,19 @@ const checkForCallResponses = async () => {
                                                 monitoringData,
                                                 aiResponse.suggested_response
                                             );
+                                            
+                                            // Store the fallback AI response in conversation history
+                                            await storeConversationMessage({
+                                                call_id: monitoringData.callId,
+                                                message: aiResponse.suggested_response,
+                                                sender: 'ai',
+                                                message_type: 'ai_response',
+                                                ai_analysis: aiResponse.analysis,
+                                                lead_name: monitoringData.leadName,
+                                                connection_id: monitoringData.connectionId,
+                                                conversation_urn_id: monitoringData.conversationUrnId
+                                            });
+                                            
                                             console.log(`✅ Fallback AI response sent successfully to ${monitoringData.leadName}`);
                                         } catch (fallbackError) {
                                             console.error(`❌ Error sending fallback AI response:`, fallbackError);
@@ -7095,6 +7132,19 @@ const checkForCallResponses = async () => {
                                             monitoringData,
                                             aiResponse.suggested_response
                                         );
+                                        
+                                        // Store the AI response in conversation history
+                                        await storeConversationMessage({
+                                            call_id: monitoringData.callId,
+                                            message: aiResponse.suggested_response,
+                                            sender: 'ai',
+                                            message_type: 'ai_response',
+                                            ai_analysis: aiResponse.analysis,
+                                            lead_name: monitoringData.leadName,
+                                            connection_id: monitoringData.connectionId,
+                                            conversation_urn_id: monitoringData.conversationUrnId
+                                        });
+                                        
                                         console.log(`✅ AI response sent successfully to ${monitoringData.leadName}`);
                                     } catch (sendError) {
                                         console.error(`❌ Error sending AI response:`, sendError);
@@ -9007,4 +9057,56 @@ async function clearCampaignDedupeFlags(campaignId) {
 
 // Clear dedupe flags for campaign 100 to allow retry (for testing)
 // clearCampaignDedupeFlags(100);
+
+// Function to store conversation message in call_status table
+async function storeConversationMessage(messageData) {
+    try {
+        console.log('💾 Storing conversation message:', messageData);
+        
+        const response = await fetch(`${PLATFORM_URL}/api/calls/conversation/store`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'lk-id': 'vicken-concept',
+                'csrf-token': await getCSRFToken()
+            },
+            body: JSON.stringify(messageData)
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        console.log('✅ Conversation message stored:', data);
+        return data;
+    } catch (error) {
+        console.error('❌ Error storing conversation message:', error);
+        return null;
+    }
+}
+
+// Function to get conversation history
+async function getConversationHistory(callId) {
+    try {
+        const response = await fetch(`${PLATFORM_URL}/api/calls/${callId}/conversation`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                'lk-id': 'vicken-concept',
+                'csrf-token': await getCSRFToken()
+            }
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        return data;
+    } catch (error) {
+        console.error('Error getting conversation history:', error);
+        return null;
+    }
+}
 
