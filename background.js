@@ -5852,7 +5852,8 @@ self.testBackendAPI = async () => {
             body: JSON.stringify({
                 message: 'Hi, William',
                 leadName: 'Eleazar Nzerem',
-                context: 'LinkedIn message response analysis'
+                context: 'LinkedIn message response analysis',
+                call_id: 'test_call_123'
             })
         });
         
@@ -5931,7 +5932,8 @@ self.testEleazarAIAnalysis = async () => {
                 body: JSON.stringify({
                     message: reply.text,
                     leadName: 'Eleazar Nzerem',
-                    context: 'LinkedIn message response analysis'
+                    context: 'LinkedIn message response analysis',
+                    call_id: 'test_direct_conversation'
                 })
             });
             
@@ -6084,7 +6086,8 @@ self.analyzeLeadRepliesWithAI = async (connectionId, leadName) => {
                         body: JSON.stringify({
                             message: latestReply.text,
                             leadName: leadName,
-                            context: 'LinkedIn message response analysis'
+                            context: 'LinkedIn message response analysis',
+                            call_id: callId || 'test_call_analysis'
                         })
         });
         
@@ -7767,7 +7770,8 @@ const processCallReplyWithAI = async (callId, messageText, leadName = null) => {
         const requestBody = {
             message: messageText,
             leadName: leadName || 'LinkedIn Lead',
-            context: 'LinkedIn message response analysis'
+            context: 'LinkedIn message response analysis',
+            call_id: callId
         };
         
         console.log('🔍 DEBUG: API Request Details:');
@@ -9063,12 +9067,19 @@ async function storeConversationMessage(messageData) {
     try {
         console.log('💾 Storing conversation message:', messageData);
         
+        // Get CSRF token
+        const tokenResult = await chrome.storage.local.get(['csrfToken']);
+        if (!tokenResult.csrfToken) {
+            console.error('❌ No CSRF token found for conversation storage');
+            return null;
+        }
+        
         const response = await fetch(`${PLATFORM_URL}/api/calls/conversation/store`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'lk-id': 'vicken-concept',
-                'csrf-token': await getCSRFToken()
+                'csrf-token': tokenResult.csrfToken
             },
             body: JSON.stringify(messageData)
         });
@@ -9089,12 +9100,19 @@ async function storeConversationMessage(messageData) {
 // Function to get conversation history
 async function getConversationHistory(callId) {
     try {
+        // Get CSRF token
+        const tokenResult = await chrome.storage.local.get(['csrfToken']);
+        if (!tokenResult.csrfToken) {
+            console.error('❌ No CSRF token found for conversation history');
+            return null;
+        }
+        
         const response = await fetch(`${PLATFORM_URL}/api/calls/${callId}/conversation`, {
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json',
                 'lk-id': 'vicken-concept',
-                'csrf-token': await getCSRFToken()
+                'csrf-token': tokenResult.csrfToken
             }
         });
 
