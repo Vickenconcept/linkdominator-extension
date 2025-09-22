@@ -2643,6 +2643,10 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
     console.log('⏰ Node delay:', nodeModel.delayInMinutes || 0, 'minutes');
     console.log('🔧 Full node model:', nodeModel);
     
+    // Get LinkedIn ID from storage or use fallback
+    const linkedinIdResult = await chrome.storage.local.get(['linkedinId']);
+    const currentLinkedInId = linkedinIdResult.linkedinId || 'vicken-concept';
+    
     // Check if campaign is completed or stopped before processing
     if (currentCampaign.status === 'completed' || currentCampaign.status === 'stop') {
         console.log('⏹️ Campaign is completed or stopped, skipping sequence execution');
@@ -2757,7 +2761,7 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                             attempts++;
                             console.log(`🔍 AI message poll attempt ${attempts}/${maxAttempts}`);
                             
-                            const currentLinkedInId = linkedinId || 'vicken-concept';
+                            // currentLinkedInId is already defined at function level
                             console.log('🔍 Using LinkedIn ID for polling:', currentLinkedInId);
                             
                             const messageResponse = await fetch(`${PLATFORM_URL}/api/calls/${callId}/message`, {
@@ -6513,9 +6517,13 @@ self.setupResponseMonitoringForAcceptedConnections = async () => {
     console.log('🔧 Setting up response monitoring for all accepted connections...');
     
     try {
+        // Get LinkedIn ID from storage or use fallback
+        const linkedinIdResult = await chrome.storage.local.get(['linkedinId']);
+        const currentLinkedInId = linkedinIdResult.linkedinId || 'vicken-concept';
+        
         // Get all campaigns and their accepted leads
         const campaignsResponse = await fetch(`${PLATFORM_URL}/api/campaigns`, {
-            headers: { 'lk-id': linkedinId || 'vicken-concept' }
+            headers: { 'lk-id': currentLinkedInId }
         });
         
         if (!campaignsResponse.ok) {
@@ -6534,7 +6542,7 @@ self.setupResponseMonitoringForAcceptedConnections = async () => {
                 
                 // Get leads for this campaign
                 const leadsResponse = await fetch(`${PLATFORM_URL}/api/campaign/${campaign.id}/leads`, {
-                    headers: { 'lk-id': linkedinId || 'vicken-concept' }
+                    headers: { 'lk-id': currentLinkedInId }
                 });
                 
                 if (leadsResponse.ok) {
@@ -6653,11 +6661,15 @@ self.simulateCallResponse = async (callId, message, isPositive = true) => {
     console.log('🧪 SIMULATING CALL RESPONSE for testing...');
     
     try {
+        // Get LinkedIn ID from storage or use fallback
+        const linkedinIdResult = await chrome.storage.local.get(['linkedinId']);
+        const currentLinkedInId = linkedinIdResult.linkedinId || 'vicken-concept';
+        
         const response = await fetch(`${PLATFORM_URL}/api/calls/process-reply`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'lk-id': linkedinId || 'vicken-concept'
+                'lk-id': currentLinkedInId
             },
             body: JSON.stringify({
                 call_id: callId,
@@ -6757,6 +6769,10 @@ const checkForCallResponses = async () => {
 >>>>>>> Stashed changes
     
     try {
+        // Get LinkedIn ID from storage or use fallback
+        const linkedinIdResult = await chrome.storage.local.get(['linkedinId']);
+        const currentLinkedInId = linkedinIdResult.linkedinId || 'vicken-concept';
+        
         // Get all response monitoring keys
         const allStorage = await chrome.storage.local.get();
         const responseKeys = Object.keys(allStorage).filter(key => key.startsWith('call_response_monitoring_'));
@@ -6974,7 +6990,7 @@ const checkForCallResponses = async () => {
                                             method: 'POST',
                                             headers: {
                                                 'Content-Type': 'application/json',
-                                                'lk-id': linkedinId || 'vicken-concept'
+                                                'lk-id': currentLinkedInId
                                             }
                                         });
 <<<<<<< Updated upstream
@@ -7385,7 +7401,7 @@ const checkForCallResponses = async () => {
                                             method: 'POST',
                                             headers: {
                                                 'Content-Type': 'application/json',
-                                                'lk-id': linkedinId || 'vicken-concept'
+                                                'lk-id': currentLinkedInId
                                             }
                                         });
 
@@ -8053,6 +8069,15 @@ const processCallReplyWithAI = async (callId, messageText, leadName = null) => {
         console.log(`🎯 Analyzing message from: ${leadName || 'Unknown Lead'}`);
         
         // CSRF token not needed for API routes
+<<<<<<< Updated upstream
+=======
+        
+        // Get LinkedIn ID from storage or use fallback
+        const linkedinIdResult = await chrome.storage.local.get(['linkedinId']);
+        const currentLinkedInId = linkedinIdResult.linkedinId || 'vicken-concept';
+        
+        console.log('🔍 Using LinkedIn ID for AI analysis:', currentLinkedInId);
+>>>>>>> Stashed changes
         
         // Get connection_id and conversation_urn_id from monitoring data
         let connectionId = null;
@@ -8085,7 +8110,7 @@ const processCallReplyWithAI = async (callId, messageText, leadName = null) => {
         // console.log('   - Method: POST');
         // console.log('   - Headers:', {
         //         'Content-Type': 'application/json',
-        //         'lk-id': linkedinId || 'vicken-concept',
+        //         'lk-id': currentLinkedInId,
         //         'csrf-token': tokenResult.csrfToken ? tokenResult.csrfToken.substring(0, 20) + '...' : 'MISSING'
         //     });
         // console.log('   - Body:', requestBody);
@@ -8103,7 +8128,11 @@ const processCallReplyWithAI = async (callId, messageText, leadName = null) => {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
+<<<<<<< Updated upstream
                 'lk-id': linkedinId || 'vicken-concept'
+=======
+                'lk-id': currentLinkedInId
+>>>>>>> Stashed changes
             },
 <<<<<<< Updated upstream
             body: JSON.stringify(requestBody)
@@ -8238,7 +8267,7 @@ const processPositiveCallResponse = async (monitoringData, responseData) => {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'lk-id': linkedinId || 'vicken-concept'
+                'lk-id': currentLinkedInId
             },
             body: JSON.stringify({
                 leadId: monitoringData.leadId,
