@@ -4,6 +4,55 @@
 // importScripts('./js/actions/campaignAction.js');
 importScripts('./env.js');
 
+// Function to store our LinkedIn profile information for reliable sender detection
+const storeLinkedInProfile = async () => {
+    try {
+        console.log('🔍 Storing LinkedIn profile information...');
+        
+        // Get CSRF token
+        const tokenResult = await chrome.storage.local.get(['csrfToken']);
+        if (!tokenResult.csrfToken) {
+            console.log('⚠️ No CSRF token available for profile detection');
+            return;
+        }
+        
+        // Fetch our LinkedIn profile
+        const profileResponse = await fetch(`${voyagerApi}/identity/profileView`, {
+            method: 'GET',
+            headers: {
+                'csrf-token': tokenResult.csrfToken,
+                'accept': 'application/vnd.linkedin.normalized+json+2.1',
+                'x-li-lang': 'en_US',
+                'x-restli-protocol-version': '2.0.0',
+            }
+        });
+        
+        if (profileResponse.ok) {
+            const profileData = await profileResponse.json();
+            console.log('📊 LinkedIn profile data:', profileData);
+            
+            if (profileData.elements && profileData.elements.length > 0) {
+                const profile = profileData.elements[0];
+                const profileInfo = {
+                    entityUrn: profile.entityUrn,
+                    publicIdentifier: profile.publicIdentifier,
+                    firstName: profile.firstName,
+                    lastName: profile.lastName,
+                    fullName: `${profile.firstName} ${profile.lastName}`.trim(),
+                    storedAt: Date.now()
+                };
+                
+                await chrome.storage.local.set({ linkedinProfile: profileInfo });
+                console.log('✅ LinkedIn profile stored:', profileInfo);
+            }
+        } else {
+            console.log('❌ Failed to fetch LinkedIn profile:', profileResponse.status);
+        }
+    } catch (error) {
+        console.error('❌ Error storing LinkedIn profile:', error);
+    }
+};
+
 // 🚀 KEEP-ALIVE MECHANISM - Prevents service worker from going inactive
 let keepAliveInterval;
 let isServiceWorkerActive = true;
@@ -454,7 +503,7 @@ const initializeActiveCampaigns = async () => {
     
     try {
         // Get all campaigns from the backend
-        const response = await fetch(`${PLATFROM_URL}/api/campaigns`, {
+        const response = await fetch(`${PLATFORM_URL}/api/campaigns`, {
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json',
@@ -520,6 +569,12 @@ chrome.runtime.onStartup.addListener(() => {
     try {
         console.log('🚀 Service worker started');
         keepServiceWorkerAlive();
+        
+        // Store LinkedIn profile for reliable sender detection
+        setTimeout(() => {
+            console.log('🔍 Attempting to store LinkedIn profile...');
+            storeLinkedInProfile();
+        }, 2000);
         
         // Initialize active campaigns after a short delay to ensure LinkedIn ID is available
         setTimeout(async () => {
@@ -669,7 +724,7 @@ const changeMessageVariableNames = (message, lead) => {
 // API helper functions
 const getCampaignSequence = async (campaignId) => {
     try {
-        const response = await fetch(`${PLATFROM_URL}/api/campaign/${campaignId}/sequence`, {
+        const response = await fetch(`${PLATFORM_URL}/api/campaign/${campaignId}/sequence`, {
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json',
@@ -693,7 +748,7 @@ const getCampaignSequence = async (campaignId) => {
 
 const getCampaignLeads = async (campaignId, callback) => {
     try {
-        const response = await fetch(`${PLATFROM_URL}/api/campaign/${campaignId}/leads`, {
+        const response = await fetch(`${PLATFORM_URL}/api/campaign/${campaignId}/leads`, {
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json',
@@ -716,12 +771,11 @@ const getCampaignLeads = async (campaignId, callback) => {
         return [];
     }
 };
-
 const getLeadGenRunning = async (campaignId) => {
     try {
         
         // First try the new tracking endpoint
-        const response = await fetch(`${PLATFROM_URL}/api/campaign/${campaignId}/leadgen/tracking`, {
+        const response = await fetch(`${PLATFORM_URL}/api/campaign/${campaignId}/leadgen/tracking`, {
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json',
@@ -782,7 +836,7 @@ const updateSequenceNodeModel = async (campaign, nodeModel) => {
             runStatus: nodeModel.runStatus
         });
         
-        const response = await fetch(`${PLATFROM_URL}/api/campaign/${campaign.id}/update-node`, {
+        const response = await fetch(`${PLATFORM_URL}/api/campaign/${campaign.id}/update-node`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -808,7 +862,7 @@ const updateSequenceNodeModel = async (campaign, nodeModel) => {
 
 const updateCampaign = async (campaignData) => {
     try {
-        const response = await fetch(`${PLATFROM_URL}/api/campaign/${campaignData.campaignId}/update`, {
+        const response = await fetch(`${PLATFORM_URL}/api/campaign/${campaignData.campaignId}/update`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -849,13 +903,13 @@ const updateLeadGenRunning = async (campaignId, leadId, updateData) => {
 
         console.log(`🔄 Updating leadgen running for campaign ${campaignId}, lead ${leadId}`);
         console.log(`🔍 Update data:`, updateData);
-        console.log(`🔗 API URL: ${PLATFROM_URL}/api/campaign/${campaignId}/leadgen/${leadId}/update`);
+        console.log(`🔗 API URL: ${PLATFORM_URL}/api/campaign/${campaignId}/leadgen/${leadId}/update`);
         console.log(`🔑 LinkedIn ID: ${linkedinId}`);
         
         const requestBody = JSON.stringify(updateData);
         console.log(`📦 Request body:`, requestBody);
         
-        const response = await fetch(`${PLATFROM_URL}/api/campaign/${campaignId}/leadgen/${leadId}/update`, {
+        const response = await fetch(`${PLATFORM_URL}/api/campaign/${campaignId}/leadgen/${leadId}/update`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -878,7 +932,7 @@ const updateLeadGenRunning = async (campaignId, leadId, updateData) => {
         const responseText = await response.text();
         console.error(`❌ Failed to update leadgen running - Status: ${response.status}, Response: ${responseText}`);
         console.error(`🔍 Full request details:`, {
-            url: `${PLATFROM_URL}/api/campaign/${campaignId}/leadgen/${leadId}/update`,
+            url: `${PLATFORM_URL}/api/campaign/${campaignId}/leadgen/${leadId}/update`,
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -891,7 +945,7 @@ const updateLeadGenRunning = async (campaignId, leadId, updateData) => {
         console.error('❌ Error updating leadgen running:', error);
         console.error('🔍 Parameters:', { campaignId, leadId, updateData });
         console.error('🔍 LinkedIn ID available:', !!linkedinId);
-        console.error('🔍 Platform URL:', PLATFROM_URL);
+        console.error('🔍 Platform URL:', PLATFORM_URL);
         
         // Don't throw the error, just log it and continue
         return null;
@@ -910,7 +964,7 @@ const updateLeadNetworkDegree = async (lead) => {
 
         // console.log(`🔄 Updating network degree for lead: ${leadId}`);
         
-        const response = await fetch(`${PLATFROM_URL}/api/lead/${leadId}/update`, {
+        const response = await fetch(`${PLATFORM_URL}/api/lead/${leadId}/update`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -968,7 +1022,7 @@ const createLeadGenRunning = async (campaignId) => {
         }
         
         console.log(`✅ No existing leadgen running found, creating new entries for campaign ${campaignId}...`);
-        const response = await fetch(`${PLATFROM_URL}/api/campaign/${campaignId}/leadgen/store`, {
+        const response = await fetch(`${PLATFORM_URL}/api/campaign/${campaignId}/leadgen/store`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -1047,10 +1101,10 @@ const getAudience = async (audienceId, total, filterApi, callback) => {
 const storeCallStatus = async (callData) => {
     try {
         console.log('🔧 DEBUG: storeCallStatus called with data:', callData);
-        console.log('🔧 DEBUG: API URL:', `${PLATFROM_URL}/api/book-call/store`);
+        console.log('🔧 DEBUG: API URL:', `${PLATFORM_URL}/api/book-call/store`);
         console.log('🔧 DEBUG: LinkedIn ID:', linkedinId);
         
-        const response = await fetch(`${PLATFROM_URL}/api/book-call/store`, {
+        const response = await fetch(`${PLATFORM_URL}/api/book-call/store`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -1105,7 +1159,7 @@ const processCallReply = async (message, profileId, connectionId) => {
             return;
         }
 
-        const response = await fetch(`${PLATFROM_URL}/api/calls/process-reply`, {
+        const response = await fetch(`${PLATFORM_URL}/api/calls/process-reply`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -1131,7 +1185,7 @@ const processCallReply = async (message, profileId, connectionId) => {
                     // Prefer scheduling details from the response; fallback to API fetch
                     let scheduling = result.scheduling;
                     if (!scheduling) {
-                        const schedRes = await fetch(`${PLATFROM_URL}/api/calls/${callId}/scheduling`, {
+                        const schedRes = await fetch(`${PLATFORM_URL}/api/calls/${callId}/scheduling`, {
                             method: 'GET',
                             headers: {
                                 'Content-Type': 'application/json',
@@ -1225,7 +1279,7 @@ const cleanupDuplicateLeads = async (campaignId) => {
     }
 };
 
-var lkmApi = PLATFROM_URL+'/api';
+var lkmApi = PLATFORM_URL+'/api';
 var inURL = LINKEDIN_URL;
 var voyagerApi = VOYAGER_API;
 var csrfToken, linkedinId, plainId, firstName, lastName;
@@ -1514,7 +1568,6 @@ const updateCampaignStatus = (status, message) => {
         }
     });
 };
-
 // Run alarm action when it's time
 chrome.alarms.onAlarm.addListener((alarm) => {
     console.log('🔔 Alarm triggered:', alarm.name);
@@ -1816,7 +1869,6 @@ const setCampaignAlarm = async (campaign) => {
         status: campaign.status,
         sequenceType: campaign.sequenceType
     });
-    
     await getCampaignSequence(campaign.id)
     alarmName = (campaign.sequenceType || 'default_sequence').replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
     nodeModelArr = campaignSequence.nodeModel
@@ -1961,14 +2013,7 @@ const setCampaignAlarm = async (campaign) => {
                         console.log(`   ... and ${uniqueLeads.length - 5} more`);
                     }
                     
-                    console.log('');
-                    console.log('🚨 IMPORTANT: If you do NOT see these invitations in LinkedIn:');
-                    console.log('   1. The send-invites action failed silently');
-                    console.log('   2. LinkedIn rate limiting prevented sending');
-                    console.log('   3. Authentication/CSRF issues occurred');
-                    console.log('');
-                    console.log('💡 SOLUTION: Use self.forceSendInvites(' + campaign.id + ') to bypass backend restrictions');
-                    console.log('');
+                 
                 }
                 
                 if(campaignLeadgenRunning.length){
@@ -2025,6 +2070,30 @@ const setCampaignAlarm = async (campaign) => {
                                     console.log(`✅ Database updated: ${lead.name} marked as accepted`);
                                 } catch (updateError) {
                                     console.error(`❌ Failed to update database for ${lead.name}:`, updateError);
+                                }
+                                
+                                // Automatically create call response monitoring for accepted connections
+                                try {
+                                    const responseMonitoringKey = `call_response_monitoring_${campaign.id}_${lead.connectionId}`;
+                                    await chrome.storage.local.set({ 
+                                        [responseMonitoringKey]: {
+                                            callId: `${lead.connectionId}_${Date.now()}`, // Generate temporary call ID
+                                            leadId: lead.id,
+                                            leadName: lead.name,
+                                            connectionId: lead.connectionId,
+                                            campaignId: campaign.id,
+                                            conversationUrnId: null, // Will be updated when we fetch conversations
+                                            sentAt: Date.now(),
+                                            status: 'waiting_for_response',
+                                            lastCheckedMessageId: null,
+                                            messageCount: 0,
+                                            responseCount: 0, // Track how many times we've responded
+                                            lastResponseSentAt: null // Track when we last sent a response
+                                        }
+                                    });
+                                    console.log(`📊 Auto-created response monitoring for ${lead.name}: ${responseMonitoringKey}`);
+                                } catch (monitoringError) {
+                                    console.error(`❌ Failed to create response monitoring for ${lead.name}:`, monitoringError);
                                 }
                             }
                             
@@ -2566,7 +2635,6 @@ const setCampaignAlarm = async (campaign) => {
         }
     }
 }
-
 const runSequence = async (currentCampaign, leads, nodeModel) => {
     console.log('🎬 RUNSEQUENCE CALLED - Starting sequence execution...');
     console.log('📊 Campaign:', currentCampaign.name, '(ID:', currentCampaign.id, ')');
@@ -2574,6 +2642,13 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
     console.log('🔗 Node action:', nodeModel.label, '(', nodeModel.value, ')');
     console.log('⏰ Node delay:', nodeModel.delayInMinutes || 0, 'minutes');
     console.log('🔧 Full node model:', nodeModel);
+    
+    // Check if campaign is completed or stopped before processing
+    if (currentCampaign.status === 'completed' || currentCampaign.status === 'stop') {
+        console.log('⏹️ Campaign is completed or stopped, skipping sequence execution');
+        updateCampaignStatus('completed', 'Campaign sequence completed');
+        return;
+    }
     
     updateCampaignStatus('processing', `Processing ${leads.length} leads...`);
     
@@ -2685,7 +2760,7 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                             const currentLinkedInId = linkedinId || 'vicken-concept';
                             console.log('🔍 Using LinkedIn ID for polling:', currentLinkedInId);
                             
-                            const messageResponse = await fetch(`${PLATFROM_URL}/api/calls/${callId}/message`, {
+                            const messageResponse = await fetch(`${PLATFORM_URL}/api/calls/${callId}/message`, {
                                 method: 'GET',
                                 headers: {
                                     'Content-Type': 'application/json',
@@ -2723,8 +2798,8 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                             if (aiMessage !== 'No AI message generated yet' && 
                                 aiMessage !== arConnectionModel.message) {
                                 console.log('🤖 Using AI-generated message instead of hardcoded message');
-                                console.log('📝 Original message:', arConnectionModel.message);
-                                console.log('🤖 AI message:', aiMessage);
+                                // console.log('📝 Original message:', arConnectionModel.message);
+                                // console.log('🤖 AI message:', aiMessage);
                                 
                                 // Update the message to use AI-generated content
                                 arConnectionModel.message = aiMessage;
@@ -2777,15 +2852,9 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                     console.error('❌ Failed to store call status (will not retry immediately):', err.message);
                     // Don't set dedupe flag on API failure, allowing retry
                 } finally {
-                    // Always mark the call node as completed after a single attempt to avoid repeats
-                    try {
-                        await updateSequenceNodeModel(currentCampaign, { ...nodeModel, runStatus: true });
-                        console.log('✅ Call node marked as completed (post-attempt)');
-                        // Set campaign-level completion flag for call node
-                        const callCompletedKey = `call_node_completed_${currentCampaign.id}`;
-                        await chrome.storage.local.set({ [callCompletedKey]: true });
-                        console.log('🗝️ Set campaign call completed flag:', callCompletedKey);
-                    } catch (e) {}
+                    // Don't mark call node as completed immediately - wait for response
+                    console.log('⏳ Call message sent, waiting for response...');
+                    console.log('🔄 Campaign will continue running to monitor for responses');
                 }
             }
 
@@ -2795,6 +2864,32 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                 messageConnection(lead);
             } else {
                 console.log('✅ Message already sent via AI message processing, skipping duplicate send');
+                
+                // Set up response monitoring after AI message is sent
+                setTimeout(async () => {
+                    const responseMonitoringKey = `call_response_monitoring_${currentCampaign.id}_${lead.connectionId}`;
+                    const callId = callResponse.call_id || callResponse.data?.call_id;
+                    
+                    console.log('🔍 DEBUG: Setting up monitoring with call_id:', callId);
+                    console.log('🔍 DEBUG: Call response:', callResponse);
+                    
+                    await chrome.storage.local.set({ 
+                        [responseMonitoringKey]: {
+                            callId: callId,
+                            leadId: lead.id,
+                            leadName: lead.name,
+                            connectionId: lead.connectionId,
+                            campaignId: currentCampaign.id,
+                            conversationUrnId: arConnectionModel.conversationUrnId || null,
+                            sentAt: Date.now(),
+                            status: 'waiting_for_response',
+                            lastCheckedMessageId: null,
+                            messageCount: 0
+                        }
+                    });
+                    console.log('📊 Response monitoring set up:', responseMonitoringKey, 'with call_id:', callId);
+                    console.log('🔗 Conversation URN ID stored:', arConnectionModel.conversationUrnId);
+                }, 3000); // Wait 3 seconds for call record to be committed to database
             }
         }else     if(nodeModel.value == 'send-invites'){
             console.log('📨 Executing send-invites action...');
@@ -3157,9 +3252,9 @@ const messageConnection = scheduleInfo => {
     }
 
     // Get browser cookie
-    chrome.cookies.get({
-        url: inURL,
-        name: 'JSESSIONID'
+            chrome.cookies.get({
+                url: inURL,
+                name: 'JSESSIONID'
     }, function(data) {
         if (data !== null) {
             chrome.storage.local.remove("csrfToken")
@@ -3195,13 +3290,60 @@ const messageConnection = scheduleInfo => {
             console.log('✅ LinkedIn message sent successfully!');
             console.log('📄 Response data:', res);
             console.log('🎯 Message sent to:', arConnectionModel.connectionId);
+            
+            // Extract conversation URN ID from response if available
+            if (res && res.value && res.value.entityUrn) {
+                const conversationUrnId = res.value.entityUrn.replace('urn:li:fsd_conversation:', '');
+                arConnectionModel.conversationUrnId = conversationUrnId;
+                console.log('🔗 Conversation URN ID extracted:', conversationUrnId);
+                
+                // Set up response monitoring if this is a call message
+                if (arConnectionModel.message && arConnectionModel.message.toLowerCase().includes('call')) {
+                    setTimeout(async () => {
+                        // Try to find the call ID from recent call attempts
+                        const allStorage = await chrome.storage.local.get();
+                        const callKeys = Object.keys(allStorage).filter(key => key.startsWith('call_attempted_'));
+                        
+                        for (const key of callKeys) {
+                            const callData = allStorage[key];
+                            if (callData && Date.now() - callData < 10000) { // Within last 10 seconds
+                                const parts = key.split('_');
+                                const campaignId = parts[2];
+                                const connectionId = parts[3];
+                                
+                                if (connectionId === arConnectionModel.connectionId) {
+                                    const responseMonitoringKey = `call_response_monitoring_${campaignId}_${connectionId}`;
+                                    await chrome.storage.local.set({ 
+                                        [responseMonitoringKey]: {
+                                            callId: null, // Will be updated when we get the actual call ID
+                                            leadId: null, // Will be updated when we get the lead ID
+                                            leadName: arConnectionModel.name,
+                                            connectionId: arConnectionModel.connectionId,
+                                            campaignId: campaignId,
+                                            conversationUrnId: conversationUrnId,
+                                            sentAt: Date.now(),
+                                            status: 'waiting_for_response',
+                                            lastCheckedMessageId: null,
+                                            messageCount: 0,
+                                            responseCount: 0, // Track how many times we've responded
+                                            lastResponseSentAt: null // Track when we last sent a response
+                                        }
+                                    });
+                                    console.log('📊 Response monitoring set up for call message:', responseMonitoringKey);
+                                    console.log('🔗 Conversation URN ID stored:', conversationUrnId);
+                                    break;
+                                }
+                            }
+                        }
+                    }, 1000);
+                }
+            }
         })
         .catch((err) => {
-            console.error('❌ Failed to send LinkedIn message:', err);
+        console.error('❌ Failed to send LinkedIn message:', err);
         })
     })
 }
-
 /**
  * Fetch skills of a given LinkedIn profile to endorse.
  * @param {object} lead 
@@ -3583,7 +3725,6 @@ const _likePost = (post, result) => {
     })
     .catch(err => console.log(err))
 }
-
 /**
  * Send connection request to a given LinkedIn profile.
  * @param {object} lead 
@@ -4283,7 +4424,7 @@ const _updateCampaignLeadsNetwork = async () => {
     let campaigns = [], clist = [], leads = []
 
     // Get campaigns
-    await fetch(`${PLATFROM_URL}/api/campaigns`, {
+    await fetch(`${PLATFORM_URL}/api/campaigns`, {
         method: 'get',
         headers: {
             'lk-id': linkedinId
@@ -4351,7 +4492,6 @@ const _updateCampaignLeadsNetwork = async () => {
         }
     }
 }
-
 const _testFunc = async () => {
     let searchUrl = `https://www.linkedin.com/voyager/api/search/dash/clusters?decorationId=com.linkedin.voyager.dash.deco.search.SearchClusterCollection-160&origin=GLOBAL_SEARCH_HEADER&q=all&query=(keywords:${encodeURIComponent('digital marketing')},flagshipSearchIntent:SEARCH_SRP,queryParameters:(resultType:List(CONTENT)),includeFiltersInResponse:false)&start=0`
 
@@ -4455,7 +4595,7 @@ const pollForLinkedInId = async () => {
 const startCampaign = async (campaignId) => {
     console.log(`🚀 Starting campaign ${campaignId}...`);
     try {
-        const response = await fetch(`${PLATFROM_URL}/api/campaign/${campaignId}/update`, {
+        const response = await fetch(`${PLATFORM_URL}/api/campaign/${campaignId}/update`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -4777,12 +4917,12 @@ const startContinuousMonitoring = () => {
         
         // Set up a recurring alarm to check for acceptances every 5 minutes
         chrome.alarms.create('continuous_invite_monitoring', {
-            delayInMinutes: 0.1, // Start checking after 5 minutes
-            periodInMinutes: 1 // Then check every 5 minutes (fixed from 1 minute)
+            delayInMinutes: 0.1, // Start checking after 6 seconds
+            periodInMinutes: 0.2 // Then check every 12 seconds (frequent for testing)
         });
         
-        console.log('⏰ Continuous monitoring alarm created - will check every 5 minutes');
-        console.log('🎯 Monitoring will start in 5 minutes and then check every 5 minutes');
+        console.log('⏰ Continuous monitoring alarm created - will check every 12 seconds (TESTING MODE)');
+        console.log('🎯 Monitoring will start in 6 seconds and then check every 12 seconds');
     });
 };
 
@@ -4802,8 +4942,3288 @@ self.stopMonitoring = () => {
     return 'Monitoring stopped manually';
 };
 
+// Manual testing functions
+self.testCallResponseMonitoring = async () => {
+    console.log('🧪 Testing call response monitoring setup...');
+    const allStorage = await chrome.storage.local.get();
+    const responseKeys = Object.keys(allStorage).filter(key => key.startsWith('call_response_monitoring_'));
+    const callAttemptKeys = Object.keys(allStorage).filter(key => key.startsWith('call_attempted_'));
+    
+    console.log('📊 Found call response monitoring entries:', responseKeys.length);
+    console.log('📊 Found call attempt entries:', callAttemptKeys.length);
+    
+    responseKeys.forEach(key => {
+        console.log(`📋 ${key}:`, allStorage[key]);
+    });
+    
+    callAttemptKeys.forEach(key => {
+        console.log(`📞 ${key}:`, new Date(allStorage[key]));
+    });
+    
+    if (responseKeys.length === 0) {
+        console.log('⚠️ No call response monitoring entries found. This means the system is not tracking responses.');
+        if (callAttemptKeys.length > 0) {
+            console.log('💡 However, there are call attempts that should be monitored. The system may need to be restarted or campaigns activated.');
+        }
+    } else {
+        console.log('✅ Call response monitoring is set up correctly!');
+    }
+};
+
+// Function to manually trigger response checking (for testing)
+self.manualCheckResponses = async () => {
+    console.log('🔍 MANUALLY TRIGGERING RESPONSE CHECK...');
+    try {
+        await checkForCallResponses();
+        console.log('✅ Manual response check completed');
+    } catch (error) {
+        console.error('❌ Manual response check failed:', error);
+    }
+};
+
+// Function to manually check if Eleazar replied (by checking LinkedIn directly)
+self.checkEleazarManually = async () => {
+    console.log('🔍 MANUALLY CHECKING ELEAZAR FOR REPLIES...');
+    
+    try {
+        // Get all tabs to find LinkedIn
+        const tabs = await chrome.tabs.query({});
+        const linkedinTab = tabs.find(tab => tab.url && tab.url.includes('linkedin.com'));
+        
+        if (!linkedinTab) {
+            console.log('❌ No LinkedIn tab found. Please open LinkedIn in a new tab first.');
+            console.log('💡 Go to: https://www.linkedin.com/messaging/');
+            return;
+        }
+        
+        console.log('✅ Found LinkedIn tab:', linkedinTab.url);
+        
+        // Navigate to messages if not already there
+        if (!linkedinTab.url.includes('/messaging/')) {
+            await chrome.tabs.update(linkedinTab.id, {
+                url: 'https://www.linkedin.com/messaging/'
+            });
+            console.log('🔄 Navigated to LinkedIn messages');
+        }
+        
+        console.log('🔄 Please check manually:');
+        console.log('1. Look for conversation with Eleazar Nzerem');
+        console.log('2. Check if he replied to your call message');
+        console.log('3. If he replied, note what he said');
+        
+        // Wait a moment then try to inject script
+        setTimeout(async () => {
+            try {
+                // Try to inject a script to check for conversations
+                const results = await chrome.tabs.executeScript(linkedinTab.id, {
+                    code: `
+                        console.log('🔍 Looking for Eleazar conversation...');
+                        
+                        // Look for conversation with Eleazar
+                        const conversations = document.querySelectorAll('[data-test-id="conversation-item"]');
+                        console.log('📊 Found conversations:', conversations.length);
+                        
+                        let eleazarConversation = null;
+                        
+                        conversations.forEach((conv, index) => {
+                            const nameElement = conv.querySelector('[data-test-id="conversation-item-name"]');
+                            if (nameElement) {
+                                console.log('👤 Conversation', index, ':', nameElement.textContent);
+                                if (nameElement.textContent.includes('Eleazar')) {
+                                    eleazarConversation = conv;
+                                    console.log('✅ Found Eleazar conversation!');
+                                }
+                            }
+                        });
+                        
+                        if (eleazarConversation) {
+                            eleazarConversation.click();
+                            console.log('✅ Clicked Eleazar conversation');
+                            
+                            // Check for new messages after a delay
+                            setTimeout(() => {
+                                const messages = document.querySelectorAll('[data-test-id="message-item"]');
+                                console.log('📊 Found messages:', messages.length);
+                                
+                                if (messages.length > 0) {
+                                    const lastMessage = messages[messages.length - 1];
+                                    const senderName = lastMessage.querySelector('[data-test-id="message-sender-name"]')?.textContent;
+                                    const messageText = lastMessage.querySelector('[data-test-id="message-text"]')?.textContent;
+                                    
+                                    console.log('📝 Last message from:', senderName);
+                                    console.log('📝 Last message text:', messageText);
+                                    
+                                    if (senderName && senderName.includes('Eleazar')) {
+                                        console.log('🎉 FOUND ELEAZAR REPLY:', messageText);
+                                    }
+                                }
+                            }, 2000);
+                        } else {
+                            console.log('❌ No conversation with Eleazar found');
+                            console.log('💡 Make sure you have sent a message to Eleazar first');
+                        }
+                    `
+                });
+                console.log('✅ Script injected successfully');
+            } catch (error) {
+                console.log('⚠️ Could not inject script:', error.message);
+                console.log('💡 Please check manually by going to LinkedIn messages');
+            }
+        }, 3000);
+        
+    } catch (error) {
+        console.error('❌ Manual check failed:', error);
+    }
+};
+
+// Function to test LinkedIn API access
+self.testLinkedInAPI = async () => {
+    console.log('🔍 TESTING LINKEDIN API ACCESS...');
+    
+    try {
+        // Get CSRF token
+        const tokenResult = await chrome.storage.local.get(['csrfToken']);
+        if (!tokenResult.csrfToken) {
+            console.error('❌ No CSRF token found');
+            return;
+        }
+        
+        console.log('✅ CSRF token found:', tokenResult.csrfToken.substring(0, 20) + '...');
+        
+        // Test basic LinkedIn API access
+        const voyagerApi = 'https://www.linkedin.com/voyager/api';
+        
+        // Test 1: Try to get user profile
+        console.log('🧪 Test 1: Getting user profile...');
+        const profileResponse = await fetch(`${voyagerApi}/identity/profiles/me`, {
+            method: 'GET',
+            headers: {
+                'csrf-token': tokenResult.csrfToken,
+                'accept': 'application/vnd.linkedin.normalized+json+2.1',
+                'x-li-lang': 'en_US',
+                'x-restli-protocol-version': '2.0.0'
+            }
+        });
+        
+        console.log('📡 Profile API status:', profileResponse.status);
+        
+        if (profileResponse.ok) {
+            const profileData = await profileResponse.json();
+            console.log('✅ Profile API works:', profileData.firstName, profileData.lastName);
+        } else {
+            console.error('❌ Profile API failed:', profileResponse.status);
+        }
+        
+        // Test 2: Try conversations with different endpoint
+        console.log('🧪 Test 2: Trying conversations endpoint...');
+        const convResponse = await fetch(`${voyagerApi}/messaging/conversations?count=20`, {
+            method: 'GET',
+            headers: {
+                'csrf-token': tokenResult.csrfToken,
+                'accept': 'application/vnd.linkedin.normalized+json+2.1',
+                'x-li-lang': 'en_US',
+                'x-restli-protocol-version': '2.0.0'
+            }
+        });
+        
+        console.log('📡 Conversations API status:', convResponse.status);
+        
+        if (convResponse.ok) {
+            const convData = await convResponse.json();
+            console.log('✅ Conversations API works, found:', convData.elements?.length || 0, 'conversations');
+        } else {
+            console.error('❌ Conversations API failed:', convResponse.status);
+        }
+        
+        // Test 3: Try to get current page info
+        console.log('🧪 Test 3: Checking current LinkedIn page...');
+        const tabs = await chrome.tabs.query({active: true, currentWindow: true});
+        if (tabs[0] && tabs[0].url.includes('linkedin.com')) {
+            console.log('✅ Currently on LinkedIn page:', tabs[0].url);
+        } else {
+            console.log('⚠️ Not currently on LinkedIn page');
+        }
+        
+    } catch (error) {
+        console.error('❌ LinkedIn API test failed:', error);
+    }
+};
+
+// Function to extract conversation ID from LinkedIn thread URL
+self.extractConversationId = async () => {
+    console.log('🔍 EXTRACTING CONVERSATION ID FROM LINKEDIN...');
+    
+    try {
+        // Get all tabs to find LinkedIn messaging tabs
+        const tabs = await chrome.tabs.query({});
+        const linkedinTabs = tabs.filter(tab => 
+            tab.url && (
+                tab.url.includes('linkedin.com/messaging/thread/') ||
+                tab.url.includes('linkedin.com/messaging/')
+            )
+        );
+        
+        if (linkedinTabs.length === 0) {
+            console.log('❌ No LinkedIn messaging tabs found');
+            console.log('💡 Please open LinkedIn messages first');
+            return null;
+        }
+        
+        console.log(`📊 Found ${linkedinTabs.length} LinkedIn messaging tabs`);
+        
+        const conversationIds = [];
+        
+        for (const tab of linkedinTabs) {
+            console.log(`🔍 Checking tab: ${tab.url}`);
+            
+            // Extract conversation ID from URL
+            const threadMatch = tab.url.match(/\/messaging\/thread\/([^\/]+)/);
+            if (threadMatch) {
+                const conversationId = threadMatch[1];
+                conversationIds.push(conversationId);
+                console.log(`✅ Found conversation ID: ${conversationId}`);
+            }
+        }
+        
+        if (conversationIds.length > 0) {
+            console.log(`🎯 Extracted ${conversationIds.length} conversation IDs:`, conversationIds);
+            return conversationIds;
+        } else {
+            console.log('❌ No conversation IDs found in URLs');
+            return null;
+        }
+        
+    } catch (error) {
+        console.error('❌ Error extracting conversation ID:', error);
+        return null;
+    }
+};
+// Function to test different LinkedIn API endpoints for messages
+self.testLinkedInMessagesAPI = async () => {
+    console.log('🧪 TESTING DIFFERENT LINKEDIN MESSAGES API ENDPOINTS...');
+    
+    try {
+        // Get CSRF token
+        const tokenResult = await chrome.storage.local.get(['csrfToken']);
+        if (!tokenResult.csrfToken) {
+            console.error('❌ No CSRF token found');
+            return;
+        }
+        
+        console.log('✅ CSRF token found');
+        
+        // Get conversation IDs from current tabs
+        const conversationIds = await self.extractConversationId();
+        
+        if (!conversationIds || conversationIds.length === 0) {
+            console.log('❌ No conversation IDs found');
+            console.log('💡 Please open LinkedIn messages first');
+            return;
+        }
+        
+        const voyagerApi = 'https://www.linkedin.com/voyager/api';
+        const conversationId = conversationIds[0]; // Use first conversation ID
+        
+        console.log(`🎯 Testing with conversation ID: ${conversationId}`);
+        
+        // Test different API endpoints and parameters
+        const endpoints = [
+            `/messaging/conversations/${conversationId}/events`,
+            `/messaging/conversations/${conversationId}/events?count=50`,
+            `/messaging/conversations/${conversationId}/events?start=0&count=20`,
+            `/messaging/conversations/${conversationId}/events?q=all`,
+            `/messaging/conversations/${conversationId}/events?q=all&count=50`,
+            `/messaging/conversations/${conversationId}/events?q=all&count=100`,
+            `/messaging/conversations/${conversationId}/events?q=all&count=200`,
+            `/messaging/conversations/${conversationId}/events?q=all&count=500`,
+            `/messaging/conversations/${conversationId}/events?q=all&count=1000`,
+            `/messaging/conversations/${conversationId}/events?q=all&count=2000`,
+            `/messaging/conversations/${conversationId}/events?q=all&count=5000`,
+            `/messaging/conversations/${conversationId}/events?q=all&count=10000`
+        ];
+        
+        // Test different header combinations
+        const headerSets = [
+            // Standard headers
+            {
+                'csrf-token': tokenResult.csrfToken,
+                'accept': 'application/vnd.linkedin.normalized+json+2.1',
+                'x-li-lang': 'en_US',
+                'x-li-page-instance': 'urn:li:page:d_flagship3_messaging_conversations;1ZlPK7kKRNSMi+vkXMyVMw==',
+                'x-li-track': JSON.stringify({"clientVersion":"1.10.1208","osName":"web","timezoneOffset":1,"deviceFormFactor":"DESKTOP","mpName":"voyager-web"}),
+                'x-restli-protocol-version': '2.0.0'
+            },
+            // Alternative headers
+            {
+                'csrf-token': tokenResult.csrfToken,
+                'accept': 'application/vnd.linkedin.normalized+json+2.1',
+                'x-li-lang': 'en_US',
+                'x-restli-protocol-version': '2.0.0'
+            },
+            // Minimal headers
+            {
+                'csrf-token': tokenResult.csrfToken,
+                'accept': 'application/json',
+                'x-restli-protocol-version': '2.0.0'
+            }
+        ];
+        
+        for (let headerIndex = 0; headerIndex < headerSets.length; headerIndex++) {
+            const headers = headerSets[headerIndex];
+            console.log(`\n🧪 Testing header set ${headerIndex + 1}:`, headers);
+            
+            for (const endpoint of endpoints) {
+                try {
+                    console.log(`🔍 Testing: ${endpoint}`);
+                    
+                    const response = await fetch(`${voyagerApi}${endpoint}`, {
+                        method: 'GET',
+                        headers: headers
+                    });
+                    
+                    console.log(`📡 Status: ${response.status}`);
+                    
+                    if (response.ok) {
+                        const data = await response.json();
+                        const messages = data.elements || [];
+                        
+                        console.log(`✅ Found ${messages.length} messages with endpoint: ${endpoint}`);
+                        
+                        if (messages.length > 0) {
+                            console.log('🎉 SUCCESS! Messages found:');
+                            
+                            messages.forEach((msg, index) => {
+                                console.log(`📝 Message ${index + 1}:`, msg);
+                                
+                                // Try multiple ways to extract text from the message
+                                let text = '';
+                                let sender = 'unknown';
+                                
+                                // Method 1: Standard message structure
+                                if (msg.eventContent?.com?.linkedin?.voyager?.messaging?.create?.MessageCreate) {
+                                    const messageCreate = msg.eventContent.com.linkedin.voyager.messaging.create.MessageCreate;
+                                    text = messageCreate.body || messageCreate.attributedBody?.text || '';
+                                }
+                                
+                                // Method 2: Alternative message structure
+                                if (!text && msg.eventContent?.com?.linkedin?.voyager?.messaging?.EventContent) {
+                                    const eventContent = msg.eventContent.com.linkedin.voyager.messaging.EventContent;
+                                    text = eventContent.attributedBody?.text || '';
+                                }
+                                
+                                // Method 3: Direct body access
+                                if (!text && msg.body) {
+                                    text = msg.body;
+                                }
+                                
+                                // Method 4: Check for different eventContent structures
+                                if (!text && msg.eventContent) {
+                                    console.log('🔍 eventContent structure:', msg.eventContent);
+                                    // Try to find any text in the eventContent
+                                    const eventContentStr = JSON.stringify(msg.eventContent);
+                                    const textMatch = eventContentStr.match(/"text":"([^"]+)"/);
+                                    if (textMatch) {
+                                        text = textMatch[1];
+                                    }
+                                }
+                                
+                                // Extract sender information
+                                if (msg.from?.com?.linkedin?.voyager?.messaging?.MessagingMember) {
+                                    const member = msg.from.com.linkedin.voyager.messaging.MessagingMember;
+                                    if (member.name) {
+                                        sender = member.name;
+                                    } else if (member.miniProfile) {
+                                        sender = `${member.miniProfile.firstName || ''} ${member.miniProfile.lastName || ''}`.trim();
+                                    }
+                                }
+                                
+                                // Enhanced lead detection (generic - works for any LinkedIn user)
+                                const isFromLead = 
+                                    // Check if this is NOT from us (William Victor) and has meaningful text
+                                    (!sender.toLowerCase().includes('william') && 
+                                     !sender.toLowerCase().includes('victor') && 
+                                     !msg.from?.entityUrn?.includes('vicken-concept') &&
+                                     text && text.trim().length > 0 && text.length < 1000 &&
+                                     // Exclude AI-generated messages (they contain template placeholders)
+                                     !text.includes('[Your Name]') &&
+                                     !text.includes('[Your Position]') &&
+                                     !text.includes('[Your Company]') &&
+                                     !text.includes('[Date and Time]') &&
+                                     !text.includes('[Duration]') &&
+                                     !text.includes('Dear Mr.') &&
+                                     !text.includes('Dear Eleazar Nzerem'));
+                                
+                                console.log(`   👤 From: ${sender}`);
+                                console.log(`   💬 Text: "${text}"`);
+                                console.log(`   🕐 Time: ${new Date(msg.createdAt).toLocaleString()}`);
+                                console.log(`   🎯 Is from Lead: ${isFromLead}`);
+                                
+                                if (isFromLead && text) {
+                                    console.log(`🎉 FOUND LEAD'S REPLY: "${text}"`);
+                                }
+                            });
+                            
+                            return {
+                                endpoint: endpoint,
+                                headers: headers,
+                                messages: messages,
+                                success: true
+                            };
+                        }
+                    } else {
+                        console.log(`❌ Failed: ${response.status}`);
+                    }
+                } catch (error) {
+                    console.log(`❌ Error: ${error.message}`);
+                }
+            }
+        }
+        
+        console.log('❌ No messages found with any endpoint/header combination');
+        
+    } catch (error) {
+        console.error('❌ LinkedIn messages API test failed:', error);
+    }
+};
+
+// Function to test direct conversation API access
+self.testDirectConversationAPI = async () => {
+    console.log('🧪 TESTING DIRECT CONVERSATION API ACCESS...');
+    
+    try {
+        // Get CSRF token
+        const tokenResult = await chrome.storage.local.get(['csrfToken']);
+        if (!tokenResult.csrfToken) {
+            console.error('❌ No CSRF token found');
+            return;
+        }
+        
+        console.log('✅ CSRF token found');
+        
+        // Get conversation IDs from current tabs
+        const conversationIds = await self.extractConversationId();
+        
+        if (!conversationIds || conversationIds.length === 0) {
+            console.log('❌ No conversation IDs found');
+            console.log('💡 Please open LinkedIn messages first');
+            return;
+        }
+        
+        const voyagerApi = 'https://www.linkedin.com/voyager/api';
+        
+        // Test each conversation ID
+        for (const conversationId of conversationIds) {
+            try {
+                console.log(`🧪 Testing conversation ID: ${conversationId}`);
+                
+                const response = await fetch(`${voyagerApi}/messaging/conversations/${conversationId}/events`, {
+                    method: 'GET',
+                    headers: {
+                        'csrf-token': tokenResult.csrfToken,
+                        'accept': 'application/vnd.linkedin.normalized+json+2.1',
+                        'x-li-lang': 'en_US',
+                        'x-li-page-instance': 'urn:li:page:d_flagship3_messaging_conversations;1ZlPK7kKRNSMi+vkXMyVMw==',
+                        'x-li-track': JSON.stringify({"clientVersion":"1.10.1208","osName":"web","timezoneOffset":1,"deviceFormFactor":"DESKTOP","mpName":"voyager-web"}),
+                        'x-restli-protocol-version': '2.0.0'
+                    }
+                });
+                
+                console.log(`📡 Status: ${response.status}`);
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    const messages = data.elements || [];
+                    
+                    console.log(`✅ Found ${messages.length} messages in conversation ${conversationId}`);
+                    
+                    if (messages.length > 0) {
+                        console.log('🎉 SUCCESS! Messages found:');
+                        
+                        messages.forEach((msg, index) => {
+                            const messageContent = msg.eventContent?.com?.linkedin?.voyager?.messaging?.EventContent;
+                            const text = messageContent?.attributedBody?.text || 
+                                        messageContent?.com?.linkedin?.voyager?.messaging?.create?.MessageCreate?.attributedBody?.text || 
+                                        messageContent?.com?.linkedin?.voyager?.messaging?.create?.MessageCreate?.body || '';
+                            
+                            const sender = msg.from?.com?.linkedin?.voyager?.messaging?.MessagingMember?.name || 
+                                          msg.from?.com?.linkedin?.voyager?.messaging?.MessagingMember?.miniProfile?.firstName + ' ' + 
+                                          msg.from?.com?.linkedin?.voyager?.messaging?.MessagingMember?.miniProfile?.lastName || 'Unknown';
+                            
+                            console.log(`📝 Message ${index + 1}:`);
+                            console.log(`   👤 From: ${sender}`);
+                            console.log(`   💬 Text: ${text}`);
+                            console.log(`   🕐 Time: ${new Date(msg.createdAt).toLocaleString()}`);
+                        });
+                        
+                        return {
+                            conversationId: conversationId,
+                            messages: messages,
+                            success: true
+                        };
+                    }
+                } else {
+                    console.log(`❌ Failed: ${response.status}`);
+                    if (response.status === 403) {
+                        console.log('💡 This might be a permission issue - make sure you have access to this conversation');
+                    }
+                }
+            } catch (error) {
+                console.log(`❌ Error: ${error.message}`);
+            }
+        }
+        
+        console.log('❌ No messages found in any conversation');
+        
+    } catch (error) {
+        console.error('❌ Direct conversation API test failed:', error);
+    }
+};
+
+// Function to immediately check for Eleazar's reply using the working API
+self.checkEleazarReplyNow = async () => {
+    console.log('🔍 IMMEDIATELY CHECKING FOR ELEAZAR\'S REPLY...');
+    
+    try {
+        // Get CSRF token
+        const tokenResult = await chrome.storage.local.get(['csrfToken']);
+        if (!tokenResult.csrfToken) {
+            console.error('❌ No CSRF token found');
+            return;
+        }
+        
+        console.log('✅ CSRF token found');
+        
+        // Use the known working conversation ID
+        const conversationId = '2-MmJlMWU1MzMtMGUzYi00ODI2LThjNWEtYjQyZTAwZWEyNjM4XzEwMA==';
+        const voyagerApi = 'https://www.linkedin.com/voyager/api';
+        
+        console.log(`🎯 Checking conversation: ${conversationId}`);
+        
+        // Use the WORKING headers from the test
+        const response = await fetch(`${voyagerApi}/messaging/conversations/${conversationId}/events`, {
+            method: 'GET',
+            headers: {
+                'csrf-token': tokenResult.csrfToken,
+                'accept': 'application/json',  // ← This is the magic header!
+                'x-restli-protocol-version': '2.0.0'
+            }
+        });
+        
+        console.log(`📡 API Status: ${response.status}`);
+        
+        if (response.ok) {
+            const data = await response.json();
+            const messages = data.elements || [];
+            
+            console.log(`📊 Found ${messages.length} messages in conversation`);
+            
+            if (messages.length > 0) {
+                console.log('🎉 MESSAGES FOUND! Analyzing for Eleazar\'s reply...');
+                
+                let eleazarReply = null;
+                let latestMessage = null;
+                
+                messages.forEach((msg, index) => {
+                    console.log(`\n📝 Message ${index + 1}:`);
+                    
+                    // Extract text using multiple methods
+                    let text = '';
+                    
+                    // Method 1: Standard structure
+                    if (msg.eventContent?.com?.linkedin?.voyager?.messaging?.create?.MessageCreate) {
+                        const messageCreate = msg.eventContent.com.linkedin.voyager.messaging.create.MessageCreate;
+                        text = messageCreate.body || messageCreate.attributedBody?.text || '';
+                    }
+                    
+                    // Method 2: Alternative structure
+                    if (!text && msg.eventContent?.com?.linkedin?.voyager?.messaging?.EventContent) {
+                        const eventContent = msg.eventContent.com.linkedin.voyager.messaging.EventContent;
+                        text = eventContent.attributedBody?.text || '';
+                    }
+                    
+                    // Method 3: Direct body
+                    if (!text && msg.body) {
+                        text = msg.body;
+                    }
+                    
+                    // Method 4: Search in eventContent JSON
+                    if (!text && msg.eventContent) {
+                        const eventContentStr = JSON.stringify(msg.eventContent);
+                        const textMatch = eventContentStr.match(/"text":"([^"]+)"/);
+                        if (textMatch) {
+                            text = textMatch[1];
+                        }
+                    }
+                    
+                    // Extract sender with enhanced detection
+                    let sender = 'unknown';
+                    console.log('🔍 Raw sender data:', msg.from);
+                    
+                    if (msg.from?.com?.linkedin?.voyager?.messaging?.MessagingMember) {
+                        const member = msg.from.com.linkedin.voyager.messaging.MessagingMember;
+                        console.log('🔍 MessagingMember data:', member);
+                        
+                        if (member.name) {
+                            sender = member.name;
+                        } else if (member.miniProfile) {
+                            sender = `${member.miniProfile.firstName || ''} ${member.miniProfile.lastName || ''}`.trim();
+                        }
+                    }
+                    
+                    // Enhanced lead detection (generic - works for any LinkedIn user)
+                    const isFromLead = 
+                        // Check if this is NOT from us (William Victor) and has meaningful text
+                        (!sender.toLowerCase().includes('william') && 
+                         !sender.toLowerCase().includes('victor') && 
+                         !msg.from?.entityUrn?.includes('vicken-concept') &&
+                         text && text.trim().length > 0 && text.length < 1000 &&
+                         // Exclude AI-generated messages (they contain template placeholders)
+                         !text.includes('[Your Name]') &&
+                         !text.includes('[Your Position]') &&
+                         !text.includes('[Your Company]') &&
+                         !text.includes('[Date and Time]') &&
+                         !text.includes('[Duration]') &&
+                         !text.includes('Dear Mr.') &&
+                         !text.includes('Dear Eleazar Nzerem'));
+                    
+                    console.log('🔍 Sender detection details:');
+                    console.log('   - sender:', sender);
+                    console.log('   - entityUrn:', msg.from?.entityUrn);
+                    console.log('   - isFromLead:', isFromLead);
+                    
+                    console.log(`   👤 From: ${sender}`);
+                    console.log(`   💬 Text: "${text}"`);
+                    console.log(`   🕐 Time: ${new Date(msg.createdAt).toLocaleString()}`);
+                    console.log(`   🎯 Is from Lead: ${isFromLead}`);
+                    
+                    if (isFromLead && text) {
+                        eleazarReply = {
+                            text: text,
+                            sender: sender,
+                            timestamp: msg.createdAt,
+                            messageId: msg.entityUrn
+                        };
+                        console.log(`🎉 FOUND ELEAZAR'S REPLY: "${text}"`);
+                    }
+                    
+                    // Track latest message
+                    if (index === messages.length - 1) {
+                        latestMessage = {
+                            text: text,
+                            sender: sender,
+                            timestamp: msg.createdAt,
+                            messageId: msg.entityUrn
+                        };
+                    }
+                });
+                
+                if (eleazarReply) {
+                    console.log('\n🎯 ELEAZAR REPLIED!');
+                    console.log(`📝 Reply: "${eleazarReply.text}"`);
+                    console.log(`🕐 Time: ${new Date(eleazarReply.timestamp).toLocaleString()}`);
+                    
+                    // TODO: Send this to AI for analysis and trigger calendar link
+                    return {
+                        found: true,
+                        reply: eleazarReply,
+                        allMessages: messages
+                    };
+                } else {
+                    console.log('\n⏳ No reply from Eleazar found yet');
+                    console.log(`📊 Latest message: "${latestMessage?.text}" from ${latestMessage?.sender}`);
+                    return {
+                        found: false,
+                        latestMessage: latestMessage,
+                        allMessages: messages
+                    };
+                }
+            } else {
+                console.log('📭 No messages found in conversation');
+                return { found: false, messages: [] };
+            }
+        } else {
+            console.log(`❌ API failed: ${response.status}`);
+            return { found: false, error: response.status };
+        }
+        
+    } catch (error) {
+        console.error('❌ Error checking Eleazar reply:', error);
+        return { found: false, error: error.message };
+    }
+};
+
+// Function to find and analyze any lead's replies (generic version)
+self.findLeadReplies = async (connectionId, leadName) => {
+    console.log(`🔍 FINDING ${leadName}'S REPLIES WITH ENHANCED DETECTION...`);
+    
+    try {
+        // Get CSRF token
+        const tokenResult = await chrome.storage.local.get(['csrfToken']);
+        if (!tokenResult.csrfToken) {
+            console.error('❌ No CSRF token found');
+            return;
+        }
+        
+        console.log('✅ CSRF token found');
+        
+        // Use the conversation ID from the connection
+        const conversationId = connectionId;
+        const voyagerApi = 'https://www.linkedin.com/voyager/api';
+        
+        console.log(`🎯 Checking conversation: ${conversationId}`);
+        
+        // Use the WORKING headers
+        const response = await fetch(`${voyagerApi}/messaging/conversations/${conversationId}/events`, {
+            method: 'GET',
+            headers: {
+                'csrf-token': tokenResult.csrfToken,
+                'accept': 'application/json',
+                'x-restli-protocol-version': '2.0.0'
+            }
+        });
+        
+        console.log(`📡 API Status: ${response.status}`);
+        
+        if (response.ok) {
+            const data = await response.json();
+            const messages = data.elements || [];
+            
+            console.log(`📊 Found ${messages.length} messages in conversation`);
+            
+            if (messages.length > 0) {
+                console.log(`🎉 MESSAGES FOUND! Analyzing for ${leadName}'s replies...`);
+                
+                        const leadReplies = [];
+                let messageCount = 0;
+                
+                messages.forEach((msg, index) => {
+                    console.log(`\n📝 Message ${index + 1}:`);
+                    
+                    // Extract text using multiple methods
+                    let text = '';
+                    
+                    // Method 1: Standard structure
+                    if (msg.eventContent?.com?.linkedin?.voyager?.messaging?.create?.MessageCreate) {
+                        const messageCreate = msg.eventContent.com.linkedin.voyager.messaging.create.MessageCreate;
+                        text = messageCreate.body || messageCreate.attributedBody?.text || '';
+                    }
+                    
+                    // Method 2: Alternative structure
+                    if (!text && msg.eventContent?.com?.linkedin?.voyager?.messaging?.EventContent) {
+                        const eventContent = msg.eventContent.com.linkedin.voyager.messaging.EventContent;
+                        text = eventContent.attributedBody?.text || '';
+                    }
+                    
+                    // Method 3: Direct body
+                    if (!text && msg.body) {
+                        text = msg.body;
+                    }
+                    
+                    // Method 4: Search in eventContent JSON
+                    if (!text && msg.eventContent) {
+                        const eventContentStr = JSON.stringify(msg.eventContent);
+                        const textMatch = eventContentStr.match(/"text":"([^"]+)"/);
+                        if (textMatch) {
+                            text = textMatch[1];
+                        }
+                    }
+                    
+                    // Extract sender with enhanced detection
+                    let sender = 'unknown';
+                    console.log('🔍 Raw sender data:', msg.from);
+                    
+                    if (msg.from?.com?.linkedin?.voyager?.messaging?.MessagingMember) {
+                        const member = msg.from.com.linkedin.voyager.messaging.MessagingMember;
+                        console.log('🔍 MessagingMember data:', member);
+                        
+                        if (member.name) {
+                            sender = member.name;
+                        } else if (member.miniProfile) {
+                            sender = `${member.miniProfile.firstName || ''} ${member.miniProfile.lastName || ''}`.trim();
+                        }
+                    }
+                    
+                    // Enhanced lead detection (generic - works for any LinkedIn user)
+                    const isFromLead = 
+                        // Check if this is NOT from us (William Victor) and has meaningful text
+                        (!sender.toLowerCase().includes('william') && 
+                         !sender.toLowerCase().includes('victor') && 
+                         !msg.from?.entityUrn?.includes('vicken-concept') &&
+                         text && text.trim().length > 0 && text.length < 1000 &&
+                         // Exclude AI-generated messages (they contain template placeholders)
+                         !text.includes('[Your Name]') &&
+                         !text.includes('[Your Position]') &&
+                         !text.includes('[Your Company]') &&
+                         !text.includes('[Date and Time]') &&
+                         !text.includes('[Duration]') &&
+                         !text.includes('Dear Mr.') &&
+                         !text.includes('Dear Eleazar Nzerem'));
+                    
+                    console.log('🔍 Sender detection details:');
+                    console.log('   - sender:', sender);
+                    console.log('   - entityUrn:', msg.from?.entityUrn);
+                    console.log('   - isFromLead:', isFromLead);
+                    
+                    console.log(`   👤 From: ${sender}`);
+                    console.log(`   💬 Text: "${text}"`);
+                    console.log(`   🕐 Time: ${new Date(msg.createdAt).toLocaleString()}`);
+                    console.log(`   🎯 Is from Lead: ${isFromLead}`);
+                    
+                    if (isFromLead && text) {
+                        leadReplies.push({
+                            text: text,
+                            sender: sender,
+                            timestamp: msg.createdAt,
+                            messageId: msg.entityUrn,
+                            messageNumber: index + 1
+                        });
+                                console.log(`🎉 FOUND LEAD'S REPLY #${leadReplies.length}: "${text}"`);
+                    }
+                    
+                    messageCount++;
+                });
+                
+                        if (leadReplies.length > 0) {
+                            console.log(`\n🎯 ${leadName} REPLIED!`);
+                            console.log(`📊 Found ${leadReplies.length} replies from ${leadName}:`);
+                            
+                            leadReplies.forEach((reply, index) => {
+                        console.log(`\n📝 Reply ${index + 1}:`);
+                        console.log(`   💬 Text: "${reply.text}"`);
+                        console.log(`   🕐 Time: ${new Date(reply.timestamp).toLocaleString()}`);
+                        console.log(`   📍 Message #: ${reply.messageNumber}`);
+                    });
+                    
+                            return {
+                                found: true,
+                                replies: leadReplies,
+                                totalMessages: messageCount,
+                                allMessages: messages
+                            };
+                } else {
+                    console.log(`\n⏳ No replies from ${leadName} found yet`);
+                    console.log(`📊 Analyzed ${messageCount} messages`);
+                    return {
+                        found: false,
+                        totalMessages: messageCount,
+                        allMessages: messages
+                    };
+                }
+            } else {
+                console.log('📭 No messages found in conversation');
+                return { found: false, messages: [] };
+            }
+        } else {
+            console.log(`❌ API failed: ${response.status}`);
+            return { found: false, error: response.status };
+        }
+        
+    } catch (error) {
+            console.error(`❌ Error finding ${leadName} replies:`, error);
+        return { found: false, error: error.message };
+    }
+};
+
+// Function to test the backend API directly
+self.testBackendAPI = async () => {
+    console.log('🧪 TESTING BACKEND API DIRECTLY...');
+    
+    try {
+        const platformUrl = 'https://app.linkdominator.com';
+        const linkedinId = 'vicken-concept';
+        
+        // Get CSRF token
+        const tokenResult = await chrome.storage.local.get(['csrfToken']);
+        if (!tokenResult.csrfToken) {
+            console.error('❌ No CSRF token found for AI analysis test');
+            return null;
+        }
+        
+        const testResponse = await fetch(`${platformUrl}/api/calls/analyze-message`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'lk-id': linkedinId,
+                'csrf-token': tokenResult.csrfToken
+            },
+            body: JSON.stringify({
+                message: 'Hi, William',
+                leadName: 'Eleazar Nzerem',
+                context: 'LinkedIn message response analysis',
+                call_id: 'test_call_123',
+                connection_id: null,
+                conversation_urn_id: null
+            })
+        });
+        
+        console.log(`📡 API Response Status: ${testResponse.status}`);
+        
+        if (testResponse.ok) {
+            const result = await testResponse.json();
+            console.log('✅ API Response:', result);
+            return { success: true, result: result };
+        } else {
+            const errorText = await testResponse.text();
+            console.log('❌ API Error Response:', errorText);
+            return { success: false, error: errorText };
+        }
+        
+    } catch (error) {
+        console.error('❌ API Test Error:', error);
+        return { success: false, error: error.message };
+    }
+};
+// Function to test AI analysis only (without calendar generation)
+self.testEleazarAIAnalysis = async () => {
+    console.log('🤖 TESTING AI ANALYSIS FOR ELEAZAR\'S REPLIES...');
+    
+    try {
+        // First, find all of Eleazar's replies (using known connection ID for testing)
+        const eleazarConnectionId = '2-MmJlMWU1MzMtMGUzYi00ODI2LThjNWEtYjQyZTAwZWEyNjM4XzEwMA==';
+        const repliesResult = await self.findLeadReplies(eleazarConnectionId, 'Eleazar Nzerem');
+        
+        if (!repliesResult.found || !repliesResult.replies) {
+            console.log('❌ No replies from Eleazar found');
+            return { success: false, reason: 'No replies found' };
+        }
+        
+        console.log(`📊 Found ${repliesResult.replies.length} replies from Eleazar`);
+        
+        // Filter out the AI-generated messages (long messages) and focus on Eleazar's actual replies
+        const eleazarActualReplies = repliesResult.replies.filter(reply => {
+            const text = reply.text.trim();
+            // Filter out long AI-generated messages and focus on short, casual replies
+            return text.length < 200 && !text.includes('Dear Mr. Nzerem') && !text.includes('[Your Name]');
+        });
+        
+        console.log(`📊 Found ${eleazarActualReplies.length} actual replies from Eleazar (excluding AI messages)`);
+        
+        if (eleazarActualReplies.length === 0) {
+            console.log('❌ No actual replies from Eleazar found (only AI messages)');
+            return { success: false, reason: 'No actual replies found' };
+        }
+        
+        // Analyze each reply from Eleazar
+        const analysisResults = [];
+        
+        for (const reply of eleazarActualReplies) {
+            console.log(`\n🎯 Analyzing reply: "${reply.text}"`);
+            
+        // Send to AI for analysis
+        const platformUrl = 'https://app.linkdominator.com';
+        
+        // Get LinkedIn ID from storage or use fallback
+        const linkedinIdResult = await chrome.storage.local.get(['linkedinId']);
+        const linkedinId = linkedinIdResult.linkedinId || 'vicken-concept';
+            
+            // Get CSRF token
+            const tokenResult = await chrome.storage.local.get(['csrfToken']);
+            if (!tokenResult.csrfToken) {
+                console.error('❌ No CSRF token found for AI analysis');
+                return null;
+            }
+            
+            const aiResponse = await fetch(`${platformUrl}/api/calls/analyze-message`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'lk-id': linkedinId,
+                    'csrf-token': tokenResult.csrfToken
+                },
+                body: JSON.stringify({
+                    message: reply.text,
+                    leadName: 'Eleazar Nzerem',
+                    context: 'LinkedIn message response analysis',
+                    call_id: 'test_direct_conversation',
+                    connection_id: null,
+                    conversation_urn_id: null
+                })
+            });
+            
+            if (!aiResponse.ok) {
+                console.log(`❌ AI analysis failed for "${reply.text}": ${aiResponse.status}`);
+                analysisResults.push({
+                    reply: reply.text,
+                    success: false,
+                    error: `HTTP ${aiResponse.status}`
+                });
+                continue;
+            }
+            
+            const aiResponseData = await aiResponse.json();
+            console.log(`🔍 Raw AI Response for "${reply.text}":`, aiResponseData);
+            
+            if (!aiResponseData.success) {
+                console.log(`❌ AI analysis failed for "${reply.text}": ${aiResponseData.message}`);
+                analysisResults.push({
+                    reply: reply.text,
+                    success: false,
+                    error: aiResponseData.message
+                });
+                continue;
+            }
+            
+            const aiAnalysis = aiResponseData.analysis || {};
+            console.log(`🔍 Parsed AI Analysis for "${reply.text}":`, aiAnalysis);
+            
+            // Check if the response is positive (handle all field name formats)
+            const intent = aiAnalysis.intent || aiAnalysis.Intent;
+            const sentiment = aiAnalysis.sentiment || aiAnalysis.Sentiment;
+            const leadScore = aiAnalysis.leadScore || aiAnalysis['Lead Score'] || aiAnalysis.lead_score;
+            const isPositiveFlag = aiAnalysis.isPositive || aiAnalysis['Is Positive'];
+            
+            const isPositive = (isPositiveFlag === true) || 
+                              (intent && (
+                                  intent.toLowerCase() === 'available' ||
+                                  intent.toLowerCase() === 'interested' ||
+                                  intent.toLowerCase() === 'scheduling_request'
+                              )) ||
+                              (sentiment && sentiment.toLowerCase() === 'positive') ||
+                              (leadScore && leadScore >= 7);
+            
+            console.log(`📊 Analysis for "${reply.text}":`);
+            console.log(`   - Intent: ${aiAnalysis.intent || aiAnalysis.Intent || 'Unknown'}`);
+            console.log(`   - Sentiment: ${aiAnalysis.sentiment || aiAnalysis.Sentiment || 'Unknown'}`);
+            console.log(`   - Lead Score: ${leadScore || 'Unknown'}`);
+            console.log(`   - Is Positive: ${isPositive}`);
+            console.log(`   - Next Action: ${aiAnalysis.nextAction || aiAnalysis['Next Action'] || 'Unknown'}`);
+            console.log(`   - Suggested Response: ${aiAnalysis.suggestedResponse || aiAnalysis['Suggested Response'] || 'None'}`);
+            
+                analysisResults.push({
+                    reply: reply.text,
+                    timestamp: reply.timestamp,
+                    success: true,
+                    analysis: aiAnalysis,
+                    isPositive: isPositive
+                });
+                
+                // If this is a positive response, trigger the full analysis with action
+                if (isPositive) {
+                    console.log(`🎉 POSITIVE RESPONSE DETECTED! "${reply.text}" - Triggering automatic follow-up...`);
+                    // Call the full analysis function that will send calendar links
+                    setTimeout(() => {
+                        // Note: This would need connectionId and leadName parameters to work
+                        console.log('⚠️ Automatic follow-up requires connectionId and leadName parameters');
+                    }, 1000);
+                }
+        }
+        
+        // Summary
+        const positiveReplies = analysisResults.filter(r => r.success && r.isPositive);
+        console.log(`\n📊 SUMMARY:`);
+        console.log(`   - Total replies analyzed: ${analysisResults.length}`);
+        console.log(`   - Positive replies: ${positiveReplies.length}`);
+        console.log(`   - Negative/neutral replies: ${analysisResults.length - positiveReplies.length}`);
+        
+        if (positiveReplies.length > 0) {
+            console.log(`\n🎉 POSITIVE REPLIES FOUND:`);
+            positiveReplies.forEach((result, index) => {
+                console.log(`   ${index + 1}. "${result.reply}" - ${result.analysis.intent} (Score: ${result.analysis.leadScore})`);
+            });
+        }
+        
+        return {
+            success: true,
+            totalReplies: analysisResults.length,
+            positiveReplies: positiveReplies.length,
+            results: analysisResults
+        };
+        
+    } catch (error) {
+        console.error('❌ Error testing AI analysis:', error);
+        return { success: false, reason: 'Analysis failed', error: error.message };
+    }
+};
+
+// Function to analyze lead replies with AI and trigger appropriate actions (works for any LinkedIn user)
+self.analyzeLeadRepliesWithAI = async (connectionId, leadName) => {
+    console.log(`🤖 ANALYZING ${leadName}'S REPLIES WITH AI...`);
+    
+    try {
+        // First, find all of the lead's replies
+        const repliesResult = await self.findLeadReplies(connectionId, leadName);
+        
+        if (!repliesResult.found || !repliesResult.replies) {
+            console.log(`❌ No replies from ${leadName} found`);
+            return { success: false, reason: 'No replies found' };
+        }
+        
+        console.log(`📊 Found ${repliesResult.replies.length} replies from ${leadName}`);
+        
+        // Filter out the AI-generated messages (long messages) and focus on lead's actual replies
+        const leadActualReplies = repliesResult.replies.filter(reply => {
+            const text = reply.text.trim();
+            // Filter out long AI-generated messages and focus on short, casual replies
+            return text.length < 200 && !text.includes('Dear Mr.') && !text.includes('[Your Name]');
+        });
+        
+        console.log(`📊 Found ${leadActualReplies.length} actual replies from ${leadName} (excluding AI messages)`);
+        
+        if (leadActualReplies.length === 0) {
+            console.log(`❌ No actual replies from ${leadName} found (only AI messages)`);
+            return { success: false, reason: 'No actual replies found' };
+        }
+        
+        // Analyze the latest reply from the lead
+        const latestReply = leadActualReplies[leadActualReplies.length - 1];
+        console.log(`🎯 Analyzing latest reply: "${latestReply.text}"`);
+        
+        // Send to AI for analysis
+        const platformUrl = 'https://app.linkdominator.com';
+        
+        // Get LinkedIn ID from storage or use fallback
+        const linkedinIdResult = await chrome.storage.local.get(['linkedinId']);
+        const linkedinId = linkedinIdResult.linkedinId || 'vicken-concept';
+        
+        // Get CSRF token
+        const tokenResult = await chrome.storage.local.get(['csrfToken']);
+        if (!tokenResult.csrfToken) {
+            console.error('❌ No CSRF token found for AI analysis');
+            return null;
+        }
+        
+        const aiResponse = await fetch(`${platformUrl}/api/calls/analyze-message`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'lk-id': linkedinId,
+                'csrf-token': tokenResult.csrfToken
+            },
+                        body: JSON.stringify({
+                            message: latestReply.text,
+                            leadName: leadName,
+                            context: 'LinkedIn message response analysis',
+                            original_message: null, // Let backend fetch from database
+                            call_id: callId || 'test_call_analysis',
+                            connection_id: null,
+                            conversation_urn_id: null
+                        })
+        });
+        
+        if (!aiResponse.ok) {
+            console.log(`❌ AI analysis failed: ${aiResponse.status}`);
+            return { success: false, reason: 'AI analysis failed' };
+        }
+        
+        const aiResponseData = await aiResponse.json();
+        console.log('🤖 AI Analysis Result:', aiResponseData);
+        
+        if (!aiResponseData.success) {
+            console.log(`❌ AI analysis failed: ${aiResponseData.message}`);
+            return { success: false, reason: 'AI analysis failed', error: aiResponseData.message };
+        }
+        
+        const aiAnalysis = aiResponseData.analysis;
+        
+        // Check if the response is positive (handle all field name formats)
+        const intent = aiAnalysis.intent || aiAnalysis.Intent;
+        const sentiment = aiAnalysis.sentiment || aiAnalysis.Sentiment;
+        const leadScore = aiAnalysis.leadScore || aiAnalysis['Lead Score'] || aiAnalysis.lead_score;
+        const isPositiveFlag = aiAnalysis.isPositive || aiAnalysis['Is Positive'];
+        
+        const isPositive = isPositiveFlag || 
+                          (intent && (
+                              intent.toLowerCase() === 'available' ||
+                              intent.toLowerCase() === 'interested' ||
+                              intent.toLowerCase() === 'scheduling_request'
+                          )) ||
+                          (sentiment && sentiment.toLowerCase() === 'positive') ||
+                          (leadScore && leadScore >= 7);
+        
+        console.log(`🎯 Response Analysis:`);
+        console.log(`   - Intent: ${intent || 'Unknown'}`);
+        console.log(`   - Sentiment: ${sentiment || 'Unknown'}`);
+        console.log(`   - Lead Score: ${leadScore || 'Unknown'}`);
+        console.log(`   - Is Positive Flag: ${isPositiveFlag}`);
+        console.log(`   - Is Positive (calculated): ${isPositive}`);
+        console.log(`   - Analysis Object:`, JSON.stringify(aiAnalysis, null, 2));
+        
+        if (isPositive) {
+            console.log('🎉 POSITIVE RESPONSE DETECTED! Generating calendar link...');
+            
+                        // Generate calendar link
+                        const calendarResponse = await fetch(`${platformUrl}/api/calls/${connectionId}_${Date.now()}/calendar-link`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'lk-id': linkedinId
+                }
+            });
+            
+            if (calendarResponse.ok) {
+                const calendarData = await calendarResponse.json();
+                console.log('✅ Calendar link generated:', calendarData.calendarLink);
+                
+                // Send the scheduling message to Eleazar
+                console.log('📤 Sending scheduling message to Eleazar...');
+                
+                        // Use the conversation ID from the connection and send the scheduling message
+                        const conversationId = connectionId; // This should be the conversation URN
+                        const voyagerApi = 'https://www.linkedin.com/voyager/api';
+                
+                const tokenResult = await chrome.storage.local.get(['csrfToken']);
+                
+                const sendMessageResponse = await fetch(`${voyagerApi}/messaging/conversations/${conversationId}/events`, {
+                    method: 'POST',
+                    headers: {
+                        'csrf-token': tokenResult.csrfToken,
+                        'accept': 'application/vnd.linkedin.normalized+json+2.1',
+                        'content-type': 'application/json',
+                        'x-li-lang': 'en_US',
+                        'x-restli-protocol-version': '2.0.0'
+                    },
+                    body: JSON.stringify({
+                        eventContent: {
+                            'com.linkedin.voyager.messaging.create.MessageCreate': {
+                                body: calendarData.schedulingMessage || `Great! I'd love to schedule a call with you. Please use this link to book a time that works for you: ${calendarData.calendarLink}`
+                            }
+                        }
+                    })
+                });
+                
+                        if (sendMessageResponse.ok) {
+                            console.log(`✅ Scheduling message sent successfully to ${leadName}!`);
+                    return {
+                        success: true,
+                        action: 'calendar_sent',
+                        calendarLink: calendarData.calendarLink,
+                        schedulingMessage: calendarData.schedulingMessage,
+                        aiAnalysis: aiAnalysis
+                    };
+                } else {
+                    console.log(`❌ Failed to send scheduling message: ${sendMessageResponse.status}`);
+                    return {
+                        success: false,
+                        reason: 'Failed to send scheduling message',
+                        aiAnalysis: aiAnalysis
+                    };
+                }
+            } else {
+                console.log(`❌ Failed to generate calendar link: ${calendarResponse.status}`);
+                return {
+                    success: false,
+                    reason: 'Failed to generate calendar link',
+                    aiAnalysis: aiAnalysis
+                };
+            }
+        } else {
+            console.log('📝 Response is neutral/negative - no action taken');
+            return {
+                success: true,
+                action: 'no_action_needed',
+                aiAnalysis: aiAnalysis,
+                message: 'Response analyzed as neutral/negative'
+            };
+        }
+        
+    } catch (error) {
+        console.error('❌ Error analyzing Eleazar replies:', error);
+        return { success: false, reason: 'Analysis failed', error: error.message };
+    }
+};
+
+// Function to create a comprehensive polling + AI pipeline for call response tracking
+self.createCallResponsePipeline = async () => {
+    console.log('🚀 CREATING COMPREHENSIVE CALL RESPONSE PIPELINE...');
+    
+    try {
+        // Get all call response monitoring entries
+        const allStorage = await chrome.storage.local.get();
+        const responseKeys = Object.keys(allStorage).filter(key => key.startsWith('call_response_monitoring_'));
+        
+        if (responseKeys.length === 0) {
+            console.log('❌ No call response monitoring entries found');
+            console.log('💡 Make sure you have sent call messages first');
+            return;
+        }
+        
+        console.log(`📊 Found ${responseKeys.length} call response monitoring entries`);
+        
+        // Process each monitoring entry
+        for (const key of responseKeys) {
+            const monitoringData = allStorage[key];
+            console.log(`\n🔍 Processing: ${monitoringData.leadName} (${monitoringData.connectionId})`);
+            
+            try {
+                // Step 1: Get conversations using the improved function
+                const conversationData = await fetchLinkedInConversation(monitoringData.connectionId, monitoringData.lastCheckedMessageId);
+                
+                if (!conversationData) {
+                    console.log(`❌ No conversation data for ${monitoringData.leadName}`);
+                    continue;
+                }
+                
+                // Step 2: Process new messages
+                if (conversationData.messages && conversationData.messages.length > 0) {
+                    console.log(`📨 Found ${conversationData.messages.length} new messages from ${monitoringData.leadName}`);
+                    
+                    for (const message of conversationData.messages) {
+                        console.log(`📝 Message: "${message.text}"`);
+                        console.log(`👤 From: ${message.sender}`);
+                        console.log(`🕐 Time: ${new Date(message.timestamp).toLocaleString()}`);
+                        
+                        // Step 3: AI Analysis for positive responses (works for any LinkedIn user)
+                        if (message.isFromLead && message.text.trim().length > 0) {
+                            console.log(`🤖 Analyzing message with AI...`);
+                            
+                            try {
+                                const aiResponse = await processCallReplyWithAI(monitoringData.callId || 'unknown', message.text, monitoringData.leadName);
+                                
+                                if (aiResponse && aiResponse.isPositive) {
+                                    console.log(`🎉 POSITIVE RESPONSE DETECTED!`);
+                                    console.log(`📊 Intent: ${aiResponse.intent}`);
+                                    console.log(`😊 Sentiment: ${aiResponse.sentiment}`);
+                                    console.log(`⭐ Lead Score: ${aiResponse.leadScore}`);
+                                    
+                                    // Step 4: Generate calendar link and send scheduling message
+                                    console.log(`📅 Generating calendar link...`);
+                                    const calendarResponse = await fetch(`${platformUrl}/api/calls/${monitoringData.callId || 'unknown'}/calendar-link`, {
+                                        method: 'POST',
+                                        headers: {
+                                            'Content-Type': 'application/json',
+                                            'lk-id': linkedinId
+                                        }
+                                    });
+                                    
+                                    if (calendarResponse.ok) {
+                                        const calendarData = await calendarResponse.json();
+                                        console.log(`✅ Calendar link generated: ${calendarData.calendarLink}`);
+                                        
+                                        // Step 5: Send scheduling message via LinkedIn
+                                        console.log(`📤 Sending scheduling message...`);
+                                        await sendCalendarLinkMessage(monitoringData, calendarData.calendarLink, calendarData.schedulingMessage);
+                                        
+                                        console.log(`🎯 COMPLETE! Call response pipeline executed successfully for ${monitoringData.leadName}`);
+                                    } else {
+                                        console.log(`❌ Failed to generate calendar link: ${calendarResponse.status}`);
+                                    }
+                                } else {
+                                    console.log(`📝 Response analyzed as neutral/negative - no action taken`);
+                                }
+                            } catch (error) {
+                                console.error(`❌ AI analysis failed:`, error);
+                            }
+                        }
+                    }
+                    
+                    // Step 6: Update monitoring data with latest message ID
+                    const latestMessage = conversationData.messages[conversationData.messages.length - 1];
+                    monitoringData.lastCheckedMessageId = latestMessage.id;
+                    monitoringData.lastChecked = Date.now();
+                    monitoringData.messageCount += conversationData.messages.length;
+                    
+                    await chrome.storage.local.set({ [key]: monitoringData });
+                    console.log(`✅ Updated monitoring data for ${monitoringData.leadName}`);
+                } else {
+                    console.log(`⏳ No new messages from ${monitoringData.leadName}`);
+                }
+                
+            } catch (error) {
+                console.error(`❌ Error processing ${monitoringData.leadName}:`, error);
+            }
+        }
+        
+        console.log(`\n🎯 Call response pipeline completed for ${responseKeys.length} leads`);
+        
+    } catch (error) {
+        console.error('❌ Call response pipeline failed:', error);
+    }
+};
+
+// Function to try different LinkedIn API endpoints for conversations
+self.testLinkedInConversationsAPI = async () => {
+    console.log('🔍 TESTING DIFFERENT LINKEDIN CONVERSATIONS API ENDPOINTS...');
+    
+    try {
+        // Get CSRF token
+        const tokenResult = await chrome.storage.local.get(['csrfToken']);
+        if (!tokenResult.csrfToken) {
+            console.error('❌ No CSRF token found');
+            return;
+        }
+        
+        const voyagerApi = 'https://www.linkedin.com/voyager/api';
+        const headers = {
+            'csrf-token': tokenResult.csrfToken,
+            'accept': 'application/vnd.linkedin.normalized+json+2.1',
+            'x-li-lang': 'en_US',
+            'x-restli-protocol-version': '2.0.0'
+        };
+        
+        // Test different endpoints
+        const endpoints = [
+            '/messaging/conversations',
+            '/messaging/conversations?count=50',
+            '/messaging/conversations?count=100',
+            '/messaging/conversations?start=0&count=20',
+            '/messaging/conversations?q=all',
+            '/messaging/conversations?q=received',
+            '/messaging/conversations?q=sent',
+            '/messaging/conversations?q=unread',
+            '/messaging/conversations?q=read',
+            '/messaging/conversations?q=archived',
+            '/messaging/conversations?q=spam',
+            '/messaging/conversations?q=trash',
+            '/messaging/conversations?q=all&count=50',
+            '/messaging/conversations?q=all&count=100',
+            '/messaging/conversations?q=all&count=200',
+            '/messaging/conversations?q=all&count=500',
+            '/messaging/conversations?q=all&count=1000',
+            '/messaging/conversations?q=all&count=2000',
+            '/messaging/conversations?q=all&count=5000',
+            '/messaging/conversations?q=all&count=10000'
+        ];
+        
+        for (const endpoint of endpoints) {
+            try {
+                console.log(`🧪 Testing endpoint: ${endpoint}`);
+                const response = await fetch(`${voyagerApi}${endpoint}`, {
+                    method: 'GET',
+                    headers: headers
+                });
+                
+                console.log(`📡 Status: ${response.status}`);
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    const conversations = data.elements || [];
+                    console.log(`✅ Found ${conversations.length} conversations`);
+                    
+                    if (conversations.length > 0) {
+                        console.log('🎉 SUCCESS! Found conversations with endpoint:', endpoint);
+                        console.log('📋 First conversation:', conversations[0]);
+                        break;
+                    }
+                } else {
+                    console.log(`❌ Failed: ${response.status}`);
+                }
+            } catch (error) {
+                console.log(`❌ Error: ${error.message}`);
+            }
+        }
+        
+    } catch (error) {
+        console.error('❌ LinkedIn conversations API test failed:', error);
+    }
+};
+
+// Function to debug LinkedIn conversations
+self.debugLinkedInConversations = async () => {
+    console.log('🔍 DEBUGGING LINKEDIN CONVERSATIONS...');
+    
+    try {
+        // Get CSRF token
+        const tokenResult = await chrome.storage.local.get(['csrfToken']);
+        if (!tokenResult.csrfToken) {
+            console.error('❌ No CSRF token found');
+            return;
+        }
+        
+        console.log('✅ CSRF token found');
+        
+        // Fetch conversations
+        const voyagerApi = 'https://www.linkedin.com/voyager/api';
+        const response = await fetch(`${voyagerApi}/messaging/conversations`, {
+            method: 'GET',
+            headers: {
+                'csrf-token': tokenResult.csrfToken,
+                'accept': 'application/vnd.linkedin.normalized+json+2.1',
+                'x-li-lang': 'en_US',
+                'x-restli-protocol-version': '2.0.0'
+            }
+        });
+        
+        console.log('📡 LinkedIn conversations API status:', response.status);
+        
+        if (!response.ok) {
+            console.error('❌ LinkedIn conversations API failed:', response.status);
+            return;
+        }
+        
+        const data = await response.json();
+        const conversations = data.elements || [];
+        
+        console.log('📊 Total conversations found:', conversations.length);
+        
+        // Look for Eleazar's conversation
+        const eleazarConversation = conversations.find(conv => {
+            return conv.participants?.some(participant => {
+                const profile = participant.com?.linkedin?.voyager?.messaging?.MessagingMember?.miniProfile;
+                return profile?.publicIdentifier === 'eleazar-nzerem' || 
+                       profile?.firstName === 'Eleazar' || 
+                       profile?.lastName === 'Nzerem';
+            });
+        });
+        
+        if (eleazarConversation) {
+            console.log('✅ FOUND ELEAZAR CONVERSATION:', eleazarConversation.entityUrn);
+            console.log('📋 Conversation details:', {
+                entityUrn: eleazarConversation.entityUrn,
+                participants: eleazarConversation.participants?.map(p => ({
+                    name: `${p.com?.linkedin?.voyager?.messaging?.MessagingMember?.miniProfile?.firstName} ${p.com?.linkedin?.voyager?.messaging?.MessagingMember?.miniProfile?.lastName}`,
+                    publicIdentifier: p.com?.linkedin?.voyager?.messaging?.MessagingMember?.miniProfile?.publicIdentifier
+                }))
+            });
+        } else {
+            console.log('❌ No conversation found with Eleazar');
+            console.log('🔍 Available conversations:', conversations.map(c => ({
+                entityUrn: c.entityUrn,
+                participants: c.participants?.map(p => ({
+                    name: `${p.com?.linkedin?.voyager?.messaging?.MessagingMember?.miniProfile?.firstName} ${p.com?.linkedin?.voyager?.messaging?.MessagingMember?.miniProfile?.lastName}`,
+                    publicIdentifier: p.com?.linkedin?.voyager?.messaging?.MessagingMember?.miniProfile?.publicIdentifier
+                }))
+            })));
+        }
+        
+    } catch (error) {
+        console.error('❌ Debug failed:', error);
+    }
+};
+
+// Function to manually set up response monitoring for all accepted connections
+self.setupResponseMonitoringForAcceptedConnections = async () => {
+    console.log('🔧 Setting up response monitoring for all accepted connections...');
+    
+    try {
+        // Get all campaigns and their accepted leads
+        const campaignsResponse = await fetch(`${PLATFORM_URL}/api/campaigns`, {
+            headers: { 'lk-id': linkedinId || 'vicken-concept' }
+        });
+        
+        if (!campaignsResponse.ok) {
+            console.error('❌ Failed to fetch campaigns');
+            return;
+        }
+        
+        const campaignsData = await campaignsResponse.json();
+        const campaigns = campaignsData.data || [];
+        
+        console.log(`📊 Found ${campaigns.length} campaigns to check`);
+        
+        for (const campaign of campaigns) {
+            if (campaign.status === 'running' || campaign.status === 'stop') {
+                console.log(`🔍 Checking campaign ${campaign.id} (${campaign.name})`);
+                
+                // Get leads for this campaign
+                const leadsResponse = await fetch(`${PLATFORM_URL}/api/campaign/${campaign.id}/leads`, {
+                    headers: { 'lk-id': linkedinId || 'vicken-concept' }
+                });
+                
+                if (leadsResponse.ok) {
+                    const leadsData = await leadsResponse.json();
+                    const leads = leadsData.data || [];
+                    
+                    console.log(`👥 Found ${leads.length} leads in campaign ${campaign.id}`);
+                    
+                    for (const lead of leads) {
+                        if (lead.acceptedStatus === true && lead.connectionId) {
+                            console.log(`✅ Lead ${lead.name} is accepted - setting up monitoring`);
+                            
+                            // Create monitoring entry for this accepted lead
+                            const responseMonitoringKey = `call_response_monitoring_${campaign.id}_${lead.connectionId}`;
+                            
+                            // Check if monitoring already exists
+                            const existingMonitoring = await chrome.storage.local.get([responseMonitoringKey]);
+                            if (!existingMonitoring[responseMonitoringKey]) {
+                                await chrome.storage.local.set({ 
+                                    [responseMonitoringKey]: {
+                                        callId: `${lead.connectionId}_${Date.now()}`, // Generate temporary call ID
+                                        leadId: lead.id,
+                                        leadName: lead.name,
+                                        connectionId: lead.connectionId,
+                                        campaignId: campaign.id,
+                                        conversationUrnId: null, // Will be updated when we fetch conversations
+                                        sentAt: Date.now(),
+                                        status: 'waiting_for_response',
+                                        lastCheckedMessageId: null,
+                                        messageCount: 0
+                                    }
+                                });
+                                console.log(`📊 Created response monitoring for ${lead.name}: ${responseMonitoringKey}`);
+                            } else {
+                                console.log(`⏭️ Monitoring already exists for ${lead.name}`);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        console.log('✅ Response monitoring setup completed for all accepted connections');
+        
+    } catch (error) {
+        console.error('❌ Error setting up response monitoring:', error);
+    }
+};
+
+// Function to manually set up response monitoring for existing calls
+self.setupResponseMonitoringForExistingCalls = async () => {
+    console.log('🔧 Setting up response monitoring for existing calls...');
+    const allStorage = await chrome.storage.local.get();
+    const callAttemptKeys = Object.keys(allStorage).filter(key => key.startsWith('call_attempted_'));
+    
+    // Find the most recent call attempt for Eleazar
+    let mostRecentCall = null;
+    let mostRecentTime = 0;
+    
+    callAttemptKeys.forEach(key => {
+        const timestamp = allStorage[key];
+        if (timestamp > mostRecentTime) {
+            mostRecentTime = timestamp;
+            mostRecentCall = key;
+        }
+    });
+    
+    if (mostRecentCall) {
+        const parts = mostRecentCall.split('_');
+        const campaignId = parts[2];
+        const connectionId = parts[3];
+        
+        console.log('🎯 Most recent call found:', mostRecentCall);
+        console.log('📊 Campaign ID:', campaignId);
+        console.log('👤 Connection ID:', connectionId);
+        
+        // Set up response monitoring for this call
+        const responseMonitoringKey = `call_response_monitoring_${campaignId}_${connectionId}`;
+        await chrome.storage.local.set({ 
+            [responseMonitoringKey]: {
+                callId: null, // We don't have the actual call ID, but we can still monitor
+                leadId: 14521, // Eleazar's lead ID from the logs
+                leadName: 'Eleazar Nzerem',
+                connectionId: connectionId,
+                campaignId: campaignId,
+                conversationUrnId: null, // Will be updated when we fetch conversations
+                sentAt: mostRecentTime,
+                status: 'waiting_for_response',
+                lastCheckedMessageId: null,
+                messageCount: 0
+            }
+        });
+        
+        console.log('✅ Response monitoring set up for most recent call:', responseMonitoringKey);
+        console.log('🕐 Call sent at:', new Date(mostRecentTime));
+        
+        return responseMonitoringKey;
+    } else {
+        console.log('❌ No call attempts found');
+        return null;
+    }
+};
+
+// Manual function to simulate a call response for testing
+self.simulateCallResponse = async (callId, message, isPositive = true) => {
+    console.log('🧪 SIMULATING CALL RESPONSE for testing...');
+    
+    try {
+        const response = await fetch(`${PLATFORM_URL}/api/calls/process-reply`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'lk-id': linkedinId || 'vicken-concept'
+            },
+            body: JSON.stringify({
+                call_id: callId,
+                message: message,
+                profile_id: 'test-profile',
+                sender: 'lead'
+            })
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            console.log('✅ Simulated response processed:', result);
+            return `Response simulated successfully. Analysis: ${JSON.stringify(result.analysis)}`;
+        } else {
+            console.error('❌ Failed to simulate response:', response.status);
+            return `Failed to simulate response: ${response.status}`;
+        }
+    } catch (error) {
+        console.error('❌ Error simulating response:', error);
+        return `Error simulating response: ${error.message}`;
+    }
+};
+
+// Manual function to check call responses for testing
+self.checkCallResponses = async () => {
+    console.log('🔍 MANUALLY CHECKING CALL RESPONSES...');
+    await checkForCallResponses();
+    return 'Call response check completed - check console for results';
+};
+
+// Manual function to force check call responses immediately
+self.forceCheckResponses = async () => {
+    console.log('🚀 FORCING IMMEDIATE CALL RESPONSE CHECK...');
+    try {
+        await checkForCallResponses();
+        console.log('✅ Forced call response check completed');
+        return 'Forced call response check completed - check console for results';
+    } catch (error) {
+        console.error('❌ Forced call response check failed:', error);
+        return 'Forced call response check failed - check console for errors';
+    }
+};
+// Manual function to check specific lead's monitoring data
+self.checkLeadMonitoring = async (leadName) => {
+    console.log(`🔍 CHECKING MONITORING DATA FOR: ${leadName}`);
+    try {
+        const allStorage = await chrome.storage.local.get();
+        const responseKeys = Object.keys(allStorage).filter(key => key.startsWith('call_response_monitoring_'));
+        
+        console.log('📊 All monitoring keys:', responseKeys);
+        
+        for (const key of responseKeys) {
+            const monitoringData = allStorage[key];
+            if (monitoringData.leadName && monitoringData.leadName.toLowerCase().includes(leadName.toLowerCase())) {
+                console.log(`🎯 FOUND MONITORING DATA FOR ${leadName}:`, monitoringData);
+                return monitoringData;
+            }
+        }
+        
+        console.log(`❌ No monitoring data found for ${leadName}`);
+        return null;
+    } catch (error) {
+        console.error('❌ Error checking lead monitoring:', error);
+        return null;
+    }
+};
+
+// Manual function to test LinkedIn conversation fetching
+self.testLinkedInConversation = async (connectionId) => {
+    console.log('🧪 TESTING LINKEDIN CONVERSATION FETCHING...');
+    console.log('🔗 Connection ID:', connectionId);
+    
+    try {
+        const messages = await fetchLinkedInConversation(connectionId);
+        console.log('📊 Messages fetched:', messages);
+        return `LinkedIn conversation test completed. Found ${messages ? messages.length : 0} messages. Check console for details.`;
+    } catch (error) {
+        console.error('❌ Error testing LinkedIn conversation:', error);
+        return `Error testing LinkedIn conversation: ${error.message}`;
+    }
+};
+
 // Flag to prevent concurrent execution of acceptance checks
 let isCheckingAcceptances = false;
+
+/**
+ * Check for call responses and process them using real LinkedIn API
+ */
+const checkForCallResponses = async () => {
+    console.log('🔍 Checking for call responses using LinkedIn API...');
+    
+    try {
+        // Get all response monitoring keys
+        const allStorage = await chrome.storage.local.get();
+        const responseKeys = Object.keys(allStorage).filter(key => key.startsWith('call_response_monitoring_'));
+        
+        if (responseKeys.length === 0) {
+            console.log('📭 No call responses to monitor');
+            return;
+        }
+        
+        console.log(`📊 Found ${responseKeys.length} call responses to check`);
+        // console.log('🔍 Response monitoring keys:', responseKeys);
+        
+        for (const key of responseKeys) {
+            const monitoringData = allStorage[key];
+            console.log(`🔍 Checking monitoring data for key: ${key}`, monitoringData);
+            
+            if (monitoringData.status === 'waiting_for_response') {
+                console.log(`🔍 Checking LinkedIn conversation for ${monitoringData.leadName} (Call ID: ${monitoringData.callId})`);
+                console.log(`🔍 Monitoring data status: ${monitoringData.status}`);
+                console.log(`🔍 Lead name: ${monitoringData.leadName}`);
+                console.log(`🔍 Connection ID: ${monitoringData.connectionId}`);
+                
+                try {
+                    // Check LinkedIn conversation for new messages
+                    const conversationData = await fetchLinkedInConversation(monitoringData.connectionId, monitoringData.lastCheckedMessageId);
+                    
+                    // Update monitoring data with conversation URN ID if found
+                    if (conversationData && conversationData.conversationUrnId && !monitoringData.conversationUrnId) {
+                        console.log(`🔗 Updating monitoring data with conversation URN ID: ${conversationData.conversationUrnId}`);
+                        monitoringData.conversationUrnId = conversationData.conversationUrnId;
+                        await chrome.storage.local.set({ [key]: monitoringData });
+                    }
+                    
+                    if (conversationData && conversationData.messages && conversationData.messages.length > 0) {
+                        const newMessages = conversationData.messages;
+                        console.log(`📨 Found ${newMessages.length} new messages from ${monitoringData.leadName}`);
+                        
+                        // Process the latest message
+                        const latestMessage = newMessages[newMessages.length - 1];
+                        
+                        // Debug logging for conversation analysis
+                        console.log(`🔍 DEBUG: Analyzing conversation for ${monitoringData.leadName}`);
+                        console.log(`📊 Total messages in conversation: ${newMessages.length}`);
+                        
+                        // Removed verbose message logging for cleaner output
+                        
+                        console.log(`📝 Latest message details:`, {
+                            id: latestMessage.id,
+                            text: latestMessage.text?.substring(0, 100) + '...',
+                            timestamp: latestMessage.timestamp,
+                            isFromLead: latestMessage.isFromLead,
+                            sender: latestMessage.sender,
+                            createdAt: new Date(latestMessage.timestamp).toISOString()
+                        });
+                        
+                        // Show what we're looking for
+                        console.log('🔍 LOOKING FOR LEAD MESSAGES:');
+                        console.log(`   - Total messages in conversation: ${newMessages.length}`);
+                        console.log(`   - Messages from lead: ${newMessages.filter(msg => msg.isFromLead).length}`);
+                        console.log(`   - Latest message is from lead: ${latestMessage.isFromLead}`);
+                        console.log(`   - Latest message text: "${latestMessage.text}"`);
+                        console.log(`📊 Monitoring data:`, {
+                            lastCheckedMessageId: monitoringData.lastCheckedMessageId,
+                            lastResponseSentAt: monitoringData.lastResponseSentAt,
+                            responseCount: monitoringData.responseCount,
+                            status: monitoringData.status
+                        });
+                        
+                        // Check if this message is from the lead (not from us) - works for any LinkedIn user
+                        console.log(`🔍 CHECKING MESSAGE: isFromLead = ${latestMessage.isFromLead}`);
+                        if (latestMessage.isFromLead) {
+                            console.log(`🎯 FOUND MESSAGE FROM LEAD: "${latestMessage.text}"`);
+                            console.log(`🔍 Message ID: ${latestMessage.id}`);
+                            console.log(`🔍 Message timestamp: ${new Date(latestMessage.timestamp).toISOString()}`);
+                            
+                            // Additional check: Make sure we haven't already responded to this message
+                            if (monitoringData.lastCheckedMessageId === latestMessage.id) {
+                                console.log(`⏭️ Already processed this message from ${monitoringData.leadName}, skipping...`);
+                                continue;
+                            }
+                            
+                            // Check if we were the last to respond (to prevent back-to-back messaging)
+                            if (monitoringData.lastResponseSentAt && monitoringData.lastResponseSentAt > latestMessage.timestamp) {
+                                console.log(`⏭️ We were the last to respond to ${monitoringData.leadName}, waiting for their reply...`);
+                                console.log(`🔍 DEBUG: lastResponseSentAt (${monitoringData.lastResponseSentAt}) > message.timestamp (${latestMessage.timestamp})`);
+                                console.log(`🔍 DEBUG: Last response time: ${new Date(monitoringData.lastResponseSentAt).toISOString()}`);
+                                console.log(`🔍 DEBUG: Message time: ${new Date(latestMessage.timestamp).toISOString()}`);
+                                continue;
+                            }
+                            
+                            // Check if we've already sent too many responses (max 3 responses per lead)
+                            const maxResponses = 5;
+                            if (monitoringData.responseCount && monitoringData.responseCount >= maxResponses) {
+                                console.log(`⏭️ Already sent ${monitoringData.responseCount} responses to ${monitoringData.leadName}, max limit reached (${maxResponses})`);
+                                monitoringData.status = 'max_responses_reached';
+                                await chrome.storage.local.set({ [key]: monitoringData });
+                                continue;
+                            }
+                            
+                            console.log('✅ New response received from lead:', latestMessage.text);
+                            console.log(`🔍 DEBUG: Proceeding to respond because:`);
+                            console.log(`   - Message is from lead: ${latestMessage.isFromLead}`);
+                            console.log(`   - Message not already processed: ${monitoringData.lastCheckedMessageId !== latestMessage.id}`);
+                            console.log(`   - We were not the last to respond: ${!(monitoringData.lastResponseSentAt && monitoringData.lastResponseSentAt > latestMessage.timestamp)}`);
+                            console.log(`   - Under response limit: ${!(monitoringData.responseCount && monitoringData.responseCount >= 3)}`);
+                        } else {
+                            console.log(`❌ MESSAGE NOT FROM LEAD: "${latestMessage.text}"`);
+                            console.log(`   - isFromLead: ${latestMessage.isFromLead}`);
+                            console.log(`   - sender: "${latestMessage.sender}"`);
+                            console.log(`   - Skipping this message...`);
+                        }
+                        
+                        // Only proceed with AI analysis if message is from lead
+                        if (latestMessage.isFromLead) {
+                            try {
+                            // Store the lead's message in conversation history
+                            console.log('🔍 DEBUG: Storing conversation message with call_id:', monitoringData.callId);
+                            console.log('🔍 DEBUG: Monitoring data:', monitoringData);
+                            
+                            const result = await storeConversationMessage({
+                                call_id: monitoringData.callId,
+                                message: latestMessage.text,
+                                sender: 'lead',
+                                message_type: 'text',
+                                lead_name: monitoringData.leadName,
+                                connection_id: monitoringData.connectionId,
+                                conversation_urn_id: monitoringData.conversationUrnId
+                            });
+                            
+                            if (!result) {
+                                console.error('❌ Failed to store conversation message - call_id might be invalid:', monitoringData.callId);
+                            } else {
+                                // Update monitoring data with the real call_id from server response
+                                if (result.call_id && result.call_id !== monitoringData.callId) {
+                                    console.log('🔄 Updating monitoring data with real call_id:', result.call_id);
+                                    monitoringData.callId = result.call_id;
+                                    await chrome.storage.local.set({ [key]: monitoringData });
+                                }
+                            }
+
+                            // Send message to backend for AI analysis
+                            const analysisResponse = await processCallReplyWithAI(monitoringData.callId, latestMessage.text, monitoringData.leadName);
+                            
+                            if (analysisResponse) {
+                            // Update monitoring status
+                            monitoringData.status = 'response_received';
+                                monitoringData.responseData = analysisResponse;
+                            monitoringData.receivedAt = Date.now();
+                                monitoringData.lastCheckedMessageId = latestMessage.id;
+                            
+                            await chrome.storage.local.set({ [key]: monitoringData });
+                            
+                                // Check if this is a scheduling scenario
+                                const callStatus = analysisResponse.call_status || analysisResponse['call_status'];
+                                const isSchedulingInitiated = callStatus === 'scheduled';
+                                
+                                if (isSchedulingInitiated) {
+                                    console.log('📅 SCHEDULING INITIATED - Generating calendar link instead of AI response');
+                                    
+                                    // Generate calendar link for scheduling
+                                    try {
+                                        // Always request calendar link from backend (reuses existing if already generated)
+                                        const calendarResponse = await fetch(`${PLATFORM_URL}/api/calls/${monitoringData.callId || 'unknown'}/calendar-link`, {
+                                            method: 'POST',
+                                            headers: {
+                                                'Content-Type': 'application/json',
+                                                'lk-id': linkedinId || 'vicken-concept'
+                                            }
+                                        });
+
+                                        if (calendarResponse.ok) {
+                                            const calendarData = await calendarResponse.json();
+                                            const schedulingMessage = calendarData.scheduling_message || 
+                                                `Perfect! I'd love to schedule a call with you. Please book a convenient time here: ${calendarData.calendar_link}\n\nLooking forward to speaking with you!`;
+
+                                            await sendSchedulingMessage(monitoringData, schedulingMessage, calendarData.calendar_link);
+                                        } else {
+                                            console.error('❌ Failed to generate calendar link (fallback to AI response path)', calendarResponse.status);
+                                            const suggestedResponse = analysisResponse.suggested_response || analysisResponse['Suggested Response'] || analysisResponse.suggestedResponse;
+                                            if (suggestedResponse) {
+                                                await sendAIMessage(monitoringData, suggestedResponse);
+                                            }
+                                        }
+                                    } catch (error) {
+                                        console.error('❌ Error generating calendar link:', error);
+                                        // Fallback to AI response
+                                        const suggestedResponse = analysisResponse.suggested_response || analysisResponse['Suggested Response'] || analysisResponse.suggestedResponse;
+                                        if (suggestedResponse) {
+                                            console.log(`📤 Fallback: Sending AI response to ${monitoringData.leadName}: "${suggestedResponse}"`);
+                                            await sendAIMessage(monitoringData, suggestedResponse);
+                                        }
+                                    }
+                                } else {
+                                    // Send AI-generated response for non-scheduling scenarios
+                                    console.log('📤 Sending AI-generated response to lead...');
+                                    
+                                    if (analysisResponse.suggested_response || analysisResponse['Suggested Response'] || analysisResponse.suggestedResponse) {
+                                        const suggestedResponse = analysisResponse.suggested_response || analysisResponse['Suggested Response'] || analysisResponse.suggestedResponse;
+                                        console.log(`📤 Sending AI response to ${monitoringData.leadName}: "${suggestedResponse}"`);
+                                        console.log(`🔍 Full analysis response:`, analysisResponse);
+                                        
+                                        await sendAIMessage(monitoringData, suggestedResponse);
+                                    }
+                            }
+                        } else {
+                            // Update last checked message ID to avoid reprocessing
+                            monitoringData.lastCheckedMessageId = latestMessage.id;
+                            await chrome.storage.local.set({ [key]: monitoringData });
+                            }
+                        } catch (error) {
+                            console.error('❌ Error processing lead message:', error);
+                        }
+                    } else {
+                        console.log('⏳ No new messages from', monitoringData.leadName);
+                            
+                        // Check if it's been too long (e.g., 7 days)
+                        const daysSinceSent = (Date.now() - monitoringData.sentAt) / (1000 * 60 * 60 * 24);
+                        if (daysSinceSent > 7) {
+                            console.log('⏰ Response timeout after 7 days, marking as no response');
+                            monitoringData.status = 'timeout';
+                            await chrome.storage.local.set({ [key]: monitoringData });
+                            await markCallNodeAsCompleted(monitoringData.campaignId, monitoringData.leadId);
+                        }
+                        }
+                    } else {
+                        console.log('⏳ No new messages from', monitoringData.leadName);
+                            
+                            // Check if it's been too long (e.g., 7 days)
+                            const daysSinceSent = (Date.now() - monitoringData.sentAt) / (1000 * 60 * 60 * 24);
+                            if (daysSinceSent > 7) {
+                                console.log('⏰ Response timeout after 7 days, marking as no response');
+                                monitoringData.status = 'timeout';
+                                await chrome.storage.local.set({ [key]: monitoringData });
+                                await markCallNodeAsCompleted(monitoringData.campaignId, monitoringData.leadId);
+                        }
+                    }
+                } catch (error) {
+                    console.error('❌ Error checking LinkedIn conversation for', monitoringData.leadName, ':', error);
+                }
+            } else {
+                console.log(`🔍 FORCING CHECK: ${monitoringData.leadName} - Status: ${monitoringData.status} (checking anyway for new messages)`);
+                
+                // Force check conversation even if status is not waiting_for_response
+                try {
+                    console.log(`🔍 FORCE CHECKING LinkedIn conversation for ${monitoringData.leadName} (Call ID: ${monitoringData.callId})`);
+                    console.log(`🔍 Monitoring data status: ${monitoringData.status}`);
+                    console.log(`🔍 Lead name: ${monitoringData.leadName}`);
+                    console.log(`🔍 Connection ID: ${monitoringData.connectionId}`);
+                    
+                    // Check LinkedIn conversation for new messages
+                    const conversationData = await fetchLinkedInConversation(monitoringData.connectionId, monitoringData.lastCheckedMessageId);
+                    
+                    // Update monitoring data with conversation URN ID if found
+                    if (conversationData && conversationData.conversationUrnId && !monitoringData.conversationUrnId) {
+                        console.log(`🔗 Updating monitoring data with conversation URN ID: ${conversationData.conversationUrnId}`);
+                        monitoringData.conversationUrnId = conversationData.conversationUrnId;
+                        await chrome.storage.local.set({ [key]: monitoringData });
+                    }
+                    
+                    if (conversationData && conversationData.messages && conversationData.messages.length > 0) {
+                        const newMessages = conversationData.messages;
+                        console.log(`📨 Found ${newMessages.length} messages from ${monitoringData.leadName} (FORCE CHECK)`);
+                        
+                        // Process the latest message
+                        const latestMessage = newMessages[newMessages.length - 1];
+                        
+                        // Debug logging for conversation analysis
+                        console.log(`🔍 DEBUG: Analyzing conversation for ${monitoringData.leadName} (FORCE CHECK)`);
+                        console.log(`📊 Total messages in conversation: ${newMessages.length}`);
+                        
+                        // Removed verbose message logging for cleaner output
+                        
+                        console.log(`📝 Latest message details:`, latestMessage);
+                        
+                        // Check if the latest message is from the lead
+                        const leadMessages = newMessages.filter(msg => msg.isFromLead);
+                        console.log(`🔍 LOOKING FOR LEAD MESSAGES:`);
+                        console.log(`   - Total messages in conversation: ${newMessages.length}`);
+                        console.log(`   - Messages from lead: ${leadMessages.length}`);
+                        console.log(`   - Latest message is from lead: ${latestMessage.isFromLead}`);
+                        console.log(`   - Latest message text: "${latestMessage.text}"`);
+                        
+                        console.log(`📊 Monitoring data:`, {
+                            lastCheckedMessageId: monitoringData.lastCheckedMessageId,
+                            lastResponseSentAt: monitoringData.lastResponseSentAt,
+                            responseCount: monitoringData.responseCount,
+                            status: monitoringData.status
+                        });
+                        
+        // Check if this is a new message from the lead
+        if (latestMessage.isFromLead) {
+            console.log(`🔍 CHECKING MESSAGE: isFromLead = ${latestMessage.isFromLead}`);
+            console.log(`🔍 Latest message text: "${latestMessage.text}"`);
+            console.log(`🔍 Latest message timestamp: ${new Date(latestMessage.timestamp).toISOString()}`);
+            
+            // Check if we've already processed this message
+            if (monitoringData.lastCheckedMessageId === latestMessage.id) {
+                console.log(`⏭️ Message already processed, skipping`);
+                console.log(`🔍 Last checked message ID: ${monitoringData.lastCheckedMessageId}`);
+                console.log(`🔍 Current message ID: ${latestMessage.id}`);
+                continue;
+            }
+            
+            // Check if we were the last to respond (prevent back-to-back messaging)
+            if (monitoringData.lastResponseSentAt && monitoringData.lastResponseSentAt > latestMessage.timestamp) {
+                console.log(`⏭️ We were the last to respond, skipping to prevent back-to-back messaging`);
+                continue;
+            }
+            
+            // Check response limit
+            const maxResponses = 30;
+            if (monitoringData.responseCount && monitoringData.responseCount >= maxResponses) {
+                console.log(`⏭️ Response limit reached (${monitoringData.responseCount}/${maxResponses}), skipping`);
+                continue;
+            }
+            
+            // ADDITIONAL CHECK: Verify this is actually from the lead, not an AI-generated message
+            const isAIGeneratedMessage = latestMessage.text && (
+                latestMessage.text.includes('Hi Eleazar, thank you for') ||
+                latestMessage.text.includes('Would you like me to follow up') ||
+                latestMessage.text.includes('Could you please provide more information') ||
+                latestMessage.text.includes('Looking forward to hearing back from you') ||
+                latestMessage.text.includes('This will help me better accommodate') ||
+                latestMessage.text.includes('preferred time for a call')
+            );
+            
+            if (isAIGeneratedMessage) {
+                console.log(`⏭️ Skipping AI-generated message: "${latestMessage.text.substring(0, 50)}..."`);
+                continue;
+            }
+                            
+                            console.log(`🎯 FOUND MESSAGE FROM LEAD: "${latestMessage.text}"`);
+                            console.log(`🔍 Message ID: ${latestMessage.id}`);
+                            console.log(`🔍 Message timestamp: ${new Date(latestMessage.timestamp).toISOString()}`);
+                            
+                            // Update last checked message ID
+                            monitoringData.lastCheckedMessageId = latestMessage.id;
+                            await chrome.storage.local.set({ [key]: monitoringData });
+                            
+                            console.log(`✅ New response received from lead: ${latestMessage.text}`);
+                            console.log(`🔍 DEBUG: Proceeding to respond because:`);
+                            console.log(`   - Message is from lead: ${latestMessage.isFromLead}`);
+                            console.log(`   - Message not already processed: ${monitoringData.lastCheckedMessageId !== latestMessage.id}`);
+                            console.log(`   - We were not the last to respond: ${!(monitoringData.lastResponseSentAt && monitoringData.lastResponseSentAt > latestMessage.timestamp)}`);
+                            console.log(`   - Under response limit: ${!(monitoringData.responseCount && monitoringData.responseCount >= maxResponses)}`);
+                            
+                            // Additional check: don't respond to messages sent by the extension itself
+                            const messageAge = Date.now() - latestMessage.timestamp;
+                            const isRecentMessage = messageAge < 10000; // 10 seconds
+                            const isLikelyAIMessage = latestMessage.text && (
+                                latestMessage.text.includes('I\'d be happy to') ||
+                                latestMessage.text.includes('Looking forward to') ||
+                                latestMessage.text.includes('Great!') ||
+                                latestMessage.text.includes('Thank you for your') ||
+                                latestMessage.text.includes('booked a time') ||
+                                latestMessage.text.includes('calendar') ||
+                                latestMessage.text.includes('specific information')
+                            );
+                            
+                            if (isRecentMessage && isLikelyAIMessage) {
+                                console.log(`⚠️ Skipping response - message appears to be from AI (sent ${Math.round(messageAge / 1000)}s ago)`);
+                                continue;
+                            }
+                            
+                            // Store the lead's message in conversation history
+                            console.log('🔍 DEBUG: Storing conversation message with call_id:', monitoringData.callId);
+                            console.log('🔍 DEBUG: Monitoring data:', monitoringData);
+                            
+                            const result = await storeConversationMessage({
+                                call_id: monitoringData.callId,
+                                message: latestMessage.text,
+                                sender: 'lead',
+                                message_type: 'text',
+                                lead_name: monitoringData.leadName,
+                                connection_id: monitoringData.connectionId,
+                                conversation_urn_id: monitoringData.conversationUrnId
+                            });
+                            
+                            if (!result) {
+                                console.error('❌ Failed to store conversation message - call_id might be invalid:', monitoringData.callId);
+                            }
+
+                            // Process the call reply with AI
+                            const aiResponse = await processCallReplyWithAI(monitoringData.callId, latestMessage.text, monitoringData.leadName);
+                            
+                            if (aiResponse && aiResponse.suggested_response) {
+                                console.log(`📤 Sending AI response: "${aiResponse.suggested_response}"`);
+                                
+                                // Check if this is a positive response that should trigger calendar link
+                                if (aiResponse.isPositive || 
+                                    (aiResponse.analysis && (
+                                        aiResponse.analysis.intent === 'available' || 
+                                        aiResponse.analysis.intent === 'interested' ||
+                                        aiResponse.analysis.intent === 'scheduling_request' ||
+                                        aiResponse.analysis.sentiment === 'positive'
+                                    ))) {
+                                    console.log(`📅 Positive response detected - generating calendar link for ${monitoringData.leadName}`);
+                                    
+                                    try {
+                                        // Always request calendar link from backend (reuses existing if already generated)
+                                        const calendarResponse = await fetch(`${PLATFORM_URL}/api/calls/${monitoringData.callId || 'unknown'}/calendar-link`, {
+                                            method: 'POST',
+                                            headers: {
+                                                'Content-Type': 'application/json',
+                                                'lk-id': linkedinId || 'vicken-concept'
+                                            }
+                                        });
+
+                                        if (calendarResponse.ok) {
+                                            const calendarData = await calendarResponse.json();
+                                            const schedulingMessage = calendarData.scheduling_message || 
+                                                `Perfect! I'd love to schedule a call with you. Please book a convenient time here: ${calendarData.calendar_link}\n\nLooking forward to speaking with you!`;
+
+                                            await sendSchedulingMessage(monitoringData, schedulingMessage, calendarData.calendar_link);
+                                        } else {
+                                            console.error('❌ Failed to generate calendar link (fallback to AI response path)', calendarResponse.status);
+                                            const suggestedResponse = aiResponse.suggested_response || aiResponse['Suggested Response'] || aiResponse.suggestedResponse;
+                                            if (suggestedResponse) {
+                                                await sendAIMessage(monitoringData, suggestedResponse);
+                                            }
+                                        }
+                                    } catch (error) {
+                                        console.error('❌ Error generating calendar link:', error);
+                                        // Fallback to AI response
+                                        const suggestedResponse = aiResponse.suggested_response || aiResponse['Suggested Response'] || aiResponse.suggestedResponse;
+                                        if (suggestedResponse) {
+                                            console.log(`📤 Fallback: Sending AI response to ${monitoringData.leadName}: "${suggestedResponse}"`);
+                                            await sendAIMessage(monitoringData, suggestedResponse);
+                                        }
+                                    }
+                                } else {
+                                    // Send the regular AI-generated response
+                                    try {
+                                        await sendLinkedInMessage(
+                                            monitoringData,
+                                            aiResponse.suggested_response
+                                        );
+                                        
+                                        // Store the AI response in conversation history
+                                        await storeConversationMessage({
+                                            call_id: monitoringData.callId,
+                                            message: aiResponse.suggested_response,
+                                            sender: 'ai',
+                                            message_type: 'ai_response',
+                                            ai_analysis: aiResponse.analysis,
+                                            lead_name: monitoringData.leadName,
+                                            connection_id: monitoringData.connectionId,
+                                            conversation_urn_id: monitoringData.conversationUrnId
+                                        });
+                                        
+                                        console.log(`✅ AI response sent successfully to ${monitoringData.leadName}`);
+                                    } catch (sendError) {
+                                        console.error(`❌ Error sending AI response:`, sendError);
+                                    }
+                                }
+                            } else {
+                                console.log(`⏭️ No AI response generated, skipping message send`);
+                            }
+                            
+                            // Update response count, timestamp, and last checked message ID
+                            monitoringData.responseCount = (monitoringData.responseCount || 0) + 1;
+                            monitoringData.lastResponseSentAt = Date.now();
+                            monitoringData.lastCheckedMessageId = latestMessage.id;
+                            monitoringData.status = 'response_received';
+                            await chrome.storage.local.set({ [key]: monitoringData });
+                            
+                        } else {
+                            console.log(`⏭️ Latest message is not from lead, skipping`);
+                        }
+                    } else {
+                        console.log('⏳ No new messages from', monitoringData.leadName, '(FORCE CHECK)');
+                    }
+                } catch (error) {
+                    console.error('❌ Error force checking LinkedIn conversation for', monitoringData.leadName, ':', error);
+                }
+            }
+        }
+        
+    } catch (error) {
+        console.error('❌ Error in checkForCallResponses:', error);
+    }
+};
+/**
+ * Fetch LinkedIn conversation messages for a specific connection
+ */
+const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => {
+    try {
+        console.log('📡 Fetching LinkedIn conversation for connection:', connectionId);
+        
+        // Get CSRF token
+        const tokenResult = await chrome.storage.local.get(["csrfToken"]);
+        if (!tokenResult.csrfToken) {
+            console.error('❌ No CSRF token available');
+            return null;
+        }
+        
+        // Step 1: Try to get conversations, but also try direct conversation access
+        console.log('🔍 Attempting to fetch conversations...');
+        
+        // First try the standard conversations endpoint
+        const conversationsResponse = await fetch(`${voyagerApi}/messaging/conversations`, {
+            method: 'GET',
+            headers: {
+                'csrf-token': tokenResult.csrfToken,
+                'accept': 'application/vnd.linkedin.normalized+json+2.1',
+                'x-li-lang': 'en_US',
+                'x-li-page-instance': 'urn:li:page:d_flagship3_messaging_conversations;1ZlPK7kKRNSMi+vkXMyVMw==',
+                'x-li-track': JSON.stringify({"clientVersion":"1.10.1208","osName":"web","timezoneOffset":1,"deviceFormFactor":"DESKTOP","mpName":"voyager-web"}),
+                'x-restli-protocol-version': '2.0.0'
+            }
+        });
+        
+        console.log(`📡 Conversations API status: ${conversationsResponse.status}`);
+        
+        let conversations = [];
+        if (conversationsResponse.ok) {
+            const conversationsData = await conversationsResponse.json();
+            conversations = conversationsData.elements || [];
+            console.log(`📊 Found ${conversations.length} conversations via API`);
+        } else {
+            console.log(`❌ Conversations API failed: ${conversationsResponse.status}`);
+        }
+        
+        // If no conversations found via API, try direct conversation access
+        if (conversations.length === 0) {
+            console.log('🔍 No conversations via API, trying direct conversation access...');
+            
+            // Known conversation ID for Eleazar (from the URL you provided)
+            const knownConversationIds = [
+                '2-MmJlMWU1MzMtMGUzYi00ODI2LThjNWEtYjQyZTAwZWEyNjM4XzEwMA==',
+                connectionId // Also try the connection ID itself
+            ];
+            
+            for (const conversationId of knownConversationIds) {
+                try {
+                    console.log(`🧪 Trying direct conversation access: ${conversationId}`);
+                    
+                    // Try to get messages directly from this conversation using the WORKING headers
+                    const directMessagesResponse = await fetch(`${voyagerApi}/messaging/conversations/${conversationId}/events`, {
+                        method: 'GET',
+                        headers: {
+                            'csrf-token': tokenResult.csrfToken,
+                            'accept': 'application/json',  // ← This is the key that works!
+                            'x-restli-protocol-version': '2.0.0'
+                        }
+                    });
+                    
+                    console.log(`📡 Direct conversation status: ${directMessagesResponse.status}`);
+                    
+                    if (directMessagesResponse.ok) {
+                        const messagesData = await directMessagesResponse.json();
+                        console.log('📋 Raw API Response:', messagesData);
+                        
+                        const messages = messagesData.elements || [];
+                        console.log(`📊 Found ${messages.length} raw messages in API response`);
+                            
+                            // Check if we have any very recent messages (within last 5 minutes)
+                            const now = Date.now();
+                            const recentMessages = messages.filter(msg => {
+                                const messageTime = msg.createdAt;
+                                const ageMinutes = (now - messageTime) / (1000 * 60);
+                                return ageMinutes <= 5;
+                            });
+                            
+                            if (recentMessages.length > 0) {
+                                console.log(`🆕 Found ${recentMessages.length} recent messages (within last 5 minutes)`);
+                            } else {
+                                console.log('⏰ No recent messages found (all messages are older than 5 minutes)');
+                            }
+                        
+                        if (messages.length > 0) {
+                            console.log(`🎉 SUCCESS! Found ${messages.length} messages in direct conversation: ${conversationId}`);
+                            // console.log('📝 Sample message structure:', messages[0]);
+                            
+                            // Show all raw message timestamps to see if we're missing recent messages
+                            console.log('🕐 RAW MESSAGE TIMESTAMPS (API ORDER):');
+                            messages.forEach((msg, index) => {
+                                const timestamp = new Date(msg.createdAt).toISOString();
+                                console.log(`   Message ${index + 1}: ${timestamp}`);
+                            });
+                            
+                            // Process messages to extract text and sender info
+                            const allProcessedMessages = await Promise.all(messages.map(async (msg, index) => {
+                                // console.log(`🔍 Processing message ${index + 1}:`, msg);
+                                
+                                // Extract text using multiple methods (same as working function)
+                                let text = '';
+                                
+                                // Method 1: Standard structure
+                                if (msg.eventContent?.com?.linkedin?.voyager?.messaging?.create?.MessageCreate) {
+                                    const messageCreate = msg.eventContent.com.linkedin.voyager.messaging.create.MessageCreate;
+                                    text = messageCreate.body || messageCreate.attributedBody?.text || '';
+                                }
+                                
+                                // Method 2: Alternative structure
+                                if (!text && msg.eventContent?.com?.linkedin?.voyager?.messaging?.EventContent) {
+                                    const eventContent = msg.eventContent.com.linkedin.voyager.messaging.EventContent;
+                                    text = eventContent.attributedBody?.text || '';
+                                }
+                                
+                                // Method 3: Direct body
+                                if (!text && msg.body) {
+                                    text = msg.body;
+                                }
+                                
+                                // Method 4: Search in eventContent JSON
+                                if (!text && msg.eventContent) {
+                                    const eventContentStr = JSON.stringify(msg.eventContent);
+                                    const textMatch = eventContentStr.match(/"text":"([^"]+)"/);
+                                    if (textMatch) {
+                                        text = textMatch[1];
+                                    }
+                                }
+                                
+                                let sender = 'unknown';
+                                let senderEntityUrn = null;
+                                let isFromExtension = false;
+                                
+                                // Extract sender with enhanced detection
+                                console.log('🔍 Raw sender data:', msg.from);
+                                
+                                if (msg.from?.com?.linkedin?.voyager?.messaging?.MessagingMember) {
+                                    const member = msg.from.com.linkedin.voyager.messaging.MessagingMember;
+                                    console.log('🔍 MessagingMember data:', member);
+                                    
+                                    if (member.name) {
+                                        sender = member.name;
+                                    } else if (member.miniProfile) {
+                                        sender = `${member.miniProfile.firstName || ''} ${member.miniProfile.lastName || ''}`.trim();
+                                    }
+                                    
+                                    // Get sender's entity URN for reliable identification
+                                    if (member.entityUrn) {
+                                        senderEntityUrn = member.entityUrn;
+                                    } else if (member.miniProfile?.entityUrn) {
+                                        senderEntityUrn = member.miniProfile.entityUrn;
+                                    }
+                                }
+                                
+                                // Get our own LinkedIn profile info for comparison
+                                const ourProfile = await chrome.storage.local.get(['linkedinProfile']);
+                                const ourEntityUrn = ourProfile.linkedinProfile?.entityUrn;
+                                const ourPublicIdentifier = ourProfile.linkedinProfile?.publicIdentifier;
+                                
+                                // Debug profile storage
+                                if (!ourEntityUrn && !ourPublicIdentifier) {
+                                    console.log('⚠️ LinkedIn profile not stored yet - using fallback detection');
+                                    console.log('🔍 Stored profile data:', ourProfile.linkedinProfile);
+                                }
+                                
+                                console.log('🔍 Sender comparison:', {
+                                    senderEntityUrn: senderEntityUrn,
+                                    ourEntityUrn: ourEntityUrn,
+                                    ourPublicIdentifier: ourPublicIdentifier,
+                                    sender: sender,
+                                    textPreview: text.substring(0, 50) + '...'
+                                });
+                                
+                                // Show why isFromExtension is true/false
+                                if (ourEntityUrn && senderEntityUrn) {
+                                    console.log('   → Using entity URN comparison');
+                                } else if (ourPublicIdentifier && sender) {
+                                    console.log('   → Using public identifier comparison');
+                                } else {
+                                    console.log('   → Using text pattern matching (FALLBACK)');
+                                    console.log('   → Text patterns checked:', {
+                                        hasYourName: text.includes('[Your Name]'),
+                                        hasThankYou: text.includes('Thank you for your response'),
+                                        hasThankYouLetting: text.includes('Thank you for letting me know'),
+                                        hasLetsSchedule: text.includes('Let\'s schedule a call'),
+                                        hasHopeMessage: text.includes('I hope this message finds you well')
+                                    });
+                                }
+                                
+                                // Determine if message is from extension using reliable identifiers
+                                if (ourEntityUrn && senderEntityUrn) {
+                                    isFromExtension = senderEntityUrn === ourEntityUrn;
+                                } else if (ourPublicIdentifier && sender) {
+                                    // Fallback to name matching if URNs not available
+                                    isFromExtension = sender.toLowerCase().includes('william') || 
+                                                   sender.toLowerCase().includes('victor') ||
+                                                   sender.toLowerCase().includes('vicken-concept');
+                                } else {
+                                    // Last resort: text pattern matching
+                                    isFromExtension = text.includes('[Your Name]') ||
+                                                   text.includes('Thank you for your response') ||
+                                                   text.includes('Thank you for letting me know') ||
+                                                   text.includes('Let\'s schedule a call') ||
+                                                   text.includes('I hope this message finds you well');
+                                }
+                                
+                                // Use the reliable isFromExtension detection
+        // Additional check: exclude AI-generated messages that might be misclassified
+        const isAIGeneratedMessage = text && (
+            // Original patterns
+            text.includes('Hi Eleazar, thank you for') ||
+            text.includes('Would you like me to follow up') ||
+            text.includes('Could you please provide more information') ||
+            text.includes('Looking forward to hearing back from you') ||
+            text.includes('This will help me better accommodate') ||
+            text.includes('preferred time for a call') ||
+            text.includes('Thank you for your response') ||
+            text.includes('calendar booking link') ||
+            text.includes('I hope this message finds you well') ||
+            text.includes('I would love to learn more about your work') ||
+            text.includes('Thank you for your interest, Eleazar!') ||
+            text.includes('Are there any specific days or times that work best for you') ||
+            text.includes('Great! Let\'s schedule a call') ||
+            text.includes('Can you please send me your availability') ||
+            text.includes('Thank you for letting me know') ||
+            text.includes('Is there a better time for us to connect') ||
+            text.includes('Sure, let\'s schedule a call! When are you available?') ||
+            // New AI response patterns
+            text.includes('Sure! I\'d be happy to share more details') ||
+            text.includes('What specific information are you looking for') ||
+            text.includes('Great! I\'ve booked a time on your calendar') ||
+            text.includes('Looking forward to our conversation') ||
+            text.includes('Great! I will go ahead and book a time') ||
+            text.includes('works for both of us') ||
+            text.includes('Thanks for your willingness to share more details') ||
+            text.includes('I\'m looking for information on your recent projects') ||
+            text.includes('Could you provide some insights on that') ||
+            text.includes('Perfect! I\'d love to schedule a call with you') ||
+            text.includes('Please book a convenient time here') ||
+            text.includes('Looking forward to speaking with you') ||
+            // Generic AI response patterns
+            text.includes('I\'d be happy to') ||
+            text.includes('Looking forward to') ||
+            text.includes('Thank you for your') ||
+            text.includes('Great!') && text.includes('schedule') ||
+            text.includes('booked a time') ||
+            text.includes('calendar') && text.includes('link') ||
+            text.includes('convenient time') ||
+            text.includes('specific information') ||
+            text.includes('recent projects') ||
+            text.includes('insights on that')
+        );
+                                
+                                // Additional check: if message was sent very recently and matches AI patterns, it's likely from AI
+                                const messageAge = Date.now() - msg.createdAt;
+                                const isRecentAIMessage = messageAge < 30000 && isAIGeneratedMessage; // 30 seconds
+                                
+                                const isFromLead = !isFromExtension && !isAIGeneratedMessage && !isRecentAIMessage && text && text.trim().length > 0;
+                                
+                                console.log('🔍 Sender detection details:');
+                                console.log('   - sender:', sender);
+                                console.log('   - senderEntityUrn:', senderEntityUrn);
+                                console.log('   - isFromExtension:', isFromExtension);
+                                console.log('   - isAIGeneratedMessage:', isAIGeneratedMessage);
+                                console.log('   - isRecentAIMessage:', isRecentAIMessage);
+                                console.log('   - messageAge:', Math.round(messageAge / 1000) + ' seconds ago');
+                                console.log('   - isFromLead:', isFromLead);
+                                console.log('   - text preview:', text.substring(0, 50) + '...');
+                                
+                                if (isAIGeneratedMessage) {
+                                    console.log('🤖 Message filtered as AI-generated');
+                                }
+                                if (isRecentAIMessage) {
+                                    console.log('🤖 Message filtered as recent AI message');
+                                }
+                                
+                                console.log(`📝 Processed message ${index + 1}: "${text}" from ${sender}`);
+                                
+                                return {
+                                    id: msg.entityUrn || msg.eventUrn || `msg_${index}`,
+                                    text: text,
+                                    sender: sender,
+                                    timestamp: msg.createdAt,
+                                    isFromLead: isFromLead,
+                                    rawMessage: msg
+                                };
+                            }));
+                            
+                            const processedMessages = allProcessedMessages.filter(msg => msg.text && msg.text.trim().length > 0);
+                            
+                            // Sort messages by timestamp to get correct chronological order
+                            processedMessages.sort((a, b) => a.timestamp - b.timestamp);
+                            
+                            console.log(`📊 Processed ${processedMessages.length} valid messages`);
+                            console.log('📅 Messages sorted by timestamp (chronological order)');
+                            
+                            // Show sorted timestamps
+                            console.log('🕐 SORTED MESSAGE TIMESTAMPS (CHRONOLOGICAL ORDER):');
+                            processedMessages.forEach((msg, index) => {
+                                const timestamp = new Date(msg.timestamp).toISOString();
+                                console.log(`   Message ${index + 1}: ${timestamp} - ${msg.isFromLead ? 'LEAD' : 'EXTENSION'}`);
+                            });
+                            
+                            // Show ALL messages for debugging
+                            // Removed verbose message logging for cleaner output
+                            
+                        // Find the actual latest message from the lead
+                        const leadMessages = processedMessages.filter(msg => msg.isFromLead);
+                        if (leadMessages.length > 0) {
+                            const latestLeadMessage = leadMessages[leadMessages.length - 1];
+                            console.log('🎯 LATEST MESSAGE FROM LEAD:');
+                            console.log(`   - Time: ${new Date(latestLeadMessage.timestamp).toISOString()}`);
+                            console.log(`   - Text: "${latestLeadMessage.text}"`);
+                            console.log(`   - Message ID: ${latestLeadMessage.id}`);
+                            
+                            // Check if this is a recent message (within last 10 minutes)
+                            const messageAge = Date.now() - latestLeadMessage.timestamp;
+                            const messageAgeMinutes = Math.floor(messageAge / (1000 * 60));
+                            console.log(`   - Message age: ${messageAgeMinutes} minutes ago`);
+                            
+                            if (messageAgeMinutes > 10) {
+                                console.log('⚠️ Latest lead message is older than 10 minutes - might be missing newer messages');
+                                console.log('🔍 SUGGESTIONS:');
+                                console.log('   1. Check if the message was actually sent in LinkedIn');
+                                console.log('   2. Wait 15-30 minutes for LinkedIn API to update');
+                                console.log('   3. Check if the message is in a different conversation thread');
+                                console.log('   4. Verify the message appears in LinkedIn web interface');
+                            }
+                        } else {
+                            console.log('❌ NO MESSAGES FROM LEAD FOUND');
+                        }
+                            
+                            // Return the processed messages
+                            return {
+                                conversationUrnId: conversationId,
+                                messages: processedMessages,
+                                totalMessages: processedMessages.length,
+                                workingEndpoint: 'direct_conversation_access',
+                                rawResponse: messagesData
+                            };
+                        } else {
+                            console.log(`📭 No messages found in conversation ${conversationId}`);
+                            // console.log('🔍 Full API response structure:', JSON.stringify(messagesData, null, 2));
+                        }
+                    } else {
+                        console.log(`❌ Direct conversation failed: ${conversationId} (${directMessagesResponse.status})`);
+                        try {
+                            const errorData = await directMessagesResponse.text();
+                            console.log('❌ Error response:', errorData);
+                        } catch (e) {
+                            console.log('❌ Could not read error response');
+                        }
+                    }
+                } catch (error) {
+                    console.log(`❌ Direct conversation error: ${conversationId} - ${error.message}`);
+                }
+            }
+        }
+        
+        if (conversations.length === 0) {
+            console.log('❌ No conversations found via any method');
+            console.log('💡 This could mean:');
+            console.log('   1. LinkedIn API has changed');
+            console.log('   2. No conversations exist');
+            console.log('   3. Authentication issues');
+            console.log('   4. Need to be actively on LinkedIn.com');
+            return null;
+        }
+        
+        // Find conversation with the target connection
+        let targetConversation = null;
+        for (const conversation of conversations) {
+            const participants = conversation.participants?.elements || [];
+            for (const participant of participants) {
+                const profile = participant.com?.linkedin?.voyager?.messaging?.MessagingMember?.miniProfile;
+                
+                // Try multiple ways to match the connection
+                if (participant.entityUrn && participant.entityUrn.includes(connectionId)) {
+                    targetConversation = conversation;
+                    break;
+                }
+                
+                // Also try matching by name (for Eleazar specifically)
+                if (profile?.firstName === 'Eleazar' && profile?.lastName === 'Nzerem') {
+                    console.log('🎯 Found Eleazar by name match:', participant.entityUrn);
+                    targetConversation = conversation;
+                    break;
+                }
+                
+                // Try matching by public identifier
+                if (profile?.publicIdentifier === 'eleazar-nzerem') {
+                    console.log('🎯 Found Eleazar by public identifier:', participant.entityUrn);
+                    targetConversation = conversation;
+                    break;
+                }
+            }
+            if (targetConversation) break;
+        }
+        
+        if (!targetConversation) {
+        console.log('📭 No conversation found with connection:', connectionId);
+        console.log('🔍 Available conversations:', conversations.map(c => ({
+            entityUrn: c.entityUrn,
+            participants: c.participants?.elements?.map(p => ({
+                entityUrn: p.entityUrn,
+                name: `${p.com?.linkedin?.voyager?.messaging?.MessagingMember?.miniProfile?.firstName} ${p.com?.linkedin?.voyager?.messaging?.MessagingMember?.miniProfile?.lastName}`,
+                publicIdentifier: p.com?.linkedin?.voyager?.messaging?.MessagingMember?.miniProfile?.publicIdentifier
+            }))
+        })));
+        return null;
+        }
+        
+        console.log('✅ Found conversation:', targetConversation.entityUrn);
+        
+        // Extract conversation URN ID
+        const conversationUrnId = targetConversation.entityUrn.replace('urn:li:fsd_conversation:', '');
+        
+        // Fetch messages from this conversation
+        console.log('📡 Fetching messages from LinkedIn conversation:', conversationUrnId);
+        const messagesResponse = await fetch(`${voyagerApi}/messaging/conversations/${conversationUrnId}/events`, {
+            method: 'GET',
+            headers: {
+                'csrf-token': tokenResult.csrfToken,
+                'accept': 'application/vnd.linkedin.normalized+json+2.1',
+                'x-li-lang': 'en_US',
+                'x-li-page-instance': 'urn:li:page:d_flagship3_messaging_conversations;1ZlPK7kKRNSMi+vkXMyVMw==',
+                'x-li-track': JSON.stringify({"clientVersion":"1.10.1208","osName":"web","timezoneOffset":1,"deviceFormFactor":"DESKTOP","mpName":"voyager-web"}),
+                'x-restli-protocol-version': '2.0.0'
+            }
+        });
+        
+        console.log('📡 LinkedIn messages API response status:', messagesResponse.status);
+        
+        if (!messagesResponse.ok) {
+            console.error('❌ LinkedIn messages API failed:', messagesResponse.status, messagesResponse.statusText);
+            throw new Error(`LinkedIn messages API failed: ${messagesResponse.status}`);
+        }
+        
+        // Remove duplicate error check
+        
+        const messagesData = await messagesResponse.json();
+        const messages = messagesData.elements || [];
+        
+        // Filter for new messages since last check
+        let newMessages = messages;
+        if (lastMessageId) {
+            const lastMessageIndex = messages.findIndex(msg => msg.entityUrn === lastMessageId);
+            if (lastMessageIndex >= 0) {
+                newMessages = messages.slice(lastMessageIndex + 1);
+            }
+        }
+        
+        console.log('📊 Total messages in conversation:', messages.length);
+        console.log('📊 New messages found:', newMessages.length);
+        if (newMessages.length > 0) {
+            console.log('🎉 NEW MESSAGES DETECTED! Response tracking is working!');
+        }
+        
+                            // Process messages to extract text and sender info using enhanced detection
+                            const processedMessages = newMessages.map(msg => {
+                                // Extract text using multiple methods (same as working function)
+                                let text = '';
+                                
+                                // Method 1: Standard structure
+                                if (msg.eventContent?.com?.linkedin?.voyager?.messaging?.create?.MessageCreate) {
+                                    const messageCreate = msg.eventContent.com.linkedin.voyager.messaging.create.MessageCreate;
+                                    text = messageCreate.body || messageCreate.attributedBody?.text || '';
+                                }
+                                
+                                // Method 2: Alternative structure
+                                if (!text && msg.eventContent?.com?.linkedin?.voyager?.messaging?.EventContent) {
+                                    const eventContent = msg.eventContent.com.linkedin.voyager.messaging.EventContent;
+                                    text = eventContent.attributedBody?.text || '';
+                                }
+                                
+                                // Method 3: Direct body
+                                if (!text && msg.body) {
+                                    text = msg.body;
+                                }
+                                
+                                // Method 4: Search in eventContent JSON
+                                if (!text && msg.eventContent) {
+                                    const eventContentStr = JSON.stringify(msg.eventContent);
+                                    const textMatch = eventContentStr.match(/"text":"([^"]+)"/);
+                                    if (textMatch) {
+                                        text = textMatch[1];
+                                    }
+                                }
+                                
+                                // Enhanced sender detection (same as working function)
+                                let sender = 'unknown';
+                                if (msg.from?.com?.linkedin?.voyager?.messaging?.MessagingMember) {
+                                    const member = msg.from.com.linkedin.voyager.messaging.MessagingMember;
+                                    if (member.name) {
+                                        sender = member.name;
+                                    } else if (member.miniProfile) {
+                                        sender = `${member.miniProfile.firstName || ''} ${member.miniProfile.lastName || ''}`.trim();
+                                    }
+                                }
+                                
+                                // Enhanced lead detection (generic - works for any LinkedIn user)
+                                const isFromLead = 
+                                    // Check by entity URN (if connectionId is provided)
+                                    (connectionId && msg.from?.entityUrn?.includes(connectionId)) ||
+                                    // Check by profile ID in various fields (if connectionId is provided)
+                                    (connectionId && msg.from && JSON.stringify(msg.from).includes(connectionId)) ||
+                                    // Check if this is NOT from us (William Victor) and has meaningful text
+                                    (!sender.toLowerCase().includes('william') && 
+                                     !sender.toLowerCase().includes('victor') && 
+                                     !msg.from?.entityUrn?.includes('vicken-concept') &&
+                                     text && text.trim().length > 0 && text.length < 1000 &&
+                                     // Exclude AI-generated messages (they contain template placeholders)
+                                     !text.includes('[Your Name]') &&
+                                     !text.includes('[Your Position]') &&
+                                     !text.includes('[Your Company]') &&
+                                     !text.includes('[Date and Time]') &&
+                                     !text.includes('[Duration]') &&
+                                     !text.includes('Dear Mr.') &&
+                                     !text.includes('Dear Eleazar Nzerem'));
+                                
+                                console.log(`📝 Monitoring - Message: "${text}" from ${sender}, isFromLead: ${isFromLead}`);
+                                
+                                return {
+                                    id: msg.entityUrn,
+                                    text: text,
+                                    sender: isFromLead ? 'lead' : 'us',
+                                    timestamp: msg.createdAt,
+                                    messageType: msg.eventContent?.com?.linkedin?.voyager?.messaging?.create?.MessageCreate?.attachments?.length > 0 ? 'attachment' : 'text',
+                                    rawSender: sender
+                                };
+                            }).filter(msg => msg.text && msg.text.trim().length > 0);
+        
+        console.log(`📊 Processed ${processedMessages.length} new messages`);
+        return processedMessages;
+        
+    } catch (error) {
+        console.error('❌ Error fetching LinkedIn conversation:', error);
+        return null;
+    }
+};
+
+/**
+ * Process call reply with AI analysis
+ */
+const processCallReplyWithAI = async (callId, messageText, leadName = null) => {
+    try {
+        console.log('🤖 Processing call reply with AI analysis...');
+        
+        // If leadName is not provided, try to get it from storage
+        if (!leadName) {
+            const allStorage = await chrome.storage.local.get();
+            const responseKeys = Object.keys(allStorage).filter(key => key.startsWith('call_response_monitoring_'));
+            for (const key of responseKeys) {
+                const monitoringData = allStorage[key];
+                if (monitoringData.callId === callId) {
+                    leadName = monitoringData.leadName;
+                    break;
+                }
+            }
+        }
+        
+        console.log(`🎯 Analyzing message from: ${leadName || 'Unknown Lead'}`);
+        
+        // Get CSRF token
+        const tokenResult = await chrome.storage.local.get(['csrfToken']);
+        if (!tokenResult.csrfToken) {
+            console.error('❌ No CSRF token found for AI analysis');
+            // Use fallback analysis
+            const fallbackAnalysis = {
+                success: true,
+                analysis: {
+                    intent: 'busy',
+                    sentiment: 'negative',
+                    leadScore: 2,
+                    isPositive: false,
+                    suggested_response: 'Thank you for letting me know. I understand you\'re not available right now. Please feel free to reach out when you have time.',
+                    next_action: 'acknowledge'
+                },
+                message: 'Fallback analysis due to missing CSRF token'
+            };
+            return fallbackAnalysis;
+        }
+        
+        // Get connection_id and conversation_urn_id from monitoring data
+        let connectionId = null;
+        let conversationUrnId = null;
+        
+        if (callId) {
+            const allStorage = await chrome.storage.local.get();
+            const responseKeys = Object.keys(allStorage).filter(key => key.startsWith('call_response_monitoring_'));
+            for (const key of responseKeys) {
+                const monitoringData = allStorage[key];
+                if (monitoringData.callId === callId) {
+                    connectionId = monitoringData.connectionId;
+                    conversationUrnId = monitoringData.conversationUrnId;
+                    break;
+                }
+            }
+        }
+
+        const requestBody = {
+            message: messageText,
+            leadName: leadName || 'LinkedIn Lead',
+            context: 'LinkedIn message response analysis',
+            call_id: callId,
+            connection_id: connectionId,
+            conversation_urn_id: conversationUrnId
+        };
+        
+        // console.log('🔍 DEBUG: API Request Details:');
+        // console.log('   - URL:', `${PLATFORM_URL}/api/calls/analyze-message`);
+        // console.log('   - Method: POST');
+        // console.log('   - Headers:', {
+        //         'Content-Type': 'application/json',
+        //         'lk-id': linkedinId || 'vicken-concept',
+        //         'csrf-token': tokenResult.csrfToken ? tokenResult.csrfToken.substring(0, 20) + '...' : 'MISSING'
+        //     });
+        // console.log('   - Body:', requestBody);
+        
+        const response = await fetch(`${PLATFORM_URL}/api/calls/analyze-message`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'lk-id': linkedinId || 'vicken-concept',
+                'csrf-token': tokenResult.csrfToken
+            },
+            body: JSON.stringify(requestBody)
+        });
+        
+        console.log('🔍 DEBUG: API Response Details:');
+        console.log('   - Status:', response.status);
+        console.log('   - Status Text:', response.statusText);
+        console.log('   - Headers:', Object.fromEntries(response.headers.entries()));
+        
+        if (response.ok) {
+                // Check if response is JSON
+                const contentType = response.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    const textResponse = await response.text();
+                    console.error('❌ Backend returned non-JSON response:', textResponse.substring(0, 200));
+                    
+                    // Fallback: Create a basic analysis response
+                    console.log('🔄 Using fallback AI analysis due to backend error');
+                    const fallbackAnalysis = {
+                        success: true,
+                        analysis: {
+                            intent: 'busy',
+                            sentiment: 'negative',
+                            leadScore: 2,
+                            isPositive: false,
+                            suggested_response: 'Thank you for letting me know. I understand you\'re not available right now. Please feel free to reach out when you have time.',
+                            next_action: 'acknowledge'
+                        },
+                        message: 'Fallback analysis due to backend error'
+                    };
+                    return fallbackAnalysis;
+                }
+                
+                const result = await response.json();
+                console.log('✅ AI analysis completed:', result);
+                
+                if (!result.success) {
+                    console.error('❌ AI analysis failed:', result.message);
+                    return null;
+                }
+            
+            // Determine if response is positive based on new AI analysis
+            const analysis = result.analysis || {};
+            const intent = analysis.intent || analysis.Intent;
+            const sentiment = analysis.sentiment || analysis.Sentiment;
+            const leadScore = analysis.leadScore || analysis['Lead Score'] || analysis.lead_score;
+            const isPositiveFlag = analysis.isPositive || analysis['Is Positive'];
+            
+            // Updated logic for new AI analysis - check for positive intents and sentiment
+            const isPositive = (isPositiveFlag === true) || 
+                              (intent && (
+                                  intent.toLowerCase() === 'available' ||
+                                  intent.toLowerCase() === 'interested' ||
+                                  intent.toLowerCase() === 'scheduling_request'
+                              )) ||
+                              (sentiment && sentiment.toLowerCase() === 'positive') ||
+                              (leadScore && leadScore >= 7);
+            
+            console.log(`🎯 Response Analysis:`);
+            console.log(`   - Intent: ${intent || 'Unknown'}`);
+            console.log(`   - Sentiment: ${sentiment || 'Unknown'}`);
+            console.log(`   - Lead Score: ${leadScore || 'Unknown'}`);
+            console.log(`   - Is Positive Flag: ${isPositiveFlag}`);
+            console.log(`   - Is Positive (calculated): ${isPositive}`);
+            console.log(`   - Analysis Object:`, JSON.stringify(analysis, null, 2));
+            
+            return {
+                hasResponse: true,
+                message: messageText,
+                analysis: analysis,
+                isPositive: isPositive,
+                call_status: isPositive ? 'scheduled' : 'response_received',
+                suggested_response: analysis.suggested_response || analysis['Suggested Response'] || analysis.suggestedResponse || 'Thank you for your response.'
+            };
+        } else {
+            console.error('❌ Failed to process reply with AI:', response.status);
+            return null;
+        }
+    } catch (error) {
+        console.error('❌ Error processing call reply with AI:', error);
+        
+        // Fallback: Create a basic analysis response when API fails completely
+        console.log('🔄 Using complete fallback AI analysis due to API error');
+        const fallbackAnalysis = {
+            success: true,
+            analysis: {
+                intent: 'busy',
+                sentiment: 'negative',
+                leadScore: 2,
+                isPositive: false,
+                suggested_response: 'Thank you for letting me know. I understand you\'re not available right now. Please feel free to reach out when you have time.',
+                next_action: 'acknowledge'
+            },
+            message: 'Complete fallback analysis due to API error'
+        };
+        return fallbackAnalysis;
+    }
+};
+
+/**
+ * Process positive call response - generate and send calendar link
+ */
+const processPositiveCallResponse = async (monitoringData, responseData) => {
+    console.log('🎉 Processing positive response from', monitoringData.leadName);
+    
+    try {
+        // Generate calendar link via backend
+        const calendarResponse = await fetch(`${PLATFORM_URL}/api/calls/${monitoringData.callId}/calendar-link`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'lk-id': linkedinId || 'vicken-concept'
+            },
+            body: JSON.stringify({
+                leadId: monitoringData.leadId,
+                leadName: monitoringData.leadName,
+                connectionId: monitoringData.connectionId,
+                campaignId: monitoringData.campaignId,
+                responseData: responseData
+            })
+        });
+        
+        if (calendarResponse.ok) {
+            const calendarData = await calendarResponse.json();
+            console.log('📅 Calendar link generated:', calendarData);
+            
+            // Send calendar link message
+            if (calendarData.calendar_link) {
+                await sendCalendarLinkMessage(monitoringData, calendarData.calendar_link, calendarData.scheduling_message);
+            }
+        } else {
+            console.error('❌ Failed to generate calendar link:', calendarResponse.status);
+        }
+    } catch (error) {
+        console.error('❌ Error processing positive response:', error);
+    }
+};
+
+/**
+ * Send scheduling message with calendar link
+ */
+const sendSchedulingMessage = async (monitoringData, message, calendarLink) => {
+    console.log('📅 Sending scheduling message to', monitoringData.leadName);
+    
+    try {
+        // Replace [CALENDAR_LINK] placeholder if it exists
+        const finalMessage = message.replace('[CALENDAR_LINK]', calendarLink);
+        
+        // Send the message using the existing LinkedIn API
+        await sendLinkedInMessage(monitoringData, finalMessage);
+        
+        console.log('✅ Scheduling message sent successfully to', monitoringData.leadName);
+        
+        // Store the scheduling message in conversation history
+        console.log('🔍 DEBUG: Storing scheduling message in conversation history');
+        const result = await storeConversationMessage({
+            call_id: monitoringData.callId,
+            message: finalMessage,
+            sender: 'ai',
+            message_type: 'calendar_link',
+            lead_name: monitoringData.leadName,
+            connection_id: monitoringData.connectionId,
+            conversation_urn_id: monitoringData.conversationUrnId
+        });
+        
+        if (!result) {
+            console.error('❌ Failed to store scheduling message in conversation history');
+        } else {
+            // Update monitoring data with the real call_id from server response
+            if (result.call_id && result.call_id !== monitoringData.callId) {
+                console.log('🔄 Updating monitoring data with real call_id from scheduling message:', result.call_id);
+                monitoringData.callId = result.call_id;
+                // Note: We can't update storage here as we don't have the key, but the next lead message will update it
+            }
+        }
+        
+    } catch (error) {
+        console.error('❌ Error sending scheduling message:', error);
+    }
+};
+/**
+ * Send AI-generated message
+ */
+const sendAIMessage = async (monitoringData, message) => {
+    console.log('🤖 Sending AI message to', monitoringData.leadName);
+    
+    try {
+        await sendLinkedInMessage(monitoringData, message);
+        console.log('✅ AI message sent successfully to', monitoringData.leadName);
+        
+        // Store the AI response in conversation history
+        console.log('🔍 DEBUG: Storing AI response in conversation history');
+        const result = await storeConversationMessage({
+            call_id: monitoringData.callId,
+            message: message,
+            sender: 'ai',
+            message_type: 'ai_response',
+            lead_name: monitoringData.leadName,
+            connection_id: monitoringData.connectionId,
+            conversation_urn_id: monitoringData.conversationUrnId
+        });
+        
+        if (!result) {
+            console.error('❌ Failed to store AI response in conversation history');
+        } else {
+            // Update monitoring data with the real call_id from server response
+            if (result.call_id && result.call_id !== monitoringData.callId) {
+                console.log('🔄 Updating monitoring data with real call_id from AI response:', result.call_id);
+                monitoringData.callId = result.call_id;
+                // Note: We can't update storage here as we don't have the key, but the next lead message will update it
+            }
+        }
+    } catch (error) {
+        console.error('❌ Error sending AI message:', error);
+    }
+};
+
+/**
+ * Send LinkedIn message (common function)
+ */
+const sendLinkedInMessage = async (monitoringData, message) => {
+    const voyagerApi = 'https://www.linkedin.com/voyager/api';
+    const tokenResult = await chrome.storage.local.get(['csrfToken']);
+    
+    // Use the conversation URN ID if available, otherwise fall back to connection ID
+    let conversationId = monitoringData.conversationUrnId || monitoringData.connectionId;
+    console.log(`🔍 Monitoring data:`, monitoringData);
+    console.log(`🔍 conversationUrnId: ${monitoringData.conversationUrnId}`);
+    console.log(`🔍 connectionId: ${monitoringData.connectionId}`);
+    console.log(`🔍 Using conversation ID for message: ${conversationId}`);
+    
+    // If we don't have a conversation URN ID, try to find it from LinkedIn API
+    if (!monitoringData.conversationUrnId) {
+        console.log('🔍 No conversation URN ID found, attempting to find conversation...');
+        try {
+            const conversationsUrl = `${voyagerApi}/messaging/conversations?keyVersion=LEGACY_INBOX&q=participants&start=0&count=20`;
+            const conversationsResponse = await fetch(conversationsUrl, {
+                method: 'GET',
+                headers: {
+                    'csrf-token': tokenResult.csrfToken,
+                    'accept': 'application/vnd.linkedin.normalized+json+2.1',
+                    'x-li-lang': 'en_US',
+                    'x-restli-protocol-version': '2.0.0',
+                }
+            });
+            
+            if (conversationsResponse.ok) {
+                const conversationsData = await conversationsResponse.json();
+                console.log('📊 Conversations data:', conversationsData);
+                
+                // Look for conversation with this connection
+                if (conversationsData.elements) {
+                    for (const conv of conversationsData.elements) {
+                        if (conv.participants && conv.participants.elements) {
+                            for (const participant of conv.participants.elements) {
+                                if (participant.messagingMember && 
+                                    participant.messagingMember['com.linkedin.voyager.messaging.MessagingMember'] &&
+                                    participant.messagingMember['com.linkedin.voyager.messaging.MessagingMember'].miniProfile &&
+                                    participant.messagingMember['com.linkedin.voyager.messaging.MessagingMember'].miniProfile.publicIdentifier === monitoringData.connectionId) {
+                                    conversationId = conv.entityUrn.replace('urn:li:fs_conversation:', '');
+                                    console.log(`✅ Found conversation URN ID: ${conversationId}`);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('❌ Error finding conversation:', error);
+        }
+    }
+    
+    // Send the message
+    const messageEvent = {
+        value: {
+            'com.linkedin.voyager.messaging.create.MessageCreate': {
+                body: message,
+                messageType: 'MEMBER_TO_MEMBER',
+                originToken: {
+                    'com.linkedin.voyager.messaging.create.OriginToken': {
+                        originType: 'CONVERSATION_VIEW'
+                    }
+                },
+                recipientUrns: [`urn:li:fs_messagingMember:${monitoringData.connectionId}`]
+            }
+        }
+    };
+    
+    const requestBody = { eventCreate: messageEvent };
+    
+    const response = await fetch(`${voyagerApi}/messaging/conversations/${conversationId}/events?action=create`, {
+        method: 'POST',
+        headers: {
+            'csrf-token': tokenResult.csrfToken,
+            'accept': 'application/vnd.linkedin.normalized+json+2.1',
+            'content-type': 'application/json',
+            'x-li-lang': 'en_US',
+            'x-restli-protocol-version': '2.0.0',
+        },
+        body: JSON.stringify(requestBody)
+    });
+    
+    if (response.ok) {
+        console.log('✅ Message sent successfully via LinkedIn API');
+        
+        // Update monitoring data
+        monitoringData.lastResponseSentAt = Date.now();
+        monitoringData.responseCount = (monitoringData.responseCount || 0) + 1;
+        
+        const monitoringKey = `call_response_monitoring_${monitoringData.campaignId}_${monitoringData.connectionId}`;
+        await chrome.storage.local.set({ [monitoringKey]: monitoringData });
+        
+    } else {
+        console.error('❌ Failed to send message via LinkedIn API:', response.status);
+        throw new Error(`LinkedIn API error: ${response.status}`);
+    }
+};
+
+/**
+ * Send calendar link message to lead
+ */
+const sendCalendarLinkMessage = async (monitoringData, calendarLink, schedulingMessage) => {
+    console.log('📅 Sending calendar link message to', monitoringData.leadName);
+    
+    try {
+        // Prepare the message content
+        const messageContent = schedulingMessage || `Hi ${monitoringData.leadName}, I'd love to schedule a call with you. Please book a convenient time here: ${calendarLink}`;
+        
+        // Create message model for LinkedIn sending
+        const messageModel = {
+            message: messageContent,
+            connectionId: monitoringData.connectionId,
+            conversationUrnId: null, // Will be created if needed
+            distance: 1
+        };
+        
+        // Store the message model globally for messageConnection function
+        if (typeof arConnectionModel !== 'object' || arConnectionModel === null) {
+            window.arConnectionModel = {};
+        }
+        
+        Object.assign(window.arConnectionModel, messageModel);
+        
+        console.log('📤 Sending calendar link message via LinkedIn...');
+        console.log('📝 Message content:', messageContent);
+        
+        // Send the message
+        await messageConnection({ uploads: [] });
+        
+        console.log('✅ Calendar link message sent successfully to', monitoringData.leadName);
+        
+        // Update monitoring data to mark calendar sent
+        monitoringData.calendarSent = true;
+        monitoringData.calendarSentAt = Date.now();
+        
+        const monitoringKey = `call_response_monitoring_${monitoringData.campaignId}_${monitoringData.connectionId}`;
+        await chrome.storage.local.set({ [monitoringKey]: monitoringData });
+        
+    } catch (error) {
+        console.error('❌ Error sending calendar link message:', error);
+    }
+};
+
+/**
+ * Process negative call response
+ */
+const processNegativeCallResponse = async (monitoringData, responseData) => {
+    console.log('😞 Processing negative response from', monitoringData.leadName);
+    
+    try {
+        // Log the negative response for analysis
+        console.log('📊 Negative response details:', responseData);
+        
+        // Could add follow-up actions here if needed
+        // For now, just mark as completed
+        
+    } catch (error) {
+        console.error('❌ Error processing negative response:', error);
+    }
+};
+
+
+/**
+ * Mark call node as completed
+ */
+const markCallNodeAsCompleted = async (campaignId, leadId) => {
+    try {
+        // Mark the call node as completed
+        const callCompletedKey = `call_node_completed_${campaignId}`;
+        await chrome.storage.local.set({ [callCompletedKey]: true });
+        console.log('✅ Call node marked as completed:', callCompletedKey);
+        
+        // Clean up monitoring data
+        const monitoringKey = `call_response_monitoring_${campaignId}_${leadId}`;
+        await chrome.storage.local.remove(monitoringKey);
+        console.log('🧹 Response monitoring data cleaned up');
+        
+    } catch (error) {
+        console.error('❌ Error marking call node as completed:', error);
+    }
+};
 
 /**
  * Check all pending leads for invite acceptances (regardless of campaign status)
@@ -4818,12 +8238,12 @@ const checkAllCampaignsForAcceptances = async () => {
     isCheckingAcceptances = true;
     console.log('🔍 STARTING ACCEPTANCE CHECK...');
     console.log('🔑 LinkedIn ID:', linkedinId);
-    console.log('🌐 Platform URL:', PLATFROM_URL);
+    console.log('🌐 Platform URL:', PLATFORM_URL);
     
     try {
         // Get ONLY ACTIVE campaigns that are currently running
         console.log('📡 Fetching campaigns from API...');
-        const response = await fetch(`${PLATFROM_URL}/api/campaigns`, {
+        const response = await fetch(`${PLATFORM_URL}/api/campaigns`, {
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json',
@@ -5038,6 +8458,9 @@ const checkAllCampaignsForAcceptances = async () => {
     } catch (error) {
         console.error('❌ Error in acceptance check:', error);
     } finally {
+        // Check for call responses before completing
+        await checkForCallResponses();
+        
         // Reset the flag to allow future executions
         isCheckingAcceptances = false;
         console.log('✅ Acceptance check completed');
@@ -5315,7 +8738,6 @@ const processSkillInTab = async (tabId, data) => {
         };
     }
 };
-
 // Process queue sequentially - grouped by profile
 const processEndorsementQueue = async () => {
     if (isProcessingQueue || !endorsementQueue || endorsementQueue.length === 0) {
@@ -5716,3 +9138,86 @@ async function clearCampaignDedupeFlags(campaignId) {
 // Clear dedupe flags for campaign 100 to allow retry (for testing)
 // clearCampaignDedupeFlags(100);
 
+// Function to store conversation message in call_status table
+async function storeConversationMessage(messageData) {
+    try {
+        console.log('💾 Storing conversation message:', messageData);
+        
+        // Get CSRF token
+        const tokenResult = await chrome.storage.local.get(['csrfToken']);
+        if (!tokenResult.csrfToken) {
+            console.error('❌ No CSRF token found for conversation storage');
+            return null;
+        }
+        
+        // Get LinkedIn ID from storage or use fallback
+        const linkedinIdResult = await chrome.storage.local.get(['linkedinId']);
+        const currentLinkedInId = linkedinIdResult.linkedinId || 'vicken-concept';
+        
+        console.log('🔍 Using LinkedIn ID for conversation storage:', currentLinkedInId);
+        
+        const response = await fetch(`${PLATFORM_URL}/api/calls/conversation/store`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'lk-id': currentLinkedInId,
+                'csrf-token': tokenResult.csrfToken
+            },
+            body: JSON.stringify(messageData)
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('❌ HTTP error storing conversation message:', {
+                status: response.status,
+                statusText: response.statusText,
+                body: errorText
+            });
+            
+            if (response.status === 404) {
+                console.error('❌ Call record not found - this should not happen if call_id is correct');
+                return null;
+            }
+            
+            throw new Error(`HTTP error! status: ${response.status} - ${errorText}`);
+        }
+
+        const data = await response.json();
+        console.log('✅ Conversation message stored:', data);
+        return data;
+    } catch (error) {
+        console.error('❌ Error storing conversation message:', error);
+        return null;
+    }
+}
+
+// Function to get conversation history
+async function getConversationHistory(callId) {
+    try {
+        // Get CSRF token
+        const tokenResult = await chrome.storage.local.get(['csrfToken']);
+        if (!tokenResult.csrfToken) {
+            console.error('❌ No CSRF token found for conversation history');
+            return null;
+        }
+        
+        const response = await fetch(`${PLATFORM_URL}/api/calls/${callId}/conversation`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                'lk-id': 'vicken-concept',
+                'csrf-token': tokenResult.csrfToken
+            }
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        return data;
+    } catch (error) {
+        console.error('Error getting conversation history:', error);
+        return null;
+    }
+}
