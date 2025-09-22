@@ -5911,9 +5911,12 @@ self.testEleazarAIAnalysis = async () => {
         for (const reply of eleazarActualReplies) {
             console.log(`\n🎯 Analyzing reply: "${reply.text}"`);
             
-            // Send to AI for analysis
-            const platformUrl = 'https://app.linkdominator.com';
-            const linkedinId = 'vicken-concept';
+        // Send to AI for analysis
+        const platformUrl = 'https://app.linkdominator.com';
+        
+        // Get LinkedIn ID from storage or use fallback
+        const linkedinIdResult = await chrome.storage.local.get(['linkedinId']);
+        const linkedinId = linkedinIdResult.linkedinId || 'vicken-concept';
             
             // Get CSRF token
             const tokenResult = await chrome.storage.local.get(['csrfToken']);
@@ -6067,7 +6070,10 @@ self.analyzeLeadRepliesWithAI = async (connectionId, leadName) => {
         
         // Send to AI for analysis
         const platformUrl = 'https://app.linkdominator.com';
-        const linkedinId = 'vicken-concept';
+        
+        // Get LinkedIn ID from storage or use fallback
+        const linkedinIdResult = await chrome.storage.local.get(['linkedinId']);
+        const linkedinId = linkedinIdResult.linkedinId || 'vicken-concept';
         
         // Get CSRF token
         const tokenResult = await chrome.storage.local.get(['csrfToken']);
@@ -6834,7 +6840,7 @@ const checkForCallResponses = async () => {
                             
                                 // Check if this is a scheduling scenario
                                 const callStatus = analysisResponse.call_status || analysisResponse['call_status'];
-                                const isSchedulingInitiated = callStatus === 'scheduling_initiated';
+                                const isSchedulingInitiated = callStatus === 'scheduled';
                                 
                                 if (isSchedulingInitiated) {
                                     console.log('📅 SCHEDULING INITIATED - Generating calendar link instead of AI response');
@@ -7862,7 +7868,7 @@ const processCallReplyWithAI = async (callId, messageText, leadName = null) => {
                 message: messageText,
                 analysis: analysis,
                 isPositive: isPositive,
-                call_status: isPositive ? 'scheduling_initiated' : 'response_received',
+                call_status: isPositive ? 'scheduled' : 'response_received',
                 suggested_response: analysis.suggested_response || analysis['Suggested Response'] || analysis.suggestedResponse || 'Thank you for your response.'
             };
         } else {
@@ -9075,11 +9081,17 @@ async function storeConversationMessage(messageData) {
             return null;
         }
         
+        // Get LinkedIn ID from storage or use fallback
+        const linkedinIdResult = await chrome.storage.local.get(['linkedinId']);
+        const currentLinkedInId = linkedinIdResult.linkedinId || 'vicken-concept';
+        
+        console.log('🔍 Using LinkedIn ID for conversation storage:', currentLinkedInId);
+        
         const response = await fetch(`${PLATFORM_URL}/api/calls/conversation/store`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'lk-id': 'vicken-concept',
+                'lk-id': currentLinkedInId,
                 'csrf-token': tokenResult.csrfToken
             },
             body: JSON.stringify(messageData)
