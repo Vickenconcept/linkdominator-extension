@@ -2016,14 +2016,7 @@ const setCampaignAlarm = async (campaign) => {
                         console.log(`   ... and ${uniqueLeads.length - 5} more`);
                     }
                     
-                    console.log('');
-                    console.log('🚨 IMPORTANT: If you do NOT see these invitations in LinkedIn:');
-                    console.log('   1. The send-invites action failed silently');
-                    console.log('   2. LinkedIn rate limiting prevented sending');
-                    console.log('   3. Authentication/CSRF issues occurred');
-                    console.log('');
-                    console.log('💡 SOLUTION: Use self.forceSendInvites(' + campaign.id + ') to bypass backend restrictions');
-                    console.log('');
+                 
                 }
                 
                 if(campaignLeadgenRunning.length){
@@ -2654,6 +2647,13 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
     console.log('⏰ Node delay:', nodeModel.delayInMinutes || 0, 'minutes');
     console.log('🔧 Full node model:', nodeModel);
     
+    // Check if campaign is completed or stopped before processing
+    if (currentCampaign.status === 'completed' || currentCampaign.status === 'stop') {
+        console.log('⏹️ Campaign is completed or stopped, skipping sequence execution');
+        updateCampaignStatus('completed', 'Campaign sequence completed');
+        return;
+    }
+    
     updateCampaignStatus('processing', `Processing ${leads.length} leads...`);
     
     for(const [i, lead] of leads.entries()){
@@ -2872,9 +2872,14 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                 // Set up response monitoring after AI message is sent
                 setTimeout(async () => {
                     const responseMonitoringKey = `call_response_monitoring_${currentCampaign.id}_${lead.connectionId}`;
+                    const callId = callResponse.call_id || callResponse.data?.call_id;
+                    
+                    console.log('🔍 DEBUG: Setting up monitoring with call_id:', callId);
+                    console.log('🔍 DEBUG: Call response:', callResponse);
+                    
                     await chrome.storage.local.set({ 
                         [responseMonitoringKey]: {
-                            callId: callResponse.call_id || callResponse.data?.call_id,
+                            callId: callId,
                             leadId: lead.id,
                             leadName: lead.name,
                             connectionId: lead.connectionId,
@@ -2886,9 +2891,9 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                             messageCount: 0
                         }
                     });
-                    console.log('📊 Response monitoring set up:', responseMonitoringKey);
+                    console.log('📊 Response monitoring set up:', responseMonitoringKey, 'with call_id:', callId);
                     console.log('🔗 Conversation URN ID stored:', arConnectionModel.conversationUrnId);
-                }, 2000); // Wait 2 seconds for LinkedIn API response to complete
+                }, 3000); // Wait 3 seconds for call record to be committed to database
             }
         }else     if(nodeModel.value == 'send-invites'){
             console.log('📨 Executing send-invites action...');
@@ -6721,7 +6726,7 @@ const checkForCallResponses = async () => {
         }
         
         console.log(`📊 Found ${responseKeys.length} call responses to check`);
-        console.log('🔍 Response monitoring keys:', responseKeys);
+        // console.log('🔍 Response monitoring keys:', responseKeys);
         
         for (const key of responseKeys) {
             const monitoringData = allStorage[key];
@@ -6826,6 +6831,31 @@ const checkForCallResponses = async () => {
                         // Only proceed with AI analysis if message is from lead
                         if (latestMessage.isFromLead) {
                             try {
+                            // Store the lead's message in conversation history
+                            console.log('🔍 DEBUG: Storing conversation message with call_id:', monitoringData.callId);
+                            console.log('🔍 DEBUG: Monitoring data:', monitoringData);
+                            
+                            const result = await storeConversationMessage({
+                                call_id: monitoringData.callId,
+                                message: latestMessage.text,
+                                sender: 'lead',
+                                message_type: 'text',
+                                lead_name: monitoringData.leadName,
+                                connection_id: monitoringData.connectionId,
+                                conversation_urn_id: monitoringData.conversationUrnId
+                            });
+                            
+                            if (!result) {
+                                console.error('❌ Failed to store conversation message - call_id might be invalid:', monitoringData.callId);
+                            } else {
+                                // Update monitoring data with the real call_id from server response
+                                if (result.call_id && result.call_id !== monitoringData.callId) {
+                                    console.log('🔄 Updating monitoring data with real call_id:', result.call_id);
+                                    monitoringData.callId = result.call_id;
+                                    await chrome.storage.local.set({ [key]: monitoringData });
+                                }
+                            }
+
                             // Send message to backend for AI analysis
                             const analysisResponse = await processCallReplyWithAI(monitoringData.callId, latestMessage.text, monitoringData.leadName);
                             
@@ -7059,7 +7089,10 @@ const checkForCallResponses = async () => {
                             }
                             
                             // Store the lead's message in conversation history
-                            await storeConversationMessage({
+                            console.log('🔍 DEBUG: Storing conversation message with call_id:', monitoringData.callId);
+                            console.log('🔍 DEBUG: Monitoring data:', monitoringData);
+                            
+                            const result = await storeConversationMessage({
                                 call_id: monitoringData.callId,
                                 message: latestMessage.text,
                                 sender: 'lead',
@@ -7068,6 +7101,10 @@ const checkForCallResponses = async () => {
                                 connection_id: monitoringData.connectionId,
                                 conversation_urn_id: monitoringData.conversationUrnId
                             });
+                            
+                            if (!result) {
+                                console.error('❌ Failed to store conversation message - call_id might be invalid:', monitoringData.callId);
+                            }
 
                             // Process the call reply with AI
                             const aiResponse = await processCallReplyWithAI(monitoringData.callId, latestMessage.text, monitoringData.leadName);
@@ -7278,7 +7315,7 @@ const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => 
                         
                         if (messages.length > 0) {
                             console.log(`🎉 SUCCESS! Found ${messages.length} messages in direct conversation: ${conversationId}`);
-                            console.log('📝 Sample message structure:', messages[0]);
+                            // console.log('📝 Sample message structure:', messages[0]);
                             
                             // Show all raw message timestamps to see if we're missing recent messages
                             console.log('🕐 RAW MESSAGE TIMESTAMPS (API ORDER):');
@@ -7289,7 +7326,7 @@ const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => 
                             
                             // Process messages to extract text and sender info
                             const allProcessedMessages = await Promise.all(messages.map(async (msg, index) => {
-                                console.log(`🔍 Processing message ${index + 1}:`, msg);
+                                // console.log(`🔍 Processing message ${index + 1}:`, msg);
                                 
                                 // Extract text using multiple methods (same as working function)
                                 let text = '';
@@ -7533,7 +7570,7 @@ const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => 
                             };
                         } else {
                             console.log(`📭 No messages found in conversation ${conversationId}`);
-                            console.log('🔍 Full API response structure:', JSON.stringify(messagesData, null, 2));
+                            // console.log('🔍 Full API response structure:', JSON.stringify(messagesData, null, 2));
                         }
                     } else {
                         console.log(`❌ Direct conversation failed: ${conversationId} (${directMessagesResponse.status})`);
@@ -7781,15 +7818,15 @@ const processCallReplyWithAI = async (callId, messageText, leadName = null) => {
             call_id: callId
         };
         
-        console.log('🔍 DEBUG: API Request Details:');
-        console.log('   - URL:', `${PLATFORM_URL}/api/calls/analyze-message`);
-        console.log('   - Method: POST');
-        console.log('   - Headers:', {
-                'Content-Type': 'application/json',
-                'lk-id': linkedinId || 'vicken-concept',
-                'csrf-token': tokenResult.csrfToken ? tokenResult.csrfToken.substring(0, 20) + '...' : 'MISSING'
-            });
-        console.log('   - Body:', requestBody);
+        // console.log('🔍 DEBUG: API Request Details:');
+        // console.log('   - URL:', `${PLATFORM_URL}/api/calls/analyze-message`);
+        // console.log('   - Method: POST');
+        // console.log('   - Headers:', {
+        //         'Content-Type': 'application/json',
+        //         'lk-id': linkedinId || 'vicken-concept',
+        //         'csrf-token': tokenResult.csrfToken ? tokenResult.csrfToken.substring(0, 20) + '...' : 'MISSING'
+        //     });
+        // console.log('   - Body:', requestBody);
         
         const response = await fetch(`${PLATFORM_URL}/api/calls/analyze-message`, {
             method: 'POST',
@@ -7950,6 +7987,29 @@ const sendSchedulingMessage = async (monitoringData, message, calendarLink) => {
         
         console.log('✅ Scheduling message sent successfully to', monitoringData.leadName);
         
+        // Store the scheduling message in conversation history
+        console.log('🔍 DEBUG: Storing scheduling message in conversation history');
+        const result = await storeConversationMessage({
+            call_id: monitoringData.callId,
+            message: finalMessage,
+            sender: 'ai',
+            message_type: 'calendar_link',
+            lead_name: monitoringData.leadName,
+            connection_id: monitoringData.connectionId,
+            conversation_urn_id: monitoringData.conversationUrnId
+        });
+        
+        if (!result) {
+            console.error('❌ Failed to store scheduling message in conversation history');
+        } else {
+            // Update monitoring data with the real call_id from server response
+            if (result.call_id && result.call_id !== monitoringData.callId) {
+                console.log('🔄 Updating monitoring data with real call_id from scheduling message:', result.call_id);
+                monitoringData.callId = result.call_id;
+                // Note: We can't update storage here as we don't have the key, but the next lead message will update it
+            }
+        }
+        
     } catch (error) {
         console.error('❌ Error sending scheduling message:', error);
     }
@@ -7964,6 +8024,29 @@ const sendAIMessage = async (monitoringData, message) => {
     try {
         await sendLinkedInMessage(monitoringData, message);
         console.log('✅ AI message sent successfully to', monitoringData.leadName);
+        
+        // Store the AI response in conversation history
+        console.log('🔍 DEBUG: Storing AI response in conversation history');
+        const result = await storeConversationMessage({
+            call_id: monitoringData.callId,
+            message: message,
+            sender: 'ai',
+            message_type: 'ai_response',
+            lead_name: monitoringData.leadName,
+            connection_id: monitoringData.connectionId,
+            conversation_urn_id: monitoringData.conversationUrnId
+        });
+        
+        if (!result) {
+            console.error('❌ Failed to store AI response in conversation history');
+        } else {
+            // Update monitoring data with the real call_id from server response
+            if (result.call_id && result.call_id !== monitoringData.callId) {
+                console.log('🔄 Updating monitoring data with real call_id from AI response:', result.call_id);
+                monitoringData.callId = result.call_id;
+                // Note: We can't update storage here as we don't have the key, but the next lead message will update it
+            }
+        }
     } catch (error) {
         console.error('❌ Error sending AI message:', error);
     }
@@ -9098,7 +9181,19 @@ async function storeConversationMessage(messageData) {
         });
 
         if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+            const errorText = await response.text();
+            console.error('❌ HTTP error storing conversation message:', {
+                status: response.status,
+                statusText: response.statusText,
+                body: errorText
+            });
+            
+            if (response.status === 404) {
+                console.error('❌ Call record not found - this should not happen if call_id is correct');
+                return null;
+            }
+            
+            throw new Error(`HTTP error! status: ${response.status} - ${errorText}`);
         }
 
         const data = await response.json();
