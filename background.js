@@ -7760,25 +7760,7 @@ const processCallReplyWithAI = async (callId, messageText, leadName = null) => {
         
         console.log(`🎯 Analyzing message from: ${leadName || 'Unknown Lead'}`);
         
-        // Get CSRF token
-        const tokenResult = await chrome.storage.local.get(['csrfToken']);
-        if (!tokenResult.csrfToken) {
-            console.error('❌ No CSRF token found for AI analysis');
-            // Use fallback analysis
-            const fallbackAnalysis = {
-                success: true,
-                analysis: {
-                    intent: 'busy',
-                    sentiment: 'negative',
-                    leadScore: 2,
-                    isPositive: false,
-                    suggested_response: 'Thank you for letting me know. I understand you\'re not available right now. Please feel free to reach out when you have time.',
-                    next_action: 'acknowledge'
-                },
-                message: 'Fallback analysis due to missing CSRF token'
-            };
-            return fallbackAnalysis;
-        }
+        // CSRF token not needed for API routes
         
         // Get connection_id and conversation_urn_id from monitoring data
         let connectionId = null;
@@ -7820,8 +7802,7 @@ const processCallReplyWithAI = async (callId, messageText, leadName = null) => {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'lk-id': linkedinId || 'vicken-concept',
-                'csrf-token': tokenResult.csrfToken
+                'lk-id': linkedinId || 'vicken-concept'
             },
             body: JSON.stringify(requestBody)
         });
@@ -9138,17 +9119,86 @@ async function clearCampaignDedupeFlags(campaignId) {
 // Clear dedupe flags for campaign 100 to allow retry (for testing)
 // clearCampaignDedupeFlags(100);
 
+// Make functions available globally for console access
+self.clearOldCallIds = clearOldCallIds;
+self.updateMonitoringDataWithCorrectCallId = updateMonitoringDataWithCorrectCallId;
+
+// Function to clear old call IDs and update monitoring data
+async function clearOldCallIds() {
+    try {
+        console.log('🧹 Clearing old call IDs from storage...');
+        
+        // Get all storage data
+        const allStorage = await chrome.storage.local.get();
+        
+        // Find all monitoring keys
+        const monitoringKeys = Object.keys(allStorage).filter(key => key.startsWith('call_response_monitoring_'));
+        
+        for (const key of monitoringKeys) {
+            const monitoringData = allStorage[key];
+            if (monitoringData && monitoringData.callId) {
+                console.log(`🔍 Found monitoring data with callId: ${monitoringData.callId} for key: ${key}`);
+                
+                // Clear the callId to force lookup by connection_id or conversation_urn_id
+                monitoringData.callId = null;
+                
+                // Update the storage
+                await chrome.storage.local.set({ [key]: monitoringData });
+                console.log(`✅ Cleared callId for ${key}`);
+            }
+        }
+        
+        // Also clear any call_id_* keys
+        const callIdKeys = Object.keys(allStorage).filter(key => key.startsWith('call_id_'));
+        for (const key of callIdKeys) {
+            await chrome.storage.local.remove([key]);
+            console.log(`✅ Removed ${key}`);
+        }
+        
+        console.log('🎉 Old call IDs cleared successfully');
+    } catch (error) {
+        console.error('❌ Error clearing old call IDs:', error);
+    }
+}
+
+// Function to update monitoring data with correct call ID
+async function updateMonitoringDataWithCorrectCallId(connectionId, correctCallId) {
+    try {
+        console.log(`🔄 Updating monitoring data for connection ${connectionId} with correct call ID: ${correctCallId}`);
+        
+        // Get all storage data
+        const allStorage = await chrome.storage.local.get();
+        
+        // Find monitoring keys for this connection
+        const monitoringKeys = Object.keys(allStorage).filter(key => 
+            key.startsWith('call_response_monitoring_') && 
+            key.includes(connectionId)
+        );
+        
+        for (const key of monitoringKeys) {
+            const monitoringData = allStorage[key];
+            if (monitoringData) {
+                monitoringData.callId = correctCallId;
+                await chrome.storage.local.set({ [key]: monitoringData });
+                console.log(`✅ Updated ${key} with correct call ID: ${correctCallId}`);
+            }
+        }
+        
+        // Also update the call_id_* key
+        await chrome.storage.local.set({ [`call_id_${connectionId}`]: correctCallId });
+        console.log(`✅ Updated call_id_${connectionId} with correct call ID: ${correctCallId}`);
+        
+    } catch (error) {
+        console.error('❌ Error updating monitoring data:', error);
+    }
+}
+
 // Function to store conversation message in call_status table
 async function storeConversationMessage(messageData) {
     try {
         console.log('💾 Storing conversation message:', messageData);
         
-        // Get CSRF token
-        const tokenResult = await chrome.storage.local.get(['csrfToken']);
-        if (!tokenResult.csrfToken) {
-            console.error('❌ No CSRF token found for conversation storage');
-            return null;
-        }
+        // CSRF token not needed for API routes
         
         // Get LinkedIn ID from storage or use fallback
         const linkedinIdResult = await chrome.storage.local.get(['linkedinId']);
@@ -9160,8 +9210,7 @@ async function storeConversationMessage(messageData) {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'lk-id': currentLinkedInId,
-                'csrf-token': tokenResult.csrfToken
+                'lk-id': currentLinkedInId
             },
             body: JSON.stringify(messageData)
         });
@@ -9175,7 +9224,71 @@ async function storeConversationMessage(messageData) {
             });
             
             if (response.status === 404) {
-                console.error('❌ Call record not found - this should not happen if call_id is correct');
+                console.error('❌ Call record not found - clearing old call ID and retrying...');
+                
+                // Clear the old call ID from monitoring data
+                if (messageData.connection_id) {
+                    await clearOldCallIds();
+                    
+                    // Try to find the correct call ID by querying the server
+                    try {
+                        const campaignsResponse = await fetch(`${PLATFORM_URL}/api/campaigns`, {
+                            headers: { 'lk-id': currentLinkedInId }
+                        });
+                        
+                        if (campaignsResponse.ok) {
+                            const campaignsData = await campaignsResponse.json();
+                            const campaigns = campaignsData.data || [];
+                            
+                            for (const campaign of campaigns) {
+                                if (campaign.status === 'running' || campaign.status === 'stop') {
+                                    const leadsResponse = await fetch(`${PLATFORM_URL}/api/campaign/${campaign.id}/leads`, {
+                                        headers: { 'lk-id': currentLinkedInId }
+                                    });
+                                    
+                                    if (leadsResponse.ok) {
+                                        const leadsData = await leadsResponse.json();
+                                        const leads = leadsData.data || [];
+                                        
+                                        for (const lead of leads) {
+                                            if (lead.connectionId === messageData.connection_id) {
+                                                console.log(`🔍 Found lead ${lead.name} with connection ID ${messageData.connection_id}`);
+                                                
+                                                // Try to find the call record by connection_id
+                                                const callLookupResponse = await fetch(`${PLATFORM_URL}/api/calls/conversation/store`, {
+                                                    method: 'POST',
+                                                    headers: {
+                                                        'Content-Type': 'application/json',
+                                                        'lk-id': currentLinkedInId
+                                                    },
+                                                    body: JSON.stringify({
+                                                        ...messageData,
+                                                        call_id: messageData.connection_id // Use connection_id instead
+                                                    })
+                                                });
+                                                
+                                                if (callLookupResponse.ok) {
+                                                    const result = await callLookupResponse.json();
+                                                    console.log('✅ Found call record with connection_id lookup:', result);
+                                                    
+                                                    // Update monitoring data with correct call ID
+                                                    if (result.call_id) {
+                                                        await updateMonitoringDataWithCorrectCallId(messageData.connection_id, result.call_id);
+                                                    }
+                                                    
+                                                    return result;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } catch (lookupError) {
+                        console.error('❌ Error during call lookup:', lookupError);
+                    }
+                }
+                
                 return null;
             }
             
