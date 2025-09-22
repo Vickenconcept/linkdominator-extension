@@ -6880,10 +6880,23 @@ const checkForCallResponses = async () => {
 
                             // Send message to backend for AI analysis
                             const analysisResponse = await processCallReplyWithAI(monitoringData.callId, latestMessage.text, monitoringData.leadName);
+<<<<<<< Updated upstream
                             
                             if (analysisResponse) {
                             // Update monitoring status
                             monitoringData.status = 'response_received';
+=======
+                            
+                            console.log('🔍 DEBUG: analysisResponse received:', analysisResponse);
+                            console.log('🔍 DEBUG: analysisResponse type:', typeof analysisResponse);
+                            console.log('🔍 DEBUG: analysisResponse truthy check:', !!analysisResponse);
+                            
+                            if (analysisResponse) {
+                                console.log('🔍 DEBUG: Entering analysisResponse block');
+                                
+                                // Update monitoring status
+                                monitoringData.status = 'response_received';
+>>>>>>> Stashed changes
                                 monitoringData.responseData = analysisResponse;
                             monitoringData.receivedAt = Date.now();
                                 monitoringData.lastCheckedMessageId = latestMessage.id;
@@ -6894,19 +6907,41 @@ const checkForCallResponses = async () => {
                                 const callStatus = analysisResponse.call_status || analysisResponse['call_status'];
                                 const isSchedulingInitiated = callStatus === 'scheduled';
                                 
+<<<<<<< Updated upstream
                                 if (isSchedulingInitiated) {
                                     console.log('📅 SCHEDULING INITIATED - Generating calendar link instead of AI response');
+=======
+                                console.log('🔍 DEBUG: About to update storage');
+                                await chrome.storage.local.set({ [key]: monitoringData });
+                                console.log('🔍 DEBUG: Storage updated successfully');
+                                
+                                // Handle positive responses
+                                console.log('🔍 DEBUG: Checking isPositive:', analysisResponse.isPositive);
+                                console.log('🔍 DEBUG: isPositive type:', typeof analysisResponse.isPositive);
+                                console.log('🔍 DEBUG: isPositive === true:', analysisResponse.isPositive === true);
+                                console.log('🔍 DEBUG: isPositive === false:', analysisResponse.isPositive === false);
+                                console.log('🔍 DEBUG: About to enter if-else block');
+                                if (analysisResponse.isPositive) {
+                                    console.log('🔍 DEBUG: ENTERED IF BLOCK - isPositive is true');
+                                    console.log('🎉 POSITIVE RESPONSE DETECTED! Generating calendar link...');
+>>>>>>> Stashed changes
                                     
                                     // Generate calendar link for scheduling
                                     try {
+<<<<<<< Updated upstream
                                         // Always request calendar link from backend (reuses existing if already generated)
                                         const calendarResponse = await fetch(`${PLATFORM_URL}/api/calls/${monitoringData.callId || 'unknown'}/calendar-link`, {
+=======
+                                        // Generate calendar link
+                                        const calendarResponse = await fetch(`${PLATFORM_URL}/api/calls/${monitoringData.connectionId}_${Date.now()}/calendar-link`, {
+>>>>>>> Stashed changes
                                             method: 'POST',
                                             headers: {
                                                 'Content-Type': 'application/json',
                                                 'lk-id': linkedinId || 'vicken-concept'
                                             }
                                         });
+<<<<<<< Updated upstream
 
                                         if (calendarResponse.ok) {
                                             const calendarData = await calendarResponse.json();
@@ -6914,6 +6949,66 @@ const checkForCallResponses = async () => {
                                                 `Perfect! I'd love to schedule a call with you. Please book a convenient time here: ${calendarData.calendar_link}\n\nLooking forward to speaking with you!`;
 
                                             await sendSchedulingMessage(monitoringData, schedulingMessage, calendarData.calendar_link);
+=======
+                    
+                                        if (calendarResponse.ok) {
+                                            const calendarData = await calendarResponse.json();
+                                            console.log('✅ Calendar link generated:', calendarData.calendarLink);
+                                            
+                                            // Send the scheduling message to the lead
+                                            console.log(`📤 Sending scheduling message to ${monitoringData.leadName}...`);
+                                            
+                                            // Use the conversation ID from the connection and send the scheduling message
+                                            const conversationId = monitoringData.connectionId;
+                                            const voyagerApi = 'https://www.linkedin.com/voyager/api';
+                                            
+                                            const tokenResult = await chrome.storage.local.get(['csrfToken']);
+                                            
+                                            const messageBody = calendarData.schedulingMessage || `Great! I'd love to schedule a call with you. Please use this link to book a time that works for you: ${calendarData.calendarLink}`;
+                                            
+                                            // Use the SAME structure as the working initial message sending
+                                            const messageEvent = {
+                                                'com.linkedin.voyager.messaging.create.MessageCreate': {
+                                                    body: messageBody,
+                                                    attributedBody: {"text": messageBody, "attributes": []},
+                                                    mediaAttachments: [],
+                                                }
+                                            };
+                                            
+                                            const requestBody = {
+                                                eventCreate: messageEvent
+                                            };
+                                            
+                                            const url = `${voyagerApi}/messaging/conversations/${conversationId}/events?action=create`;
+                                            
+                                            console.log('🔍 DEBUG: LinkedIn API Request Details (Using WORKING structure):');
+                                            console.log('🔍 URL:', url);
+                                            console.log('🔍 Request Body:', JSON.stringify(requestBody, null, 2));
+                                            
+                                            const sendMessageResponse = await fetch(url, {
+                                                method: 'POST',
+                                                headers: {
+                                                    'csrf-token': tokenResult.csrfToken,
+                                                    'accept': 'text/plain, */*; q=0.01',
+                                                    'content-type': 'application/json; charset=UTF-8',
+                                                    'x-li-lang': 'en_US',
+                                                    'x-li-page-instance': 'urn:li:page:d_flagship3_people_invitations;1ZlPK7kKRNSMi+vkXMyVMw==',
+                                                    'x-li-track': JSON.stringify({"clientVersion":"1.10.1208","osName":"web","timezoneOffset":1,"deviceFormFactor":"DESKTOP","mpName":"voyager-web"}),
+                                                    'x-restli-protocol-version': '2.0.0',
+                                                },
+                                                body: JSON.stringify(requestBody)
+                                            });
+                                            
+                                            if (sendMessageResponse.ok) {
+                                                console.log(`✅ Scheduling message sent successfully to ${monitoringData.leadName}!`);
+                                                monitoringData.status = 'scheduling_initiated';
+                                                await chrome.storage.local.set({ [key]: monitoringData });
+                                            } else {
+                                                console.log(`❌ Failed to send scheduling message: ${sendMessageResponse.status}`);
+                                                const errorText = await sendMessageResponse.text();
+                                                console.log('🔍 Error Response:', errorText);
+                                            }
+>>>>>>> Stashed changes
                                         } else {
                                             console.error('❌ Failed to generate calendar link (fallback to AI response path)', calendarResponse.status);
                                             const suggestedResponse = analysisResponse.suggested_response || analysisResponse['Suggested Response'] || analysisResponse.suggestedResponse;
@@ -6941,8 +7036,72 @@ const checkForCallResponses = async () => {
                                         
                                         await sendAIMessage(monitoringData, suggestedResponse);
                                     }
+<<<<<<< Updated upstream
+=======
+                                }
+                            } else {
+                                console.log('🔍 DEBUG: REACHED ELSE BLOCK - This should appear!');
+                                console.log('🔍 DEBUG: Entering else block for neutral/negative response');
+                                console.log('📝 Neutral/Negative response detected. Sending AI-generated follow-up...');
+                                console.log('🔍 DEBUG: Checking suggested_response:', analysisResponse.suggested_response);
+                                
+                                // Send AI-generated response for neutral/negative messages
+                                if (analysisResponse.suggested_response) {
+                                    try {
+                                        console.log(`📤 Sending AI response to ${monitoringData.leadName}: "${analysisResponse.suggested_response}"`);
+                                        
+                                        // Use the conversation ID from the connection and send the AI response
+                                        const conversationId = monitoringData.connectionId;
+                                        const voyagerApi = 'https://www.linkedin.com/voyager/api';
+                                        
+                                        const tokenResult = await chrome.storage.local.get(['csrfToken']);
+                                        
+                                        // Use the SAME structure as the working initial message sending
+                                        const messageEvent = {
+                                            'com.linkedin.voyager.messaging.create.MessageCreate': {
+                                                body: analysisResponse.suggested_response,
+                                                attributedBody: {"text": analysisResponse.suggested_response, "attributes": []},
+                                                mediaAttachments: [],
+                                            }
+                                        };
+                                        
+                                        const requestBody = {
+                                            eventCreate: messageEvent
+                                        };
+                                        
+                                        const url = `${voyagerApi}/messaging/conversations/${conversationId}/events?action=create`;
+                                        
+                                        const sendMessageResponse = await fetch(url, {
+                                            method: 'POST',
+                                            headers: {
+                                                'csrf-token': tokenResult.csrfToken,
+                                                'accept': 'text/plain, */*; q=0.01',
+                                                'content-type': 'application/json; charset=UTF-8',
+                                                'x-li-lang': 'en_US',
+                                                'x-li-page-instance': 'urn:li:page:d_flagship3_people_invitations;1ZlPK7kKRNSMi+vkXMyVMw==',
+                                                'x-li-track': JSON.stringify({"clientVersion":"1.10.1208","osName":"web","timezoneOffset":1,"deviceFormFactor":"DESKTOP","mpName":"voyager-web"}),
+                                                'x-restli-protocol-version': '2.0.0',
+                                            },
+                                            body: JSON.stringify(requestBody)
+                                        });
+                                        
+                                        if (sendMessageResponse.ok) {
+                                            console.log(`✅ AI response sent successfully to ${monitoringData.leadName}!`);
+                                            monitoringData.status = 'ai_response_sent';
+                                            await chrome.storage.local.set({ [key]: monitoringData });
+                                        } else {
+                                            console.log(`❌ Failed to send AI response: ${sendMessageResponse.status}`);
+                                        }
+                                    } catch (error) {
+                                        console.error('❌ Error sending AI response:', error);
+                                    }
+                                } else {
+                                    console.log('⚠️ No suggested response from AI analysis');
+                                }
+>>>>>>> Stashed changes
                             }
                         } else {
+                            console.log('🔍 DEBUG: analysisResponse is null/undefined, updating last checked message ID');
                             // Update last checked message ID to avoid reprocessing
                             monitoringData.lastCheckedMessageId = latestMessage.id;
                             await chrome.storage.local.set({ [key]: monitoringData });
@@ -7827,6 +7986,7 @@ const processCallReplyWithAI = async (callId, messageText, leadName = null) => {
     try {
         console.log('🤖 Processing call reply with AI analysis...');
         
+<<<<<<< Updated upstream
         // If leadName is not provided, try to get it from storage
         if (!leadName) {
             const allStorage = await chrome.storage.local.get();
@@ -7835,11 +7995,25 @@ const processCallReplyWithAI = async (callId, messageText, leadName = null) => {
                 const monitoringData = allStorage[key];
                 if (monitoringData.callId === callId) {
                     leadName = monitoringData.leadName;
+=======
+        // If leadName is not provided, try to get it from the call monitoring data
+        let actualLeadName = leadName;
+        if (!actualLeadName) {
+            // Try to find the lead name from monitoring data
+            const allStorage = await chrome.storage.local.get();
+            const responseKeys = Object.keys(allStorage).filter(key => key.startsWith('call_response_monitoring_'));
+            
+            for (const key of responseKeys) {
+                const monitoringData = allStorage[key];
+                if (monitoringData.callId === callId || key.includes(callId)) {
+                    actualLeadName = monitoringData.leadName;
+>>>>>>> Stashed changes
                     break;
                 }
             }
         }
         
+<<<<<<< Updated upstream
         console.log(`🎯 Analyzing message from: ${leadName || 'Unknown Lead'}`);
         
         // CSRF token not needed for API routes
@@ -7879,6 +8053,15 @@ const processCallReplyWithAI = async (callId, messageText, leadName = null) => {
         //         'csrf-token': tokenResult.csrfToken ? tokenResult.csrfToken.substring(0, 20) + '...' : 'MISSING'
         //     });
         // console.log('   - Body:', requestBody);
+=======
+        // Fallback to a generic name if we still don't have it
+        if (!actualLeadName) {
+            actualLeadName = 'LinkedIn Lead';
+            console.log('⚠️ Could not determine lead name, using generic name');
+        }
+        
+        console.log(`🎯 Analyzing message from: ${actualLeadName}`);
+>>>>>>> Stashed changes
         
         const response = await fetch(`${PLATFORM_URL}/api/calls/analyze-message`, {
             method: 'POST',
@@ -7886,7 +8069,15 @@ const processCallReplyWithAI = async (callId, messageText, leadName = null) => {
                 'Content-Type': 'application/json',
                 'lk-id': linkedinId || 'vicken-concept'
             },
+<<<<<<< Updated upstream
             body: JSON.stringify(requestBody)
+=======
+            body: JSON.stringify({
+                message: messageText,
+                leadName: actualLeadName,
+                context: 'LinkedIn message response analysis'
+            })
+>>>>>>> Stashed changes
         });
         
         console.log('🔍 DEBUG: API Response Details:');
@@ -7956,8 +8147,13 @@ const processCallReplyWithAI = async (callId, messageText, leadName = null) => {
                 message: messageText,
                 analysis: analysis,
                 isPositive: isPositive,
+<<<<<<< Updated upstream
                 call_status: isPositive ? 'scheduled' : 'response_received',
                 suggested_response: analysis.suggested_response || analysis['Suggested Response'] || analysis.suggestedResponse || 'Thank you for your response.'
+=======
+                call_status: isPositive ? 'scheduling_initiated' : 'response_received',
+                suggested_response: analysis.suggestedResponse || analysis['Suggested Response'] || 'Thank you for your response.'
+>>>>>>> Stashed changes
             };
         } else {
             console.error('❌ Failed to process reply with AI:', response.status);
@@ -7995,9 +8191,13 @@ const processPositiveCallResponse = async (monitoringData, responseData) => {
     try {
         // Generate calendar link via backend
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
         const calendarResponse = await fetch(`${PLATFORM_URL}/api/calls/${monitoringData.callId}/calendar-link`, {
 =======
         const calendarResponse = await fetch(`${PLATFROM_URL}/api/calls/${monitoringData.callId}/calendar-link`, {
+>>>>>>> Stashed changes
+=======
+        const calendarResponse = await fetch(`${PLATFORM_URL}/api/calls/${monitoringData.callId}/calendar-link`, {
 >>>>>>> Stashed changes
             method: 'POST',
             headers: {
