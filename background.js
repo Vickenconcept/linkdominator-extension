@@ -2855,6 +2855,24 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                     // Don't mark call node as completed immediately - wait for response
                     console.log('⏳ Call message sent, waiting for response...');
                     console.log('🔄 Campaign will continue running to monitor for responses');
+<<<<<<< Updated upstream
+=======
+                    
+                    // Set up response monitoring instead of marking as completed
+                    const responseMonitoringKey = `call_response_monitoring_${currentCampaign.id}_${lead.connectionId}`;
+                    await chrome.storage.local.set({ 
+                        [responseMonitoringKey]: {
+                            callId: callResponse.call_id || callResponse.data?.call_id,
+                            leadId: lead.id,
+                            leadName: lead.name,
+                            connectionId: lead.connectionId,
+                            campaignId: currentCampaign.id,
+                            sentAt: Date.now(),
+                            status: 'waiting_for_response'
+                        }
+                    });
+                    console.log('📊 Response monitoring set up:', responseMonitoringKey);
+>>>>>>> Stashed changes
                 }
             }
 
@@ -6706,10 +6724,17 @@ self.testLinkedInConversation = async (connectionId) => {
 let isCheckingAcceptances = false;
 
 /**
+<<<<<<< Updated upstream
  * Check for call responses and process them using real LinkedIn API
  */
 const checkForCallResponses = async () => {
     console.log('🔍 Checking for call responses using LinkedIn API...');
+=======
+ * Check for call responses and process them
+ */
+const checkForCallResponses = async () => {
+    console.log('🔍 Checking for call responses...');
+>>>>>>> Stashed changes
     
     try {
         // Get all response monitoring keys
@@ -6722,6 +6747,7 @@ const checkForCallResponses = async () => {
         }
         
         console.log(`📊 Found ${responseKeys.length} call responses to check`);
+<<<<<<< Updated upstream
         // console.log('🔍 Response monitoring keys:', responseKeys);
         
         for (const key of responseKeys) {
@@ -6938,6 +6964,53 @@ const checkForCallResponses = async () => {
                         }
                     } else {
                         console.log('⏳ No new messages from', monitoringData.leadName);
+=======
+        
+        for (const key of responseKeys) {
+            const monitoringData = allStorage[key];
+            
+            if (monitoringData.status === 'waiting_for_response') {
+                console.log(`🔍 Checking response for ${monitoringData.leadName} (Call ID: ${monitoringData.callId})`);
+                
+                try {
+                    // Check if there's a response from the backend
+                    const response = await fetch(`${PLATFROM_URL}/api/calls/${monitoringData.callId}/response`, {
+                        method: 'GET',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'lk-id': linkedinId || 'vicken-concept'
+                        }
+                    });
+                    
+                    if (response.ok) {
+                        const responseData = await response.json();
+                        console.log('📨 Response data received:', responseData);
+                        
+                        if (responseData.hasResponse) {
+                            console.log('✅ Response received from', monitoringData.leadName);
+                            
+                            // Update monitoring status
+                            monitoringData.status = 'response_received';
+                            monitoringData.responseData = responseData;
+                            monitoringData.receivedAt = Date.now();
+                            
+                            await chrome.storage.local.set({ [key]: monitoringData });
+                            
+                            // Process the response based on AI analysis
+                            if (responseData.isPositive) {
+                                console.log('🎉 Positive response detected! Generating calendar link...');
+                                await processPositiveCallResponse(monitoringData, responseData);
+                            } else {
+                                console.log('😞 Negative response detected. Handling accordingly...');
+                                await processNegativeCallResponse(monitoringData, responseData);
+                            }
+                            
+                            // Mark call node as completed after processing response
+                            await markCallNodeAsCompleted(monitoringData.campaignId, monitoringData.leadId);
+                            
+                        } else {
+                            console.log('⏳ No response yet from', monitoringData.leadName);
+>>>>>>> Stashed changes
                             
                             // Check if it's been too long (e.g., 7 days)
                             const daysSinceSent = (Date.now() - monitoringData.sentAt) / (1000 * 60 * 60 * 24);
@@ -6946,6 +7019,7 @@ const checkForCallResponses = async () => {
                                 monitoringData.status = 'timeout';
                                 await chrome.storage.local.set({ [key]: monitoringData });
                                 await markCallNodeAsCompleted(monitoringData.campaignId, monitoringData.leadId);
+<<<<<<< Updated upstream
                         }
                     }
                 } catch (error) {
@@ -7186,6 +7260,13 @@ const checkForCallResponses = async () => {
                     }
                 } catch (error) {
                     console.error('❌ Error force checking LinkedIn conversation for', monitoringData.leadName, ':', error);
+=======
+                            }
+                        }
+                    }
+                } catch (error) {
+                    console.error('❌ Error checking response for', monitoringData.leadName, ':', error);
+>>>>>>> Stashed changes
                 }
             }
         }
@@ -7194,6 +7275,7 @@ const checkForCallResponses = async () => {
         console.error('❌ Error in checkForCallResponses:', error);
     }
 };
+<<<<<<< Updated upstream
 /**
  * Fetch LinkedIn conversation messages for a specific connection
  */
@@ -7901,6 +7983,8 @@ const processCallReplyWithAI = async (callId, messageText, leadName = null) => {
         return fallbackAnalysis;
     }
 };
+=======
+>>>>>>> Stashed changes
 
 /**
  * Process positive call response - generate and send calendar link
@@ -7910,7 +7994,11 @@ const processPositiveCallResponse = async (monitoringData, responseData) => {
     
     try {
         // Generate calendar link via backend
+<<<<<<< Updated upstream
         const calendarResponse = await fetch(`${PLATFORM_URL}/api/calls/${monitoringData.callId}/calendar-link`, {
+=======
+        const calendarResponse = await fetch(`${PLATFROM_URL}/api/calls/${monitoringData.callId}/calendar-link`, {
+>>>>>>> Stashed changes
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -7930,11 +8018,17 @@ const processPositiveCallResponse = async (monitoringData, responseData) => {
             console.log('📅 Calendar link generated:', calendarData);
             
             // Send calendar link message
+<<<<<<< Updated upstream
             if (calendarData.calendar_link) {
                 await sendCalendarLinkMessage(monitoringData, calendarData.calendar_link, calendarData.scheduling_message);
             }
         } else {
             console.error('❌ Failed to generate calendar link:', calendarResponse.status);
+=======
+            if (calendarData.calendarLink) {
+                await sendCalendarLinkMessage(monitoringData, calendarData.calendarLink);
+            }
+>>>>>>> Stashed changes
         }
     } catch (error) {
         console.error('❌ Error processing positive response:', error);
@@ -7942,6 +8036,7 @@ const processPositiveCallResponse = async (monitoringData, responseData) => {
 };
 
 /**
+<<<<<<< Updated upstream
  * Send scheduling message with calendar link
  */
 const sendSchedulingMessage = async (monitoringData, message, calendarLink) => {
@@ -8168,6 +8263,8 @@ const sendCalendarLinkMessage = async (monitoringData, calendarLink, schedulingM
 };
 
 /**
+=======
+>>>>>>> Stashed changes
  * Process negative call response
  */
 const processNegativeCallResponse = async (monitoringData, responseData) => {
@@ -8185,6 +8282,35 @@ const processNegativeCallResponse = async (monitoringData, responseData) => {
     }
 };
 
+<<<<<<< Updated upstream
+=======
+/**
+ * Send calendar link message to lead
+ */
+const sendCalendarLinkMessage = async (monitoringData, calendarLink) => {
+    console.log('📤 Sending calendar link to', monitoringData.leadName);
+    
+    try {
+        // Prepare message with calendar link
+        const calendarMessage = `Thank you for your interest! Here's the link to schedule our call: ${calendarLink}`;
+        
+        // Set up arConnectionModel for message sending
+        arConnectionModel = {
+            message: calendarMessage,
+            connectionId: monitoringData.connectionId,
+            conversationUrnId: monitoringData.conversationUrnId || undefined,
+            distance: 1 // Assuming 1st degree connection
+        };
+        
+        // Send the message
+        messageConnection({ uploads: [] });
+        console.log('✅ Calendar link sent successfully');
+        
+    } catch (error) {
+        console.error('❌ Error sending calendar link:', error);
+    }
+};
+>>>>>>> Stashed changes
 
 /**
  * Mark call node as completed
