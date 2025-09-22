@@ -3331,9 +3331,19 @@ const messageConnection = scheduleInfo => {
                                 
                                 if (connectionId === arConnectionModel.connectionId) {
                                     const responseMonitoringKey = `call_response_monitoring_${campaignId}_${connectionId}`;
+                                    
+                                    // Try to get the actual call_id from storage
+                                    let actualCallId = null;
+                                    try {
+                                        const stored = await chrome.storage.local.get([`call_id_${connectionId}`]);
+                                        actualCallId = stored[`call_id_${connectionId}`] || null;
+                                    } catch (e) {
+                                        console.log('⚠️ Failed to read call_id from storage:', e.message);
+                                    }
+                                    
                                     await chrome.storage.local.set({ 
                                         [responseMonitoringKey]: {
-                                            callId: null, // Will be updated when we get the actual call ID
+                                            callId: actualCallId, // Use the actual call ID from storage
                                             leadId: null, // Will be updated when we get the lead ID
                                             leadName: arConnectionModel.name,
                                             connectionId: arConnectionModel.connectionId,
@@ -6603,9 +6613,19 @@ self.setupResponseMonitoringForExistingCalls = async () => {
         
         // Set up response monitoring for this call
         const responseMonitoringKey = `call_response_monitoring_${campaignId}_${connectionId}`;
+        
+        // Try to get the actual call_id from storage
+        let actualCallId = null;
+        try {
+            const stored = await chrome.storage.local.get([`call_id_${connectionId}`]);
+            actualCallId = stored[`call_id_${connectionId}`] || null;
+        } catch (e) {
+            console.log('⚠️ Failed to read call_id from storage:', e.message);
+        }
+        
         await chrome.storage.local.set({ 
             [responseMonitoringKey]: {
-                callId: null, // We don't have the actual call ID, but we can still monitor
+                callId: actualCallId, // Use the actual call ID from storage
                 leadId: 14521, // Eleazar's lead ID from the logs
                 leadName: 'Eleazar Nzerem',
                 connectionId: connectionId,
@@ -6856,9 +6876,25 @@ const checkForCallResponses = async () => {
                             // Store the lead's message in conversation history
                             console.log('🔍 DEBUG: Storing conversation message with call_id:', monitoringData.callId);
                             console.log('🔍 DEBUG: Monitoring data:', monitoringData);
-                            
+
+                            // Resolve a real call_id if current looks stale (numeric or null)
+                            let resolvedCallId = monitoringData.callId;
+                            try {
+                                if (!resolvedCallId || /^\d+$/.test(String(resolvedCallId))) {
+                                    const storedIds = await chrome.storage.local.get([`call_id_${monitoringData.connectionId}`]);
+                                    if (storedIds && storedIds[`call_id_${monitoringData.connectionId}`]) {
+                                        resolvedCallId = storedIds[`call_id_${monitoringData.connectionId}`];
+                                        monitoringData.callId = resolvedCallId;
+                                        await chrome.storage.local.set({ [key]: monitoringData });
+                                        console.log('🔄 Resolved real call_id from storage:', resolvedCallId);
+                                    }
+                                }
+                            } catch (e) {
+                                console.log('⚠️ Failed resolving call_id from storage:', e.message);
+                            }
+
                             const result = await storeConversationMessage({
-                                call_id: monitoringData.callId,
+                                call_id: resolvedCallId,
                                 message: latestMessage.text,
                                 sender: 'lead',
                                 message_type: 'text',
@@ -9531,6 +9567,62 @@ async function storeConversationMessage(messageData) {
         const currentLinkedInId = linkedinIdResult.linkedinId || 'vicken-concept';
         
         console.log('🔍 Using LinkedIn ID for conversation storage:', currentLinkedInId);
+        
+        // If no call_id provided, try to get it from storage
+        if (!messageData.call_id && messageData.connection_id) {
+            try {
+                const stored = await chrome.storage.local.get([`call_id_${messageData.connection_id}`]);
+                const storedCallId = stored[`call_id_${messageData.connection_id}`] || null;
+                if (storedCallId) {
+                    messageData.call_id = storedCallId;
+                    console.log('🔍 Using stored call_id:', storedCallId);
+                }
+            } catch (e) {
+                console.log('⚠️ Failed to read call_id from storage:', e.message);
+            }
+        }
+        
+        // If still no call_id, try to create a new call record
+        if (!messageData.call_id) {
+            console.log('⚠️ No call_id available, attempting to create new call record...');
+            try {
+                const newCallData = {
+                    recipient: messageData.lead_name || 'Unknown',
+                    connection_id: messageData.connection_id,
+                    conversation_urn_id: messageData.conversation_urn_id,
+                    original_message: 'Auto-generated call record for conversation storage',
+                    campaign_id: messageData.campaign_id || null,
+                    profile: 'extension'
+                };
+                
+                const newCallResponse = await fetch(`${PLATFORM_URL}/api/book-call/store`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'lk-id': currentLinkedInId,
+                        'csrf-token': tokenResult.csrfToken
+                    },
+                    body: JSON.stringify(newCallData)
+                });
+                
+                if (newCallResponse.ok) {
+                    const newCallData = await newCallResponse.json();
+                    messageData.call_id = newCallData.call_id;
+                    console.log('✅ Created new call record with ID:', newCallData.call_id);
+                    
+                    // Store the new call_id for future use
+                    if (messageData.connection_id) {
+                        await chrome.storage.local.set({ [`call_id_${messageData.connection_id}`]: newCallData.call_id });
+                    }
+                } else {
+                    console.error('❌ Failed to create new call record:', newCallResponse.status);
+                    return null;
+                }
+            } catch (e) {
+                console.error('❌ Error creating new call record:', e);
+                return null;
+            }
+        }
         
         const response = await fetch(`${PLATFORM_URL}/api/calls/conversation/store`, {
             method: 'POST',
