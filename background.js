@@ -771,7 +771,6 @@ const getCampaignLeads = async (campaignId, callback) => {
         return [];
     }
 };
-
 const getLeadGenRunning = async (campaignId) => {
     try {
         
@@ -1569,7 +1568,6 @@ const updateCampaignStatus = (status, message) => {
         }
     });
 };
-
 // Run alarm action when it's time
 chrome.alarms.onAlarm.addListener((alarm) => {
     console.log('🔔 Alarm triggered:', alarm.name);
@@ -1871,7 +1869,6 @@ const setCampaignAlarm = async (campaign) => {
         status: campaign.status,
         sequenceType: campaign.sequenceType
     });
-    
     await getCampaignSequence(campaign.id)
     alarmName = (campaign.sequenceType || 'default_sequence').replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
     nodeModelArr = campaignSequence.nodeModel
@@ -2638,7 +2635,6 @@ const setCampaignAlarm = async (campaign) => {
         }
     }
 }
-
 const runSequence = async (currentCampaign, leads, nodeModel) => {
     console.log('🎬 RUNSEQUENCE CALLED - Starting sequence execution...');
     console.log('📊 Campaign:', currentCampaign.name, '(ID:', currentCampaign.id, ')');
@@ -3348,7 +3344,6 @@ const messageConnection = scheduleInfo => {
         })
     })
 }
-
 /**
  * Fetch skills of a given LinkedIn profile to endorse.
  * @param {object} lead 
@@ -3730,7 +3725,6 @@ const _likePost = (post, result) => {
     })
     .catch(err => console.log(err))
 }
-
 /**
  * Send connection request to a given LinkedIn profile.
  * @param {object} lead 
@@ -4498,7 +4492,6 @@ const _updateCampaignLeadsNetwork = async () => {
         }
     }
 }
-
 const _testFunc = async () => {
     let searchUrl = `https://www.linkedin.com/voyager/api/search/dash/clusters?decorationId=com.linkedin.voyager.dash.deco.search.SearchClusterCollection-160&origin=GLOBAL_SEARCH_HEADER&q=all&query=(keywords:${encodeURIComponent('digital marketing')},flagshipSearchIntent:SEARCH_SRP,queryParameters:(resultType:List(CONTENT)),includeFiltersInResponse:false)&start=0`
 
@@ -5205,7 +5198,6 @@ self.extractConversationId = async () => {
         return null;
     }
 };
-
 // Function to test different LinkedIn API endpoints for messages
 self.testLinkedInMessagesAPI = async () => {
     console.log('🧪 TESTING DIFFERENT LINKEDIN MESSAGES API ENDPOINTS...');
@@ -5858,7 +5850,9 @@ self.testBackendAPI = async () => {
                 message: 'Hi, William',
                 leadName: 'Eleazar Nzerem',
                 context: 'LinkedIn message response analysis',
-                call_id: 'test_call_123'
+                call_id: 'test_call_123',
+                connection_id: null,
+                conversation_urn_id: null
             })
         });
         
@@ -5879,7 +5873,6 @@ self.testBackendAPI = async () => {
         return { success: false, error: error.message };
     }
 };
-
 // Function to test AI analysis only (without calendar generation)
 self.testEleazarAIAnalysis = async () => {
     console.log('🤖 TESTING AI ANALYSIS FOR ELEAZAR\'S REPLIES...');
@@ -5941,7 +5934,9 @@ self.testEleazarAIAnalysis = async () => {
                     message: reply.text,
                     leadName: 'Eleazar Nzerem',
                     context: 'LinkedIn message response analysis',
-                    call_id: 'test_direct_conversation'
+                    call_id: 'test_direct_conversation',
+                    connection_id: null,
+                    conversation_urn_id: null
                 })
             });
             
@@ -6099,7 +6094,9 @@ self.analyzeLeadRepliesWithAI = async (connectionId, leadName) => {
                             leadName: leadName,
                             context: 'LinkedIn message response analysis',
                             original_message: null, // Let backend fetch from database
-                            call_id: callId || 'test_call_analysis'
+                            call_id: callId || 'test_call_analysis',
+                            connection_id: null,
+                            conversation_urn_id: null
                         })
         });
         
@@ -6665,7 +6662,6 @@ self.forceCheckResponses = async () => {
         return 'Forced call response check failed - check console for errors';
     }
 };
-
 // Manual function to check specific lead's monitoring data
 self.checkLeadMonitoring = async (leadName) => {
     console.log(`🔍 CHECKING MONITORING DATA FOR: ${leadName}`);
@@ -6877,6 +6873,7 @@ const checkForCallResponses = async () => {
                                     
                                     // Generate calendar link for scheduling
                                     try {
+                                        // Always request calendar link from backend (reuses existing if already generated)
                                         const calendarResponse = await fetch(`${PLATFORM_URL}/api/calls/${monitoringData.callId || 'unknown'}/calendar-link`, {
                                             method: 'POST',
                                             headers: {
@@ -6884,26 +6881,17 @@ const checkForCallResponses = async () => {
                                                 'lk-id': linkedinId || 'vicken-concept'
                                             }
                                         });
-                                        
+
                                         if (calendarResponse.ok) {
                                             const calendarData = await calendarResponse.json();
-                                            console.log('📅 Calendar link generated:', calendarData);
-                                            
-                                            // Use the scheduling message from backend or fallback
                                             const schedulingMessage = calendarData.scheduling_message || 
-                                                `Hi ${monitoringData.leadName}, I'd love to schedule a call with you. Please book a convenient time here: ${calendarData.calendar_link}`;
-                                            
-                                            console.log(`📤 Sending scheduling message to ${monitoringData.leadName}: "${schedulingMessage}"`);
-                                            
-                                            // Send the scheduling message with calendar link
+                                                `Perfect! I'd love to schedule a call with you. Please book a convenient time here: ${calendarData.calendar_link}\n\nLooking forward to speaking with you!`;
+
                                             await sendSchedulingMessage(monitoringData, schedulingMessage, calendarData.calendar_link);
-                                            
                                         } else {
-                                            console.error('❌ Failed to generate calendar link:', calendarResponse.status);
-                                            // Fallback to AI response
+                                            console.error('❌ Failed to generate calendar link (fallback to AI response path)', calendarResponse.status);
                                             const suggestedResponse = analysisResponse.suggested_response || analysisResponse['Suggested Response'] || analysisResponse.suggestedResponse;
                                             if (suggestedResponse) {
-                                                console.log(`📤 Fallback: Sending AI response to ${monitoringData.leadName}: "${suggestedResponse}"`);
                                                 await sendAIMessage(monitoringData, suggestedResponse);
                                             }
                                         }
@@ -7123,53 +7111,35 @@ const checkForCallResponses = async () => {
                                     console.log(`📅 Positive response detected - generating calendar link for ${monitoringData.leadName}`);
                                     
                                     try {
-                                        // Generate calendar link
-                                        const calendarLink = `https://calendly.com/vicken-concept/30min`;
-                                        const schedulingMessage = `Perfect! I'd love to schedule a call with you. Please book a convenient time here: ${calendarLink}\n\nLooking forward to speaking with you!`;
-                                        
-                                        await sendLinkedInMessage(
-                                            monitoringData,
-                                            schedulingMessage
-                                        );
-                                        
-                                        // Store the AI response with calendar link in conversation history
-                                        await storeConversationMessage({
-                                            call_id: monitoringData.callId,
-                                            message: schedulingMessage,
-                                            sender: 'ai',
-                                            message_type: 'calendar_link',
-                                            ai_analysis: aiResponse.analysis,
-                                            lead_name: monitoringData.leadName,
-                                            connection_id: monitoringData.connectionId,
-                                            conversation_urn_id: monitoringData.conversationUrnId
+                                        // Always request calendar link from backend (reuses existing if already generated)
+                                        const calendarResponse = await fetch(`${PLATFORM_URL}/api/calls/${monitoringData.callId || 'unknown'}/calendar-link`, {
+                                            method: 'POST',
+                                            headers: {
+                                                'Content-Type': 'application/json',
+                                                'lk-id': linkedinId || 'vicken-concept'
+                                            }
                                         });
-                                        
-                                        console.log(`✅ Calendar link sent successfully to ${monitoringData.leadName}`);
-                                    } catch (calendarError) {
-                                        console.error(`❌ Error sending calendar link:`, calendarError);
-                                        
-                                        // Fallback to regular AI response
-                                        try {
-                                            await sendLinkedInMessage(
-                                                monitoringData,
-                                                aiResponse.suggested_response
-                                            );
-                                            
-                                            // Store the fallback AI response in conversation history
-                                            await storeConversationMessage({
-                                                call_id: monitoringData.callId,
-                                                message: aiResponse.suggested_response,
-                                                sender: 'ai',
-                                                message_type: 'ai_response',
-                                                ai_analysis: aiResponse.analysis,
-                                                lead_name: monitoringData.leadName,
-                                                connection_id: monitoringData.connectionId,
-                                                conversation_urn_id: monitoringData.conversationUrnId
-                                            });
-                                            
-                                            console.log(`✅ Fallback AI response sent successfully to ${monitoringData.leadName}`);
-                                        } catch (fallbackError) {
-                                            console.error(`❌ Error sending fallback AI response:`, fallbackError);
+
+                                        if (calendarResponse.ok) {
+                                            const calendarData = await calendarResponse.json();
+                                            const schedulingMessage = calendarData.scheduling_message || 
+                                                `Perfect! I'd love to schedule a call with you. Please book a convenient time here: ${calendarData.calendar_link}\n\nLooking forward to speaking with you!`;
+
+                                            await sendSchedulingMessage(monitoringData, schedulingMessage, calendarData.calendar_link);
+                                        } else {
+                                            console.error('❌ Failed to generate calendar link (fallback to AI response path)', calendarResponse.status);
+                                            const suggestedResponse = aiResponse.suggested_response || aiResponse['Suggested Response'] || aiResponse.suggestedResponse;
+                                            if (suggestedResponse) {
+                                                await sendAIMessage(monitoringData, suggestedResponse);
+                                            }
+                                        }
+                                    } catch (error) {
+                                        console.error('❌ Error generating calendar link:', error);
+                                        // Fallback to AI response
+                                        const suggestedResponse = aiResponse.suggested_response || aiResponse['Suggested Response'] || aiResponse.suggestedResponse;
+                                        if (suggestedResponse) {
+                                            console.log(`📤 Fallback: Sending AI response to ${monitoringData.leadName}: "${suggestedResponse}"`);
+                                            await sendAIMessage(monitoringData, suggestedResponse);
                                         }
                                     }
                                 } else {
@@ -7224,7 +7194,6 @@ const checkForCallResponses = async () => {
         console.error('❌ Error in checkForCallResponses:', error);
     }
 };
-
 /**
  * Fetch LinkedIn conversation messages for a specific connection
  */
@@ -7811,11 +7780,30 @@ const processCallReplyWithAI = async (callId, messageText, leadName = null) => {
             return fallbackAnalysis;
         }
         
+        // Get connection_id and conversation_urn_id from monitoring data
+        let connectionId = null;
+        let conversationUrnId = null;
+        
+        if (callId) {
+            const allStorage = await chrome.storage.local.get();
+            const responseKeys = Object.keys(allStorage).filter(key => key.startsWith('call_response_monitoring_'));
+            for (const key of responseKeys) {
+                const monitoringData = allStorage[key];
+                if (monitoringData.callId === callId) {
+                    connectionId = monitoringData.connectionId;
+                    conversationUrnId = monitoringData.conversationUrnId;
+                    break;
+                }
+            }
+        }
+
         const requestBody = {
             message: messageText,
             leadName: leadName || 'LinkedIn Lead',
             context: 'LinkedIn message response analysis',
-            call_id: callId
+            call_id: callId,
+            connection_id: connectionId,
+            conversation_urn_id: conversationUrnId
         };
         
         // console.log('🔍 DEBUG: API Request Details:');
@@ -8014,7 +8002,6 @@ const sendSchedulingMessage = async (monitoringData, message, calendarLink) => {
         console.error('❌ Error sending scheduling message:', error);
     }
 };
-
 /**
  * Send AI-generated message
  */
@@ -8751,7 +8738,6 @@ const processSkillInTab = async (tabId, data) => {
         };
     }
 };
-
 // Process queue sequentially - grouped by profile
 const processEndorsementQueue = async () => {
     if (isProcessingQueue || !endorsementQueue || endorsementQueue.length === 0) {
@@ -9235,4 +9221,3 @@ async function getConversationHistory(callId) {
         return null;
     }
 }
-
