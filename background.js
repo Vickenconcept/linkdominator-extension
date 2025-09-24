@@ -2757,8 +2757,7 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
             if(nodeModel.value == 'call'){
                 console.log('📞 Recording call status with enhanced data...');
                 try {
-                    // First, store the call status to get AI-generated message
-                    // Don't send original_message so backend will generate AI message
+                    // First, store the call status with user's message and paraphrase preference
                     const callResponse = await storeCallStatus({
                         recipient: `${lead.firstName} ${lead.lastName}`,
                         profile: `${firstName} ${lastName}`,
@@ -2768,7 +2767,8 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                         industry: lead.industry || null,
                         job_title: lead.jobTitle || null,
                         location: lead.location || null,
-                        // original_message: arConnectionModel.message, // Don't send this - let backend generate AI message
+                        original_message: arConnectionModel.message || null, // Send user's message if available
+                        paraphrase_user_message: nodeModel.paraphrase_user_message || false, // Include paraphrase flag
                         linkedin_profile_url: lead.profileUrl || null,
                         connection_id: lead.connectionId || null,
                         conversation_urn_id: arConnectionModel.conversationUrnId || null,
@@ -2792,8 +2792,38 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                             return;
                         }
                         
-                        // Poll for AI-generated message (OpenAI takes time to generate)
-                        console.log('⏳ Polling for AI-generated message...');
+                        // Decide whether to poll for AI/paraphrased message or send immediately
+                        const shouldPollForMessage = (nodeModel.paraphrase_user_message === true) || !arConnectionModel.message;
+                        if (!shouldPollForMessage) {
+                            // User did not request paraphrasing and provided a message → send immediately
+                            try {
+                                if (typeof arConnectionModel !== 'object' || arConnectionModel === null) {
+                                    arConnectionModel = {};
+                                }
+                                arConnectionModel.connectionId = lead.connectionId;
+                                arConnectionModel.distance = (lead.networkDistance === 'DISTANCE_1' || lead.networkDistance === 1) ? 1 : 2;
+                                arConnectionModel.conversationUrnId = lead.conversationUrnId || undefined;
+
+                                console.log('📧 Sending user message immediately to:', lead.name, '(', lead.connectionId, ')');
+                                console.log('📝 Message content:', arConnectionModel.message);
+
+                                // Small wait to ensure LinkedIn is ready but not as long as AI path
+                                await new Promise(resolve => setTimeout(resolve, 5000));
+
+                                await messageConnection({ uploads: [], filters: { message: arConnectionModel.message } });
+
+                                console.log('✅ User message sent without AI polling');
+                                messageSentViaAI = true; // prevent duplicate send in standard path
+                            } catch (error) {
+                                console.error('❌ Failed to send user message immediately:', error);
+                            }
+
+                            // Skip AI polling path entirely
+                            return;
+                        }
+
+                        // Poll for AI-generated/paraphrased message (OpenAI takes time to generate)
+                        console.log('⏳ Polling for AI/paraphrased message...');
                         let attempts = 0;
                         const maxAttempts = 10; // 10 attempts with 2-second intervals = 20 seconds max
                         
@@ -2881,7 +2911,30 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                                 console.log('🔍 Original message:', arConnectionModel.message);
                             }
                         } else {
-                            console.warn('⚠️ Could not fetch AI message after polling, using original message');
+                            console.warn('⚠️ Could not fetch AI message after polling');
+                            // Fallback to user's original message if available
+                            if (arConnectionModel.message) {
+                                try {
+                                    if (typeof arConnectionModel !== 'object' || arConnectionModel === null) {
+                                        arConnectionModel = {};
+                                    }
+                                    arConnectionModel.connectionId = lead.connectionId;
+                                    arConnectionModel.distance = (lead.networkDistance === 'DISTANCE_1' || lead.networkDistance === 1) ? 1 : 2;
+                                    arConnectionModel.conversationUrnId = lead.conversationUrnId || undefined;
+
+                                    console.log('📧 Sending fallback user message to:', lead.name, '(', lead.connectionId, ')');
+                                    console.log('📝 Message content:', arConnectionModel.message);
+
+                                    await new Promise(resolve => setTimeout(resolve, 5000));
+
+                                    await messageConnection({ uploads: [], filters: { message: arConnectionModel.message } });
+
+                                    console.log('✅ Fallback user message sent');
+                                    messageSentViaAI = true; // prevent duplicate standard send
+                                } catch (fallbackErr) {
+                                    console.error('❌ Failed to send fallback user message:', fallbackErr);
+                                }
+                            }
                         }
                     } catch (msgErr) {
                         console.warn('⚠️ Failed to fetch AI message:', msgErr.message);
@@ -2905,7 +2958,8 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
             // Send the LinkedIn message (only if not already sent via AI message processing)
             if (!messageSentViaAI) {
                 console.log('📤 Sending message via standard method (no AI message or AI message not used)');
-                messageConnection(lead);
+                // Ensure we send the current arConnectionModel.message
+                await messageConnection({ uploads: [], filters: { message: arConnectionModel.message } });
             } else {
                 console.log('✅ Message already sent via AI message processing, skipping duplicate send');
                 
@@ -8105,6 +8159,13 @@ const sendAIMessage = async (monitoringData, message) => {
     console.log('🤖 Sending AI message to', monitoringData.leadName);
     
     try {
+        // Guard: Only send if the latest message is from the lead (avoid replying to ourselves)
+        const shouldReply = await shouldRespondToLatestLeadMessage(monitoringData);
+        if (!shouldReply) {
+            console.warn('⛔ Skipping AI reply: latest message is not from lead or no new lead message detected');
+            return;
+        }
+
         await sendLinkedInMessage(monitoringData, message);
         console.log('✅ AI message sent successfully to', monitoringData.leadName);
         
@@ -8132,6 +8193,78 @@ const sendAIMessage = async (monitoringData, message) => {
         }
     } catch (error) {
         console.error('❌ Error sending AI message:', error);
+    }
+};
+
+/**
+ * Check if we should respond by verifying the latest message is from the lead
+ */
+const shouldRespondToLatestLeadMessage = async (monitoringData) => {
+    try {
+        const voyagerApi = 'https://www.linkedin.com/voyager/api';
+        const tokenResult = await chrome.storage.local.get(['csrfToken']);
+
+        // Try to get conversation id to fetch latest messages
+        const conversationId = monitoringData.conversationUrnId || monitoringData.connectionId;
+        if (!conversationId) {
+            console.warn('⚠️ No conversation/connection id available to verify latest message');
+            return false;
+        }
+
+        // Fetch the conversation thread
+        const conversationUrl = `${voyagerApi}/messaging/conversations/${encodeURIComponent(conversationId)}?q=timeline&keyVersion=LEGACY_INBOX&start=0&count=1`;
+        const response = await fetch(conversationUrl, {
+            method: 'GET',
+            headers: {
+                'csrf-token': tokenResult.csrfToken,
+                'accept': 'application/vnd.linkedin.normalized+json+2.1',
+                'x-li-lang': 'en_US',
+                'x-restli-protocol-version': '2.0.0'
+            }
+        });
+
+        if (!response.ok) {
+            console.warn('⚠️ Failed to fetch conversation to verify latest message. Status:', response.status);
+            return false;
+        }
+
+        const data = await response.json();
+        const elements = data?.included || data?.elements || [];
+        if (!elements.length) {
+            return false;
+        }
+
+        // Heuristic: find the latest event with a body
+        let latestText = '';
+        let latestSender = '';
+        let latestFromEntity = '';
+        for (let i = elements.length - 1; i >= 0; i--) {
+            const msg = elements[i];
+            const body = msg?.eventContent?.com?.linkedin?.voyager?.messaging?.create?.MessageCreate?.attributedBody?.text ||
+                         msg?.eventContent?.com?.linkedin?.voyager?.messaging?.create?.MessageCreate?.body || '';
+            if (body) {
+                latestText = body;
+                const member = msg?.from?.com?.linkedin?.voyager?.messaging?.MessagingMember;
+                if (member) {
+                    latestSender = member.name || `${member.miniProfile?.firstName || ''} ${member.miniProfile?.lastName || ''}`.trim();
+                }
+                latestFromEntity = msg?.from?.entityUrn || '';
+                break;
+            }
+        }
+
+        // Determine if this is from lead (not from us). We avoid names and our entity URN where possible
+        const myHints = ['william', 'victor', 'vicken-concept'];
+        const fromUs =
+            (latestSender && myHints.some(h => latestSender.toLowerCase().includes(h))) ||
+            (latestFromEntity && latestFromEntity.includes('vicken-concept'));
+
+        const isLeadMessage = !!latestText && !fromUs;
+        console.log('🔎 Latest message check -> fromUs:', fromUs, '| isLeadMessage:', isLeadMessage, '| text:', latestText);
+        return isLeadMessage;
+    } catch (e) {
+        console.warn('⚠️ Failed to verify latest message sender:', e.message);
+        return false;
     }
 };
 
