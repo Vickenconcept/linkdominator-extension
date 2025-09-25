@@ -8248,6 +8248,100 @@ const shouldScheduleFromAnalysis = (analysis) => {
 };
 
 /**
+ * Draft queue helpers (extension-only, no backend cron)
+ */
+const DEFAULT_REVIEW_WINDOW_MS = 2 * 60 * 60 * 1000; // 2 hours
+
+const getAiModeForCampaign = async (campaignId) => {
+    try {
+        const key = `campaign_ai_mode_${campaignId}`;
+        const res = await chrome.storage.local.get([key]);
+        const mode = res[key];
+        return (mode === 'review' || mode === 'hybrid' || mode === 'instant') ? mode : 'instant';
+    } catch (e) {
+        console.warn('⚠️ Failed to get ai_mode from storage, defaulting to instant', e);
+        return 'instant';
+    }
+};
+
+const makeDraftQueueKey = (campaignId, connectionId) => `draft_queue_${campaignId}_${connectionId}`;
+
+const saveDraftQueueEntry = async ({ monitoringData, draftMessage, analysis, autoSendAtMs, requireApproval }) => {
+    const key = makeDraftQueueKey(monitoringData.campaignId, monitoringData.connectionId);
+    const entry = {
+        callId: monitoringData.callId || null,
+        campaignId: monitoringData.campaignId,
+        connectionId: monitoringData.connectionId,
+        leadName: monitoringData.leadName,
+        draft_message: draftMessage,
+        ai_analysis: analysis,
+        created_at: Date.now(),
+        auto_send_at: autoSendAtMs || null,
+        approval_status: requireApproval ? 'pending' : 'approved',
+        status: 'queued'
+    };
+    await chrome.storage.local.set({ [key]: entry });
+    console.log('🗂️ Queued AI draft (extension storage):', { key, entry });
+    return entry;
+};
+
+const loadDraftQueueEntry = async (campaignId, connectionId) => {
+    const key = makeDraftQueueKey(campaignId, connectionId);
+    const res = await chrome.storage.local.get([key]);
+    return res[key] || null;
+};
+
+const clearDraftQueueEntry = async (campaignId, connectionId) => {
+    const key = makeDraftQueueKey(campaignId, connectionId);
+    await chrome.storage.local.remove([key]);
+};
+
+const shouldSendQueuedDraftNow = (entry) => {
+    if (!entry) return false;
+    const approved = entry.approval_status === 'approved';
+    const timeOk = !entry.auto_send_at || Date.now() >= entry.auto_send_at;
+    return approved && timeOk;
+};
+
+/**
+ * Attempt to send any queued draft for a lead if eligible
+ */
+const trySendQueuedDraft = async (monitoringData) => {
+    try {
+        const entry = await loadDraftQueueEntry(monitoringData.campaignId, monitoringData.connectionId);
+        if (!entry) return false;
+
+        // Only send within active sequence window; assume caller checks delay gate
+        if (!shouldSendQueuedDraftNow(entry)) {
+            console.log('⏳ Draft still waiting (approval/time)', entry);
+            return false;
+        }
+
+        // Decide scheduling vs normal send
+        const analysis = entry.ai_analysis || {};
+        const scheduleAllowed = shouldScheduleFromAnalysis(analysis);
+
+        if (scheduleAllowed) {
+            // Generate calendar link path
+            console.log('📅 Sending queued scheduling draft...');
+            // Reuse existing flow by calling sendSchedulingMessage with a generated link upstream
+            // Note: rely on existing scheduling pipeline elsewhere; here we fallback to normal send
+            await sendAIMessage(monitoringData, entry.draft_message);
+        } else {
+            console.log('📤 Sending queued normal draft...');
+            await sendAIMessage(monitoringData, entry.draft_message);
+        }
+
+        // Clear queue entry after successful send
+        await clearDraftQueueEntry(monitoringData.campaignId, monitoringData.connectionId);
+        return true;
+    } catch (err) {
+        console.error('❌ Failed to send queued draft:', err);
+        return false;
+    }
+};
+
+/**
  * Send AI-generated message
  */
 const sendAIMessage = async (monitoringData, message) => {
