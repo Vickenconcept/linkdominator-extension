@@ -5435,21 +5435,9 @@ self.testLinkedInMessagesAPI = async () => {
                                     }
                                 }
                                 
-                                // Enhanced lead detection (generic - works for any LinkedIn user)
-                                const isFromLead = 
-                                    // Check if this is NOT from us (William Victor) and has meaningful text
-                                    (!sender.toLowerCase().includes('william') && 
-                                     !sender.toLowerCase().includes('victor') && 
-                                     !msg.from?.entityUrn?.includes('vicken-concept') &&
-                                     text && text.trim().length > 0 && text.length < 1000 &&
-                                     // Exclude AI-generated messages (they contain template placeholders)
-                                     !text.includes('[Your Name]') &&
-                                     !text.includes('[Your Position]') &&
-                                     !text.includes('[Your Company]') &&
-                                     !text.includes('[Date and Time]') &&
-                                     !text.includes('[Duration]') &&
-                                     !text.includes('Dear Mr.') &&
-                                     !text.includes('Dear Eleazar Nzerem'));
+                                // Use enhanced sender detection
+                                const senderInfo = detectMessageSender(msg, text);
+                                const isFromLead = senderInfo.isFromLead;
                                 
                                 console.log(`   👤 From: ${sender}`);
                                 console.log(`   💬 Text: "${text}"`);
@@ -5668,21 +5656,9 @@ self.checkEleazarReplyNow = async () => {
                         }
                     }
                     
-                    // Enhanced lead detection (generic - works for any LinkedIn user)
-                    const isFromLead = 
-                        // Check if this is NOT from us (William Victor) and has meaningful text
-                        (!sender.toLowerCase().includes('william') && 
-                         !sender.toLowerCase().includes('victor') && 
-                         !msg.from?.entityUrn?.includes('vicken-concept') &&
-                         text && text.trim().length > 0 && text.length < 1000 &&
-                         // Exclude AI-generated messages (they contain template placeholders)
-                         !text.includes('[Your Name]') &&
-                         !text.includes('[Your Position]') &&
-                         !text.includes('[Your Company]') &&
-                         !text.includes('[Date and Time]') &&
-                         !text.includes('[Duration]') &&
-                         !text.includes('Dear Mr.') &&
-                         !text.includes('Dear Eleazar Nzerem'));
+                    // Use enhanced sender detection
+                    const senderInfo = detectMessageSender(msg, text);
+                    const isFromLead = senderInfo.isFromLead;
                     
                     console.log('🔍 Sender detection details:');
                     console.log('   - sender:', sender);
@@ -5841,21 +5817,9 @@ self.findLeadReplies = async (connectionId, leadName) => {
                         }
                     }
                     
-                    // Enhanced lead detection (generic - works for any LinkedIn user)
-                    const isFromLead = 
-                        // Check if this is NOT from us (William Victor) and has meaningful text
-                        (!sender.toLowerCase().includes('william') && 
-                         !sender.toLowerCase().includes('victor') && 
-                         !msg.from?.entityUrn?.includes('vicken-concept') &&
-                         text && text.trim().length > 0 && text.length < 1000 &&
-                         // Exclude AI-generated messages (they contain template placeholders)
-                         !text.includes('[Your Name]') &&
-                         !text.includes('[Your Position]') &&
-                         !text.includes('[Your Company]') &&
-                         !text.includes('[Date and Time]') &&
-                         !text.includes('[Duration]') &&
-                         !text.includes('Dear Mr.') &&
-                         !text.includes('Dear Eleazar Nzerem'));
+                    // Use enhanced sender detection
+                    const senderInfo = detectMessageSender(msg, text);
+                    const isFromLead = senderInfo.isFromLead;
                     
                     console.log('🔍 Sender detection details:');
                     console.log('   - sender:', sender);
@@ -6219,14 +6183,7 @@ self.analyzeLeadRepliesWithAI = async (connectionId, leadName) => {
         const leadScore = aiAnalysis.leadScore || aiAnalysis['Lead Score'] || aiAnalysis.lead_score;
         const isPositiveFlag = aiAnalysis.isPositive || aiAnalysis['Is Positive'];
         
-        const isPositive = isPositiveFlag || 
-                          (intent && (
-                              intent.toLowerCase() === 'available' ||
-                              intent.toLowerCase() === 'interested' ||
-                              intent.toLowerCase() === 'scheduling_request'
-                          )) ||
-                          (sentiment && sentiment.toLowerCase() === 'positive') ||
-                          (leadScore && leadScore >= 7);
+        const isPositive = shouldScheduleFromAnalysis(aiAnalysis);
         
         console.log(`🎯 Response Analysis:`);
         console.log(`   - Intent: ${intent || 'Unknown'}`);
@@ -6305,12 +6262,12 @@ self.analyzeLeadRepliesWithAI = async (connectionId, leadName) => {
                 };
             }
         } else {
-            console.log('📝 Response is neutral/negative - no action taken');
+            console.log('📝 Response is neutral/negative or explicitly not_interested - no scheduling action');
             return {
                 success: true,
                 action: 'no_action_needed',
                 aiAnalysis: aiAnalysis,
-                message: 'Response analyzed as neutral/negative'
+                message: 'Response analyzed as neutral/negative or not_interested'
             };
         }
         
@@ -7001,7 +6958,7 @@ const checkForCallResponses = async () => {
                             monitoringData.status = 'response_received';
                                 monitoringData.responseData = analysisResponse;
                             monitoringData.receivedAt = Date.now();
-                                monitoringData.lastCheckedMessageId = latestMessage.id;
+                                // Don't update lastCheckedMessageId here - wait until response is actually sent
                             
                             await chrome.storage.local.set({ [key]: monitoringData });
                             
@@ -7028,12 +6985,20 @@ const checkForCallResponses = async () => {
                                             const schedulingMessage = calendarData.scheduling_message || 
                                                 `Perfect! I'd love to schedule a call with you. Please book a convenient time here: ${calendarData.calendar_link}\n\nLooking forward to speaking with you!`;
 
-                                            await sendSchedulingMessage(monitoringData, schedulingMessage, calendarData.calendar_link);
+                                            const schedulingSuccess = await sendSchedulingMessage(monitoringData, schedulingMessage, calendarData.calendar_link);
+                                            if (schedulingSuccess) {
+                                                // Update message tracking after successful scheduling message
+                                                await updateMessageTracking(monitoringData, latestMessage.id, key);
+                                            }
                                         } else {
                                             console.error('❌ Failed to generate calendar link (fallback to AI response path)', calendarResponse.status);
                                             const suggestedResponse = analysisResponse.suggested_response || analysisResponse['Suggested Response'] || analysisResponse.suggestedResponse;
                                             if (suggestedResponse) {
-                                                await sendAIMessage(monitoringData, suggestedResponse);
+                                                const aiSuccess = await sendAIMessage(monitoringData, suggestedResponse);
+                                                if (aiSuccess) {
+                                                    // Update message tracking after successful AI response
+                                                    await updateMessageTracking(monitoringData, latestMessage.id, key);
+                                                }
                                             }
                                         }
                                     } catch (error) {
@@ -7042,7 +7007,11 @@ const checkForCallResponses = async () => {
                                         const suggestedResponse = analysisResponse.suggested_response || analysisResponse['Suggested Response'] || analysisResponse.suggestedResponse;
                                         if (suggestedResponse) {
                                             console.log(`📤 Fallback: Sending AI response to ${monitoringData.leadName}: "${suggestedResponse}"`);
-                                            await sendAIMessage(monitoringData, suggestedResponse);
+                                            const aiSuccess = await sendAIMessage(monitoringData, suggestedResponse);
+                                            if (aiSuccess) {
+                                                // Update message tracking after successful AI response
+                                                await updateMessageTracking(monitoringData, latestMessage.id, key);
+                                            }
                                         }
                                     }
                                 } else {
@@ -7054,13 +7023,16 @@ const checkForCallResponses = async () => {
                                         console.log(`📤 Sending AI response to ${monitoringData.leadName}: "${suggestedResponse}"`);
                                         console.log(`🔍 Full analysis response:`, analysisResponse);
                                         
-                                        await sendAIMessage(monitoringData, suggestedResponse);
+                                        const aiSuccess = await sendAIMessage(monitoringData, suggestedResponse);
+                                        if (aiSuccess) {
+                                            // Update message tracking after successful AI response
+                                            await updateMessageTracking(monitoringData, latestMessage.id, key);
+                                        }
                                     }
                             }
                         } else {
-                            // Update last checked message ID to avoid reprocessing
-                            monitoringData.lastCheckedMessageId = latestMessage.id;
-                            await chrome.storage.local.set({ [key]: monitoringData });
+                            // Don't update lastCheckedMessageId here - no response was sent
+                            console.log('⏭️ No analysis response received, not updating message tracking');
                             }
                         } catch (error) {
                             console.error('❌ Error processing lead message:', error);
@@ -7169,17 +7141,10 @@ const checkForCallResponses = async () => {
                 continue;
             }
             
-            // ADDITIONAL CHECK: Verify this is actually from the lead, not an AI-generated message
-            const isAIGeneratedMessage = latestMessage.text && (
-                latestMessage.text.includes('Hi Eleazar, thank you for') ||
-                latestMessage.text.includes('Would you like me to follow up') ||
-                latestMessage.text.includes('Could you please provide more information') ||
-                latestMessage.text.includes('Looking forward to hearing back from you') ||
-                latestMessage.text.includes('This will help me better accommodate') ||
-                latestMessage.text.includes('preferred time for a call')
-            );
+            // Use enhanced sender detection for the latest message
+            const senderInfo = detectMessageSender({ from: { entityUrn: 'latest-message' }, createdAt: latestMessage.timestamp }, latestMessage.text);
             
-            if (isAIGeneratedMessage) {
+            if (senderInfo.isAIGeneratedMessage || senderInfo.isRecentAIMessage) {
                 console.log(`⏭️ Skipping AI-generated message: "${latestMessage.text.substring(0, 50)}..."`);
                 continue;
             }
@@ -7188,10 +7153,7 @@ const checkForCallResponses = async () => {
                             console.log(`🔍 Message ID: ${latestMessage.id}`);
                             console.log(`🔍 Message timestamp: ${new Date(latestMessage.timestamp).toISOString()}`);
                             
-                            // Update last checked message ID
-                            monitoringData.lastCheckedMessageId = latestMessage.id;
-                            await chrome.storage.local.set({ [key]: monitoringData });
-                            
+                            // Don't update lastCheckedMessageId here - wait until response is actually sent
                             console.log(`✅ New response received from lead: ${latestMessage.text}`);
                             console.log(`🔍 DEBUG: Proceeding to respond because:`);
                             console.log(`   - Message is from lead: ${latestMessage.isFromLead}`);
@@ -7266,12 +7228,20 @@ const checkForCallResponses = async () => {
                                             const schedulingMessage = calendarData.scheduling_message || 
                                                 `Perfect! I'd love to schedule a call with you. Please book a convenient time here: ${calendarData.calendar_link}\n\nLooking forward to speaking with you!`;
 
-                                            await sendSchedulingMessage(monitoringData, schedulingMessage, calendarData.calendar_link);
+                                            const schedulingSuccess = await sendSchedulingMessage(monitoringData, schedulingMessage, calendarData.calendar_link);
+                                            if (schedulingSuccess) {
+                                                // Update message tracking after successful scheduling message
+                                                await updateMessageTracking(monitoringData, latestMessage.id, key);
+                                            }
                                         } else {
                                             console.error('❌ Failed to generate calendar link (fallback to AI response path)', calendarResponse.status);
                                             const suggestedResponse = aiResponse.suggested_response || aiResponse['Suggested Response'] || aiResponse.suggestedResponse;
                                             if (suggestedResponse) {
-                                                await sendAIMessage(monitoringData, suggestedResponse);
+                                                const aiSuccess = await sendAIMessage(monitoringData, suggestedResponse);
+                                                if (aiSuccess) {
+                                                    // Update message tracking after successful AI response
+                                                    await updateMessageTracking(monitoringData, latestMessage.id, key);
+                                                }
                                             }
                                         }
                                     } catch (error) {
@@ -7280,7 +7250,11 @@ const checkForCallResponses = async () => {
                                         const suggestedResponse = aiResponse.suggested_response || aiResponse['Suggested Response'] || aiResponse.suggestedResponse;
                                         if (suggestedResponse) {
                                             console.log(`📤 Fallback: Sending AI response to ${monitoringData.leadName}: "${suggestedResponse}"`);
-                                            await sendAIMessage(monitoringData, suggestedResponse);
+                                            const aiSuccess = await sendAIMessage(monitoringData, suggestedResponse);
+                                            if (aiSuccess) {
+                                                // Update message tracking after successful AI response
+                                                await updateMessageTracking(monitoringData, latestMessage.id, key);
+                                            }
                                         }
                                     }
                                 } else {
@@ -7312,12 +7286,7 @@ const checkForCallResponses = async () => {
                                 console.log(`⏭️ No AI response generated, skipping message send`);
                             }
                             
-                            // Update response count, timestamp, and last checked message ID
-                            monitoringData.responseCount = (monitoringData.responseCount || 0) + 1;
-                            monitoringData.lastResponseSentAt = Date.now();
-                            monitoringData.lastCheckedMessageId = latestMessage.id;
-                            monitoringData.status = 'response_received';
-                            await chrome.storage.local.set({ [key]: monitoringData });
+                            // Message tracking is now handled by the updateMessageTracking helper function
                             
                         } else {
                             console.log(`⏭️ Latest message is not from lead, skipping`);
@@ -8020,15 +7989,8 @@ const processCallReplyWithAI = async (callId, messageText, leadName = null) => {
             const leadScore = analysis.leadScore || analysis['Lead Score'] || analysis.lead_score;
             const isPositiveFlag = analysis.isPositive || analysis['Is Positive'];
             
-            // Updated logic for new AI analysis - check for positive intents and sentiment
-            const isPositive = (isPositiveFlag === true) || 
-                              (intent && (
-                                  intent.toLowerCase() === 'available' ||
-                                  intent.toLowerCase() === 'interested' ||
-                                  intent.toLowerCase() === 'scheduling_request'
-                              )) ||
-                              (sentiment && sentiment.toLowerCase() === 'positive') ||
-                              (leadScore && leadScore >= 7);
+            // Updated gating: use explicit scheduling conditions
+            const isPositive = shouldScheduleFromAnalysis(analysis);
             
             console.log(`🎯 Response Analysis:`);
             console.log(`   - Intent: ${intent || 'Unknown'}`);
@@ -8148,10 +8110,143 @@ const sendSchedulingMessage = async (monitoringData, message, calendarLink) => {
             }
         }
         
+        // Return success status for tracking
+        return true;
+        
     } catch (error) {
         console.error('❌ Error sending scheduling message:', error);
     }
 };
+/**
+ * Update message tracking after successful response
+ */
+const updateMessageTracking = async (monitoringData, messageId, key) => {
+    try {
+        monitoringData.lastCheckedMessageId = messageId;
+        monitoringData.lastResponseSentAt = Date.now();
+        monitoringData.responseCount = (monitoringData.responseCount || 0) + 1;
+        monitoringData.status = 'response_sent';
+        
+        await chrome.storage.local.set({ [key]: monitoringData });
+        console.log('✅ Updated message tracking after successful response');
+        return true;
+    } catch (error) {
+        console.error('❌ Error updating message tracking:', error);
+        return false;
+    }
+};
+
+/**
+ * Enhanced sender detection to determine if message is from lead or AI/extension
+ */
+const detectMessageSender = (msg, text) => {
+    let sender = 'unknown';
+    let senderEntityUrn = null;
+    
+    // Extract sender information
+    if (msg.from?.com?.linkedin?.voyager?.messaging?.MessagingMember) {
+        const member = msg.from.com.linkedin.voyager.messaging.MessagingMember;
+        if (member.name) {
+            sender = member.name;
+        } else if (member.miniProfile) {
+            sender = `${member.miniProfile.firstName || ''} ${member.miniProfile.lastName || ''}`.trim();
+        }
+        senderEntityUrn = member.entityUrn;
+    }
+    
+    // Check if message is from our extension/user account
+    const isFromExtension = 
+        sender.toLowerCase().includes('william') || 
+        sender.toLowerCase().includes('victor') || 
+        senderEntityUrn?.includes('vicken-concept') ||
+        msg.from?.entityUrn?.includes('vicken-concept');
+    
+    // Check if message is AI-generated (contains common AI response patterns)
+    const isAIGeneratedMessage = text && (
+        // Template placeholders
+        text.includes('[Your Name]') ||
+        text.includes('[Your Position]') ||
+        text.includes('[Your Company]') ||
+        text.includes('[Date and Time]') ||
+        text.includes('[Duration]') ||
+        text.includes('Dear Mr.') ||
+        text.includes('Dear Eleazar Nzerem') ||
+        // Common AI response patterns
+        text.includes('Thank you for your response') ||
+        text.includes('I understand your concerns') ||
+        text.includes('Would you like me to follow up') ||
+        text.includes('Could you please provide more information') ||
+        text.includes('I appreciate your interest') ||
+        text.includes('Let me know if you have any questions') ||
+        text.includes('Feel free to reach out') ||
+        text.includes('I\'d be happy to help') ||
+        text.includes('Looking forward to speaking with you') ||
+        text.includes('Perfect! I\'d love to schedule a call') ||
+        text.includes('Please book a convenient time here') ||
+        text.includes('Here\'s the link to schedule') ||
+        text.includes('convenient time') ||
+        text.includes('specific information') ||
+        text.includes('recent projects') ||
+        text.includes('insights on that') ||
+        text.includes('Thanks for your willingness to share more details') ||
+        text.includes('I\'m looking for information on your recent projects') ||
+        text.includes('Could you provide some insights on that')
+    );
+    
+    // Check if message was sent very recently (likely from AI)
+    const messageAge = Date.now() - msg.createdAt;
+    const isRecentAIMessage = messageAge < 30000 && isAIGeneratedMessage; // 30 seconds
+    
+    // Final determination: message is from lead if it's not from extension, not AI-generated, and has meaningful content
+    const isFromLead = !isFromExtension && !isAIGeneratedMessage && !isRecentAIMessage && text && text.trim().length > 0 && text.length < 1000;
+    
+    // Enhanced logging for debugging
+    console.log('🔍 Enhanced Sender Detection:');
+    console.log(`   - Sender: "${sender}"`);
+    console.log(`   - Sender Entity URN: ${senderEntityUrn}`);
+    console.log(`   - Message Entity URN: ${msg.from?.entityUrn}`);
+    console.log(`   - Is from Extension: ${isFromExtension}`);
+    console.log(`   - Is AI Generated: ${isAIGeneratedMessage}`);
+    console.log(`   - Is Recent AI Message: ${isRecentAIMessage}`);
+    console.log(`   - Message Age: ${Math.round(messageAge / 1000)} seconds ago`);
+    console.log(`   - Text Length: ${text ? text.length : 0} characters`);
+    console.log(`   - Text Preview: "${text ? text.substring(0, 100) + '...' : 'No text'}"`);
+    console.log(`   - Final Decision: Is from Lead = ${isFromLead}`);
+    
+    return {
+        sender,
+        senderEntityUrn,
+        isFromExtension,
+        isAIGeneratedMessage,
+        isRecentAIMessage,
+        isFromLead,
+        messageAge
+    };
+};
+
+/**
+ * Decide if we should schedule based on AI analysis
+ * Requires explicit positive intents or next_action.
+ * Blocks on clear negative intents/actions regardless of sentiment.
+ */
+const shouldScheduleFromAnalysis = (analysis) => {
+    if (!analysis) return false;
+    const intent = (analysis.intent || analysis.Intent || '').toLowerCase();
+    const nextAction = (analysis.next_action || analysis.nextAction || '').toLowerCase();
+    const blockIntents = ['not_interested'];
+    const blockActions = ['end_conversation', 'follow_up_later'];
+    const allowIntents = ['available', 'interested', 'scheduling_request', 'reschedule_request'];
+    const allowActions = ['schedule_call', 'send_calendar', 'ask_availability', 'address_concerns'];
+
+    if (blockIntents.includes(intent)) return false;
+    if (blockActions.includes(nextAction)) return false;
+
+    if (allowIntents.includes(intent)) return true;
+    if (allowActions.includes(nextAction)) return true;
+
+    return false;
+};
+
 /**
  * Send AI-generated message
  */
@@ -8159,13 +8254,6 @@ const sendAIMessage = async (monitoringData, message) => {
     console.log('🤖 Sending AI message to', monitoringData.leadName);
     
     try {
-        // Guard: Only send if the latest message is from the lead (avoid replying to ourselves)
-        const shouldReply = await shouldRespondToLatestLeadMessage(monitoringData);
-        if (!shouldReply) {
-            console.warn('⛔ Skipping AI reply: latest message is not from lead or no new lead message detected');
-            return;
-        }
-
         await sendLinkedInMessage(monitoringData, message);
         console.log('✅ AI message sent successfully to', monitoringData.leadName);
         
@@ -8191,80 +8279,11 @@ const sendAIMessage = async (monitoringData, message) => {
                 // Note: We can't update storage here as we don't have the key, but the next lead message will update it
             }
         }
+        
+        // Return success status for tracking
+        return true;
     } catch (error) {
         console.error('❌ Error sending AI message:', error);
-    }
-};
-
-/**
- * Check if we should respond by verifying the latest message is from the lead
- */
-const shouldRespondToLatestLeadMessage = async (monitoringData) => {
-    try {
-        const voyagerApi = 'https://www.linkedin.com/voyager/api';
-        const tokenResult = await chrome.storage.local.get(['csrfToken']);
-
-        // Try to get conversation id to fetch latest messages
-        const conversationId = monitoringData.conversationUrnId || monitoringData.connectionId;
-        if (!conversationId) {
-            console.warn('⚠️ No conversation/connection id available to verify latest message');
-            return false;
-        }
-
-        // Fetch the conversation thread
-        const conversationUrl = `${voyagerApi}/messaging/conversations/${encodeURIComponent(conversationId)}?q=timeline&keyVersion=LEGACY_INBOX&start=0&count=1`;
-        const response = await fetch(conversationUrl, {
-            method: 'GET',
-            headers: {
-                'csrf-token': tokenResult.csrfToken,
-                'accept': 'application/vnd.linkedin.normalized+json+2.1',
-                'x-li-lang': 'en_US',
-                'x-restli-protocol-version': '2.0.0'
-            }
-        });
-
-        if (!response.ok) {
-            console.warn('⚠️ Failed to fetch conversation to verify latest message. Status:', response.status);
-            return false;
-        }
-
-        const data = await response.json();
-        const elements = data?.included || data?.elements || [];
-        if (!elements.length) {
-            return false;
-        }
-
-        // Heuristic: find the latest event with a body
-        let latestText = '';
-        let latestSender = '';
-        let latestFromEntity = '';
-        for (let i = elements.length - 1; i >= 0; i--) {
-            const msg = elements[i];
-            const body = msg?.eventContent?.com?.linkedin?.voyager?.messaging?.create?.MessageCreate?.attributedBody?.text ||
-                         msg?.eventContent?.com?.linkedin?.voyager?.messaging?.create?.MessageCreate?.body || '';
-            if (body) {
-                latestText = body;
-                const member = msg?.from?.com?.linkedin?.voyager?.messaging?.MessagingMember;
-                if (member) {
-                    latestSender = member.name || `${member.miniProfile?.firstName || ''} ${member.miniProfile?.lastName || ''}`.trim();
-                }
-                latestFromEntity = msg?.from?.entityUrn || '';
-                break;
-            }
-        }
-
-        // Determine if this is from lead (not from us). We avoid names and our entity URN where possible
-        const myHints = ['william', 'victor', 'vicken-concept'];
-        const fromUs =
-            (latestSender && myHints.some(h => latestSender.toLowerCase().includes(h))) ||
-            (latestFromEntity && latestFromEntity.includes('vicken-concept'));
-
-        const isLeadMessage = !!latestText && !fromUs;
-        console.log('🔎 Latest message check -> fromUs:', fromUs, '| isLeadMessage:', isLeadMessage, '| text:', latestText);
-        return isLeadMessage;
-    } catch (e) {
-        console.warn('⚠️ Failed to verify latest message sender:', e.message);
-        return false;
     }
 };
 
