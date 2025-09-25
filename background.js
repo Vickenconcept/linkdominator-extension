@@ -6183,14 +6183,7 @@ self.analyzeLeadRepliesWithAI = async (connectionId, leadName) => {
         const leadScore = aiAnalysis.leadScore || aiAnalysis['Lead Score'] || aiAnalysis.lead_score;
         const isPositiveFlag = aiAnalysis.isPositive || aiAnalysis['Is Positive'];
         
-        const isPositive = isPositiveFlag || 
-                          (intent && (
-                              intent.toLowerCase() === 'available' ||
-                              intent.toLowerCase() === 'interested' ||
-                              intent.toLowerCase() === 'scheduling_request'
-                          )) ||
-                          (sentiment && sentiment.toLowerCase() === 'positive') ||
-                          (leadScore && leadScore >= 7);
+        const isPositive = shouldScheduleFromAnalysis(aiAnalysis);
         
         console.log(`🎯 Response Analysis:`);
         console.log(`   - Intent: ${intent || 'Unknown'}`);
@@ -6269,12 +6262,12 @@ self.analyzeLeadRepliesWithAI = async (connectionId, leadName) => {
                 };
             }
         } else {
-            console.log('📝 Response is neutral/negative - no action taken');
+            console.log('📝 Response is neutral/negative or explicitly not_interested - no scheduling action');
             return {
                 success: true,
                 action: 'no_action_needed',
                 aiAnalysis: aiAnalysis,
-                message: 'Response analyzed as neutral/negative'
+                message: 'Response analyzed as neutral/negative or not_interested'
             };
         }
         
@@ -7996,15 +7989,8 @@ const processCallReplyWithAI = async (callId, messageText, leadName = null) => {
             const leadScore = analysis.leadScore || analysis['Lead Score'] || analysis.lead_score;
             const isPositiveFlag = analysis.isPositive || analysis['Is Positive'];
             
-            // Updated logic for new AI analysis - check for positive intents and sentiment
-            const isPositive = (isPositiveFlag === true) || 
-                              (intent && (
-                                  intent.toLowerCase() === 'available' ||
-                                  intent.toLowerCase() === 'interested' ||
-                                  intent.toLowerCase() === 'scheduling_request'
-                              )) ||
-                              (sentiment && sentiment.toLowerCase() === 'positive') ||
-                              (leadScore && leadScore >= 7);
+            // Updated gating: use explicit scheduling conditions
+            const isPositive = shouldScheduleFromAnalysis(analysis);
             
             console.log(`🎯 Response Analysis:`);
             console.log(`   - Intent: ${intent || 'Unknown'}`);
@@ -8236,6 +8222,29 @@ const detectMessageSender = (msg, text) => {
         isFromLead,
         messageAge
     };
+};
+
+/**
+ * Decide if we should schedule based on AI analysis
+ * Requires explicit positive intents or next_action.
+ * Blocks on clear negative intents/actions regardless of sentiment.
+ */
+const shouldScheduleFromAnalysis = (analysis) => {
+    if (!analysis) return false;
+    const intent = (analysis.intent || analysis.Intent || '').toLowerCase();
+    const nextAction = (analysis.next_action || analysis.nextAction || '').toLowerCase();
+    const blockIntents = ['not_interested'];
+    const blockActions = ['end_conversation', 'follow_up_later'];
+    const allowIntents = ['available', 'interested', 'scheduling_request', 'reschedule_request'];
+    const allowActions = ['schedule_call', 'send_calendar', 'ask_availability', 'address_concerns'];
+
+    if (blockIntents.includes(intent)) return false;
+    if (blockActions.includes(nextAction)) return false;
+
+    if (allowIntents.includes(intent)) return true;
+    if (allowActions.includes(nextAction)) return true;
+
+    return false;
 };
 
 /**
