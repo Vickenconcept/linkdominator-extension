@@ -6196,8 +6196,15 @@ self.analyzeLeadRepliesWithAI = async (connectionId, leadName) => {
         if (isPositive) {
             console.log('🎉 POSITIVE RESPONSE DETECTED! Generating calendar link...');
             
-                        // Generate calendar link
-                        const calendarResponse = await fetch(`${platformUrl}/api/calls/${connectionId}_${Date.now()}/calendar-link`, {
+            // Ensure we have a valid call_id before generating calendar link
+            const validCallId = await ensureValidCallId(monitoringData);
+            if (!validCallId) {
+                console.log(`❌ Cannot generate calendar link - no valid call_id found for connection_id: ${monitoringData.connectionId}`);
+                return;
+            }
+            
+            // Generate calendar link
+            const calendarResponse = await fetch(`${platformUrl}/api/calls/${validCallId}/calendar-link`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -6332,7 +6339,15 @@ self.createCallResponsePipeline = async () => {
                                     
                                     // Step 4: Generate calendar link and send scheduling message
                                     console.log(`📅 Generating calendar link...`);
-                                    const calendarResponse = await fetch(`${platformUrl}/api/calls/${monitoringData.callId || 'unknown'}/calendar-link`, {
+                                    
+                                    // Ensure we have a valid call_id before generating calendar link
+                                    const validCallId = await ensureValidCallId(monitoringData);
+                                    if (!validCallId) {
+                                        console.log(`❌ Cannot generate calendar link - no valid call_id found for connection_id: ${monitoringData.connectionId}`);
+                                        return;
+                                    }
+                                    
+                                    const calendarResponse = await fetch(`${platformUrl}/api/calls/${validCallId}/calendar-link`, {
                                         method: 'POST',
                                         headers: {
                                             'Content-Type': 'application/json',
@@ -6971,8 +6986,15 @@ const checkForCallResponses = async () => {
                                     
                                     // Generate calendar link for scheduling
                                     try {
+                                        // Ensure we have a valid call_id before generating calendar link
+                                        const validCallId = await ensureValidCallId(monitoringData);
+                                        if (!validCallId) {
+                                            console.log(`❌ Cannot generate calendar link - no valid call_id found for connection_id: ${monitoringData.connectionId}`);
+                                            return;
+                                        }
+                                        
                                         // Always request calendar link from backend (reuses existing if already generated)
-                                        const calendarResponse = await fetch(`${PLATFORM_URL}/api/calls/${monitoringData.callId || 'unknown'}/calendar-link`, {
+                                        const calendarResponse = await fetch(`${PLATFORM_URL}/api/calls/${validCallId}/calendar-link`, {
                                             method: 'POST',
                                             headers: {
                                                 'Content-Type': 'application/json',
@@ -6992,26 +7014,49 @@ const checkForCallResponses = async () => {
                                             }
                                         } else {
                                             console.error('❌ Failed to generate calendar link (fallback to AI response path)', calendarResponse.status);
+                                            
+                                            // Check if we should send fallback message or wait for lead reply
+                                            const shouldSendFallback = await shouldSendFallbackMessage(monitoringData, latestMessage);
+                                            
+                                            if (shouldSendFallback) {
+                                                const suggestedResponse = analysisResponse.suggested_response || analysisResponse['Suggested Response'] || analysisResponse.suggestedResponse;
+                                                if (suggestedResponse) {
+                                                    console.log(`📤 Calendar failed - sending fallback AI response to ${monitoringData.leadName}: "${suggestedResponse}"`);
+                                                    const aiSuccess = await sendAIMessage(monitoringData, suggestedResponse);
+                                                    if (aiSuccess) {
+                                                        // Update message tracking after successful AI response
+                                                        await updateMessageTracking(monitoringData, latestMessage.id, key);
+                                                    }
+                                                }
+                                            } else {
+                                                console.log(`⏸️ Calendar failed but lead was last to send - not sending fallback message to ${monitoringData.leadName}`);
+                                                // Still update message tracking to avoid reprocessing
+                                                monitoringData.lastCheckedMessageId = latestMessage.id;
+                                                await chrome.storage.local.set({ [key]: monitoringData });
+                                            }
+                                        }
+                                    } catch (error) {
+                                        console.error('❌ Error generating calendar link:', error);
+                                        
+                                        // Check if we should send fallback message or wait for lead reply
+                                        const shouldSendFallback = await shouldSendFallbackMessage(monitoringData, latestMessage);
+                                        
+                                        if (shouldSendFallback) {
+                                            // Fallback to AI response
                                             const suggestedResponse = analysisResponse.suggested_response || analysisResponse['Suggested Response'] || analysisResponse.suggestedResponse;
                                             if (suggestedResponse) {
+                                                console.log(`📤 Calendar error - sending fallback AI response to ${monitoringData.leadName}: "${suggestedResponse}"`);
                                                 const aiSuccess = await sendAIMessage(monitoringData, suggestedResponse);
                                                 if (aiSuccess) {
                                                     // Update message tracking after successful AI response
                                                     await updateMessageTracking(monitoringData, latestMessage.id, key);
                                                 }
                                             }
-                                        }
-                                    } catch (error) {
-                                        console.error('❌ Error generating calendar link:', error);
-                                        // Fallback to AI response
-                                        const suggestedResponse = analysisResponse.suggested_response || analysisResponse['Suggested Response'] || analysisResponse.suggestedResponse;
-                                        if (suggestedResponse) {
-                                            console.log(`📤 Fallback: Sending AI response to ${monitoringData.leadName}: "${suggestedResponse}"`);
-                                            const aiSuccess = await sendAIMessage(monitoringData, suggestedResponse);
-                                            if (aiSuccess) {
-                                                // Update message tracking after successful AI response
-                                                await updateMessageTracking(monitoringData, latestMessage.id, key);
-                                            }
+                                        } else {
+                                            console.log(`⏸️ Calendar error but lead was last to send - not sending fallback message to ${monitoringData.leadName}`);
+                                            // Still update message tracking to avoid reprocessing
+                                            monitoringData.lastCheckedMessageId = latestMessage.id;
+                                            await chrome.storage.local.set({ [key]: monitoringData });
                                         }
                                     }
                                 } else {
@@ -7214,8 +7259,15 @@ const checkForCallResponses = async () => {
                                     console.log(`📅 Positive response detected - generating calendar link for ${monitoringData.leadName}`);
                                     
                                     try {
+                                        // Ensure we have a valid call_id before generating calendar link
+                                        const validCallId = await ensureValidCallId(monitoringData);
+                                        if (!validCallId) {
+                                            console.log(`❌ Cannot generate calendar link - no valid call_id found for connection_id: ${monitoringData.connectionId}`);
+                                            return;
+                                        }
+                                        
                                         // Always request calendar link from backend (reuses existing if already generated)
-                                        const calendarResponse = await fetch(`${PLATFORM_URL}/api/calls/${monitoringData.callId || 'unknown'}/calendar-link`, {
+                                        const calendarResponse = await fetch(`${PLATFORM_URL}/api/calls/${validCallId}/calendar-link`, {
                                             method: 'POST',
                                             headers: {
                                                 'Content-Type': 'application/json',
@@ -7235,26 +7287,49 @@ const checkForCallResponses = async () => {
                                             }
                                         } else {
                                             console.error('❌ Failed to generate calendar link (fallback to AI response path)', calendarResponse.status);
+                                            
+                                            // Check if we should send fallback message or wait for lead reply
+                                            const shouldSendFallback = await shouldSendFallbackMessage(monitoringData, latestMessage);
+                                            
+                                            if (shouldSendFallback) {
+                                                const suggestedResponse = aiResponse.suggested_response || aiResponse['Suggested Response'] || aiResponse.suggestedResponse;
+                                                if (suggestedResponse) {
+                                                    console.log(`📤 Calendar failed - sending fallback AI response to ${monitoringData.leadName}: "${suggestedResponse}"`);
+                                                    const aiSuccess = await sendAIMessage(monitoringData, suggestedResponse);
+                                                    if (aiSuccess) {
+                                                        // Update message tracking after successful AI response
+                                                        await updateMessageTracking(monitoringData, latestMessage.id, key);
+                                                    }
+                                                }
+                                            } else {
+                                                console.log(`⏸️ Calendar failed but lead was last to send - not sending fallback message to ${monitoringData.leadName}`);
+                                                // Still update message tracking to avoid reprocessing
+                                                monitoringData.lastCheckedMessageId = latestMessage.id;
+                                                await chrome.storage.local.set({ [key]: monitoringData });
+                                            }
+                                        }
+                                    } catch (error) {
+                                        console.error('❌ Error generating calendar link:', error);
+                                        
+                                        // Check if we should send fallback message or wait for lead reply
+                                        const shouldSendFallback = await shouldSendFallbackMessage(monitoringData, latestMessage);
+                                        
+                                        if (shouldSendFallback) {
+                                            // Fallback to AI response
                                             const suggestedResponse = aiResponse.suggested_response || aiResponse['Suggested Response'] || aiResponse.suggestedResponse;
                                             if (suggestedResponse) {
+                                                console.log(`📤 Calendar error - sending fallback AI response to ${monitoringData.leadName}: "${suggestedResponse}"`);
                                                 const aiSuccess = await sendAIMessage(monitoringData, suggestedResponse);
                                                 if (aiSuccess) {
                                                     // Update message tracking after successful AI response
                                                     await updateMessageTracking(monitoringData, latestMessage.id, key);
                                                 }
                                             }
-                                        }
-                                    } catch (error) {
-                                        console.error('❌ Error generating calendar link:', error);
-                                        // Fallback to AI response
-                                        const suggestedResponse = aiResponse.suggested_response || aiResponse['Suggested Response'] || aiResponse.suggestedResponse;
-                                        if (suggestedResponse) {
-                                            console.log(`📤 Fallback: Sending AI response to ${monitoringData.leadName}: "${suggestedResponse}"`);
-                                            const aiSuccess = await sendAIMessage(monitoringData, suggestedResponse);
-                                            if (aiSuccess) {
-                                                // Update message tracking after successful AI response
-                                                await updateMessageTracking(monitoringData, latestMessage.id, key);
-                                            }
+                                        } else {
+                                            console.log(`⏸️ Calendar error but lead was last to send - not sending fallback message to ${monitoringData.leadName}`);
+                                            // Still update message tracking to avoid reprocessing
+                                            monitoringData.lastCheckedMessageId = latestMessage.id;
+                                            await chrome.storage.local.set({ [key]: monitoringData });
                                         }
                                     }
                                 } else {
@@ -8040,8 +8115,15 @@ const processPositiveCallResponse = async (monitoringData, responseData) => {
     console.log('🎉 Processing positive response from', monitoringData.leadName);
     
     try {
+        // Ensure we have a valid call_id before generating calendar link
+        const validCallId = await ensureValidCallId(monitoringData);
+        if (!validCallId) {
+            console.log(`❌ Cannot generate calendar link - no valid call_id found for connection_id: ${monitoringData.connectionId}`);
+            return;
+        }
+        
         // Generate calendar link via backend
-        const calendarResponse = await fetch(`${PLATFORM_URL}/api/calls/${monitoringData.callId}/calendar-link`, {
+        const calendarResponse = await fetch(`${PLATFORM_URL}/api/calls/${validCallId}/calendar-link`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -8340,6 +8422,100 @@ const trySendQueuedDraft = async (monitoringData) => {
         return false;
     }
 };
+
+/**
+  * Check if we should send a fallback message when calendar generation fails
+  * Only send if we were the last to send a message (not the lead)
+  */
+ const shouldSendFallbackMessage = async (monitoringData, latestMessage) => {
+     try {
+         // Check if we were the last to respond
+         if (monitoringData.lastResponseSentAt && monitoringData.lastResponseSentAt > latestMessage.timestamp) {
+             console.log('✅ We were the last to respond - safe to send fallback message');
+             return true;
+         }
+         
+         // Check if the latest message is from the lead
+         if (latestMessage.isFromLead) {
+             console.log('⏸️ Lead was last to send - not sending fallback message');
+             return false;
+         }
+         
+         // If we can't determine, err on the side of caution and don't send
+         console.log('⚠️ Cannot determine conversation state - not sending fallback message');
+         return false;
+     } catch (error) {
+         console.error('❌ Error checking fallback message eligibility:', error);
+         return false;
+     }
+ };
+
+/**
+  * Ensure we have a valid call_id for calendar link generation
+  * If call_id is invalid/deleted, search for existing call record by connection_id
+  */
+ const ensureValidCallId = async (monitoringData) => {
+     try {
+         // If we already have a callId, try to validate it first
+         if (monitoringData.callId) {
+             console.log(`🔍 Validating existing call_id: ${monitoringData.callId}`);
+             
+             // Test if the call record exists by trying to get it
+             const testResponse = await fetch(`${PLATFORM_URL}/api/calls/${monitoringData.callId}`, {
+                 method: 'GET',
+                 headers: {
+                     'Content-Type': 'application/json',
+                     'lk-id': linkedinId || 'vicken-concept'
+                 }
+             });
+             
+             if (testResponse.ok) {
+                 console.log(`✅ Call_id ${monitoringData.callId} is valid`);
+                 return monitoringData.callId;
+             } else if (testResponse.status === 404) {
+                 console.log(`❌ Call_id ${monitoringData.callId} not found (404) - searching by connection_id`);
+             } else {
+                 console.log(`⚠️ Call_id ${monitoringData.callId} validation failed with status ${testResponse.status}`);
+             }
+         }
+         
+         // Search for existing call record by connection_id
+         console.log(`🔍 Searching for existing call record by connection_id: ${monitoringData.connectionId}`);
+         
+         const searchResponse = await fetch(`${PLATFORM_URL}/api/calls/search-by-connection/${monitoringData.connectionId}`, {
+             method: 'GET',
+             headers: {
+                 'Content-Type': 'application/json',
+                 'lk-id': linkedinId || 'vicken-concept'
+             }
+         });
+         
+         if (searchResponse.ok) {
+             const searchData = await searchResponse.json();
+             if (searchData.call_id) {
+                 console.log(`✅ Found existing call record with ID: ${searchData.call_id}`);
+                 
+                 // Update monitoring data with found call_id
+                 monitoringData.callId = searchData.call_id;
+                 
+                 // Update storage with found call_id
+                 const key = `call_response_monitoring_${monitoringData.campaignId}_${monitoringData.connectionId}`;
+                 await chrome.storage.local.set({ [key]: monitoringData });
+                 
+                 return searchData.call_id;
+             } else {
+                 console.log(`❌ No call record found for connection_id: ${monitoringData.connectionId} - will not send message`);
+                 return null;
+             }
+         } else {
+             console.log(`❌ Failed to search for call record by connection_id: ${searchResponse.status} - will not send message`);
+             return null;
+         }
+     } catch (error) {
+         console.error('❌ Error ensuring valid call_id:', error);
+         return null;
+     }
+ };
 
 /**
  * Send AI-generated message
