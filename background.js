@@ -56,6 +56,8 @@ const storeLinkedInProfile = async () => {
 // 🚀 KEEP-ALIVE MECHANISM - Prevents service worker from going inactive
 let keepAliveInterval;
 let isServiceWorkerActive = true;
+let lastCleanupTime = null;
+let lastDebugTime = null;
 
 // Message handler for connection invites from content scripts
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -458,8 +460,24 @@ const keepServiceWorkerAlive = () => {
         clearInterval(keepAliveInterval);
     }
     
-    keepAliveInterval = setInterval(() => {
+    keepAliveInterval = setInterval(async () => {
         console.log('💓 Service worker keep-alive ping...');
+        
+        // Check for pending messages that are ready to send
+        await checkAndSendPendingMessages();
+        
+        // Clean up orphaned campaign data (run every 5 minutes)
+        const now = Date.now();
+        if (!lastCleanupTime || (now - lastCleanupTime) > 300000) { // 5 minutes
+            await cleanupOrphanedCampaignData();
+            lastCleanupTime = now;
+        }
+        
+        // Debug campaign storage (run every 2 minutes for debugging)
+        if (!lastDebugTime || (now - lastDebugTime) > 120000) { // 2 minutes
+            await debugCampaignStorage();
+            lastDebugTime = now;
+        }
         
         // Check if we have any active campaigns
         chrome.storage.local.get(['activeCampaigns'], (result) => {
@@ -1568,6 +1586,12 @@ const updateCampaignStatus = (status, message) => {
         }
     });
 };
+// AI mode is now handled by node model, no need for database calls
+
+// Review messages are now handled by setTimeout, no need for database storage
+
+// Review messages are now handled by setTimeout, no need for database polling
+
 // Run alarm action when it's time
 chrome.alarms.onAlarm.addListener((alarm) => {
     console.log('🔔 Alarm triggered:', alarm.name);
@@ -1733,6 +1757,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
                 console.log(err)
             }
         });
+    }else if(alarm.name === 'check_review_messages'){
+        // Review messages are now handled by node model timing, no need for database polling
+        console.log('⏸️ Review message checking disabled - using node model timing instead');
     }else if(alarm.name.startsWith('delayed_action_')){
         console.log('⏰ DELAYED ACTION ALARM TRIGGERED:', alarm.name);
         console.log('📅 Current time:', new Date().toLocaleString());
@@ -2626,10 +2653,14 @@ const setCampaignAlarm = async (campaign) => {
         console.log('🔔 Creating alarm for node:', nodeItem);
         campaignModel = {
             campaign: campaign,
-            nodeModel: nodeItem
+            nodeModel: nodeItem,
+            sequence: nodeModelArr // Save the full sequence array for AI mode access
         }
         chrome.storage.local.set(campaignModel).then(() => {
             console.log('💾 Campaign model saved to storage:', campaignModel);
+            console.log('🔍 Sequence data saved:', nodeModelArr);
+            console.log('🔍 First node AI mode:', nodeModelArr[0]?.ai_mode);
+            console.log('🔍 First node review time:', nodeModelArr[0]?.review_time);
             chrome.alarms.create(
                 alarmName, {
                     delayInMinutes: 0.1 // Reduced from 2 to 0.1 minutes (6 seconds) for faster testing
@@ -2666,9 +2697,14 @@ const setCampaignAlarm = async (campaign) => {
             console.log('🔄 Creating fallback alarm...');
             campaignModel = {
                 campaign: campaign,
-                nodeModel: nodeItem
+                nodeModel: nodeItem,
+                sequence: nodeModelArr // Save the full sequence array for AI mode access
             }
             chrome.storage.local.set(campaignModel).then(() => {
+                console.log('💾 Fallback campaign model saved to storage:', campaignModel);
+                console.log('🔍 Fallback sequence data saved:', nodeModelArr);
+                console.log('🔍 Fallback first node AI mode:', nodeModelArr[0]?.ai_mode);
+                console.log('🔍 Fallback first node review time:', nodeModelArr[0]?.review_time);
                 chrome.alarms.create(
                     alarmName, {
                         delayInMinutes: 0.1
@@ -2683,6 +2719,13 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
     console.log('🎬 RUNSEQUENCE CALLED - Starting sequence execution...');
     console.log('📊 Campaign:', currentCampaign.name, '(ID:', currentCampaign.id, ')');
     console.log('👥 Leads to process:', leads.length);
+    console.log('🎯 Node Model AI Settings:', {
+        ai_mode: nodeModel?.ai_mode || 'auto',
+        review_time: nodeModel?.review_time || null,
+        paraphrase_user_message: nodeModel?.paraphrase_user_message || false
+    });
+    console.log('🔍 Raw nodeModel review_time:', nodeModel?.review_time, 'Type:', typeof nodeModel?.review_time);
+    console.log('🔍 Parsed review_time:', nodeModel?.review_time ? parseInt(nodeModel.review_time, 10) : null);
     console.log('🔗 Node action:', nodeModel.label, '(', nodeModel.value, ')');
     console.log('⏰ Node delay:', nodeModel.delayInMinutes || 0, 'minutes');
     console.log('🔧 Full node model:', nodeModel);
@@ -2769,6 +2812,8 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                         location: lead.location || null,
                         original_message: arConnectionModel.message || null, // Send user's message if available
                         paraphrase_user_message: nodeModel.paraphrase_user_message || false, // Include paraphrase flag
+                        ai_mode: nodeModel.ai_mode || 'auto', // Include AI mode setting
+                        review_time: nodeModel.review_time || null, // Include review time if set
                         linkedin_profile_url: lead.profileUrl || null,
                         connection_id: lead.connectionId || null,
                         conversation_urn_id: arConnectionModel.conversationUrnId || null,
@@ -2792,8 +2837,18 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                             return;
                         }
                         
+                        // Check AI mode to determine message handling
+                        const aiMode = nodeModel.ai_mode || 'auto';
+                        const reviewTime = nodeModel.review_time ? parseInt(nodeModel.review_time, 10) : null;
+                        console.log(`🤖 AI Mode from node: ${aiMode}, Review Time: ${reviewTime} minutes`);
+                        
                         // Decide whether to poll for AI/paraphrased message or send immediately
                         const shouldPollForMessage = (nodeModel.paraphrase_user_message === true) || !arConnectionModel.message;
+                        
+                        // Note: Review mode only applies to AI responses, not initial messages
+                        // Initial messages are always sent immediately
+                        console.log(`📤 Sending initial message (AI mode: ${aiMode} - review mode only affects AI responses)`);
+                        
                         if (!shouldPollForMessage) {
                             // User did not request paraphrasing and provided a message → send immediately
                             try {
@@ -2814,6 +2869,16 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
 
                                 console.log('✅ User message sent without AI polling');
                                 messageSentViaAI = true; // prevent duplicate send in standard path
+                                
+                                // Set up monitoring for responses to this initial message
+                                const initialMonitoringData = {
+                                    callId: callId,
+                                    campaignId: currentCampaign.id,
+                                    connectionId: lead.connectionId,
+                                    conversationUrnId: lead.conversationUrnId,
+                                    leadName: lead.name
+                                };
+                                await setupAIMessageMonitoring(initialMonitoringData);
                             } catch (error) {
                                 console.error('❌ Failed to send user message immediately:', error);
                             }
@@ -7060,18 +7125,135 @@ const checkForCallResponses = async () => {
                                         }
                                     }
                                 } else {
+                                    // Check if there's already a pending message for this lead
+                                    if (monitoringData.status === 'pending_review') {
+                                        console.log(`⏸️ Pending message already exists for ${monitoringData.leadName}, skipping new message generation (Location 2)`);
+                                        console.log(`📝 Pending message: "${monitoringData.pendingMessage?.substring(0, 50)}..."`);
+                                        console.log(`⏰ Scheduled send time: ${monitoringData.scheduledSendAt}`);
+                                        return; // Skip processing this message
+                                    }
+                                    
                                     // Send AI-generated response for non-scheduling scenarios
                                     console.log('📤 Sending AI-generated response to lead...');
                                     
                                     if (analysisResponse.suggested_response || analysisResponse['Suggested Response'] || analysisResponse.suggestedResponse) {
                                         const suggestedResponse = analysisResponse.suggested_response || analysisResponse['Suggested Response'] || analysisResponse.suggestedResponse;
-                                        console.log(`📤 Sending AI response to ${monitoringData.leadName}: "${suggestedResponse}"`);
-                                        console.log(`🔍 Full analysis response:`, analysisResponse);
+                                        console.log(`📤 AI response generated: "${suggestedResponse}"`);
+                                        
+                                        // Get AI mode from campaign data
+                                        let nodeAiMode = 'auto';
+                                        let nodeReviewTime = null;
+                                        
+                                        try {
+                                            // Get all campaign data to find the sequence with AI mode settings
+                                            const allStorage = await chrome.storage.local.get();
+                                            console.log(`🔍 All storage data:`, allStorage);
+                                            
+                                            // Look for campaign data that contains the sequence array
+                                            let campaignData = null;
+                                            let sequenceData = null;
+                                            
+            // Check various campaign storage keys
+            const possibleKeys = ['campaign', 'campaignAccepted', 'campaignNotAccepted', 'campaignCustomLikePost', 'campaignCustomProfileView', 'campaignCustomFollow', 'campaignCustomMessage', 'campaignCustomEndorse'];
+            
+            // Also check for campaign-specific keys
+            const campaignSpecificKey = `campaign_${monitoringData.campaignId}`;
+            possibleKeys.push(campaignSpecificKey);
+            
+            for (const key of possibleKeys) {
+                if (allStorage[key] && allStorage[key].campaign && allStorage[key].campaign.id === monitoringData.campaignId) {
+                    campaignData = allStorage[key];
+                    sequenceData = allStorage[key].sequence;
+                    console.log(`🔍 Found campaign data in key: ${key}`);
+                    break;
+                }
+            }
+                                            
+                                            if (campaignData && sequenceData) {
+                                                console.log(`🔍 Campaign object:`, campaignData);
+                                                console.log(`🔍 Sequence data:`, sequenceData);
+                                                
+                                                // Find the current node (first node in sequence)
+                                                // Check if sequenceData is an array or has nodeModel property
+                                                let currentNode = null;
+                                                if (Array.isArray(sequenceData)) {
+                                                    currentNode = sequenceData[0];
+                                                } else if (sequenceData.nodeModel && Array.isArray(sequenceData.nodeModel)) {
+                                                    currentNode = sequenceData.nodeModel[0];
+                                                }
+                                                console.log(`🔍 Current node:`, currentNode);
+                                                
+                                                if (currentNode) {
+                                                    nodeAiMode = currentNode.ai_mode || 'auto';
+                                                    nodeReviewTime = currentNode.review_time ? parseInt(currentNode.review_time, 10) : null;
+                                                    console.log(`🔍 Node AI settings:`, {
+                                                        ai_mode: currentNode.ai_mode,
+                                                        review_time: currentNode.review_time,
+                                                        parsed_review_time: nodeReviewTime
+                                                    });
+                                                } else {
+                                                    console.log(`⚠️ No current node found in sequence data`);
+                                                }
+                                            } else {
+                                                console.log(`⚠️ No campaign data found for campaign ${monitoringData.campaignId}`);
+                                            }
+                                        } catch (error) {
+                                            console.error('❌ Error getting campaign data for AI mode:', error);
+                                        }
+                                        
+                                console.log(`🎯 AI Mode from campaign data: ${nodeAiMode}, Review Time: ${nodeReviewTime} minutes`);
+                                console.log(`🔍 REVIEW MODE CHECK:`, {
+                                    nodeAiMode: nodeAiMode,
+                                    nodeReviewTime: nodeReviewTime,
+                                    isReviewMode: nodeAiMode === 'review',
+                                    hasReviewTime: !!nodeReviewTime,
+                                    reviewTimeMs: nodeReviewTime ? nodeReviewTime * 60 * 1000 : 0,
+                                    currentTime: new Date().toISOString()
+                                });
+                                
+                                if (nodeAiMode === 'review' && nodeReviewTime) {
+                                    console.log(`⏸️ REVIEW MODE ACTIVATED: Saving AI response for review (${nodeReviewTime} minutes)`);
+                                    const scheduledSendAt = new Date(Date.now() + (nodeReviewTime * 60 * 1000));
+                                    console.log(`⏰ SCHEDULED SEND TIME: ${scheduledSendAt.toISOString()}`);
+                                    
+                                    // Save pending message to database
+                                    try {
+                                        const pendingResponse = await fetch(`${PLATFORM_URL}/api/calls/${monitoringData.callId}/pending-message`, {
+                                            method: 'POST',
+                                            headers: {
+                                                'Content-Type': 'application/json',
+                                                'lk-id': linkedinId || 'vicken-concept'
+                                            },
+                                            body: JSON.stringify({
+                                                pending_message: suggestedResponse,
+                                                scheduled_send_at: scheduledSendAt.toISOString(),
+                                                analysis: aiResponse.analysis
+                                            })
+                                        });
+                                        
+                                        if (pendingResponse.ok) {
+                                            console.log(`✅ Pending message saved to database for review`);
+                                            // Update message tracking to indicate message is pending
+                                            monitoringData.status = 'pending_review';
+                                            monitoringData.pendingMessage = suggestedResponse;
+                                            monitoringData.scheduledSendAt = scheduledSendAt.toISOString();
+                                            await chrome.storage.local.set({ [key]: monitoringData });
+                                        } else {
+                                            console.error(`❌ Failed to save pending message: ${pendingResponse.status}`);
+                                        }
+                                    } catch (error) {
+                                        console.error(`❌ Error saving pending message:`, error);
+                                    }
+                                } else {
+                                    // Send immediately for auto mode
+                                    console.log(`📤 AUTO MODE: Sending AI response immediately to ${monitoringData.leadName} at ${new Date().toISOString()}`);
+                                    console.log(`📤 Response: "${suggestedResponse}"`);
                                         
                                         const aiSuccess = await sendAIMessage(monitoringData, suggestedResponse);
                                         if (aiSuccess) {
                                             // Update message tracking after successful AI response
                                             await updateMessageTracking(monitoringData, latestMessage.id, key);
+                                    }
                                         }
                                     }
                             }
@@ -7242,20 +7424,142 @@ const checkForCallResponses = async () => {
                                 console.error('❌ Failed to store conversation message - call_id might be invalid:', monitoringData.callId);
                             }
 
+                            // Check if there's already a pending message for this lead
+                            if (monitoringData.status === 'pending_review') {
+                                console.log(`⏸️ Pending message already exists for ${monitoringData.leadName}, skipping new message generation`);
+                                console.log(`📝 Pending message: "${monitoringData.pendingMessage?.substring(0, 50)}..."`);
+                                console.log(`⏰ Scheduled send time: ${monitoringData.scheduledSendAt}`);
+                                return; // Skip processing this message
+                            }
+
                             // Process the call reply with AI
                             const aiResponse = await processCallReplyWithAI(monitoringData.callId, latestMessage.text, monitoringData.leadName);
                             
+                            console.log(`🔍 ANALYSIS RESPONSE RECEIVED:`, {
+                                hasResponse: !!aiResponse,
+                                hasSuggestedResponse: !!(aiResponse && aiResponse.suggested_response),
+                                suggestedResponse: aiResponse?.suggested_response?.substring(0, 50) + '...',
+                                timestamp: new Date().toISOString()
+                            });
+                            
                             if (aiResponse && aiResponse.suggested_response) {
+                                console.log(`📤 AI response generated: "${aiResponse.suggested_response}"`);
+                                
+                                // Get AI mode from campaign data (need to fetch from storage)
+                                let nodeAiMode = 'auto';
+                                let nodeReviewTime = null;
+                                
+                                try {
+                                    // Get all campaign data to find the sequence with AI mode settings
+                                    const allStorage = await chrome.storage.local.get();
+                                    console.log(`🔍 All storage data (Location 2):`, allStorage);
+                                    
+                                    // Look for campaign data that contains the sequence array
+                                    let campaignData = null;
+                                    let sequenceData = null;
+                                    
+                                    // Check various campaign storage keys
+                                    const possibleKeys = ['campaign', 'campaignAccepted', 'campaignNotAccepted', 'campaignCustomLikePost', 'campaignCustomProfileView', 'campaignCustomFollow', 'campaignCustomMessage', 'campaignCustomEndorse'];
+                                    
+                                    // Also check for campaign-specific keys
+                                    const campaignSpecificKey = `campaign_${monitoringData.campaignId}`;
+                                    possibleKeys.push(campaignSpecificKey);
+                                    
+                                    for (const key of possibleKeys) {
+                                        if (allStorage[key] && allStorage[key].campaign && allStorage[key].campaign.id === monitoringData.campaignId) {
+                                            campaignData = allStorage[key];
+                                            sequenceData = allStorage[key].sequence;
+                                            console.log(`🔍 Found campaign data in key (Location 2): ${key}`);
+                                            break;
+                                        }
+                                    }
+                                    
+                                    if (campaignData && sequenceData) {
+                                        console.log(`🔍 Campaign object (Location 2):`, campaignData);
+                                        console.log(`🔍 Sequence data (Location 2):`, sequenceData);
+                                        
+                                        // Find the current node (first node in sequence)
+                                        // Check if sequenceData is an array or has nodeModel property
+                                        let currentNode = null;
+                                        if (Array.isArray(sequenceData)) {
+                                            currentNode = sequenceData[0];
+                                        } else if (sequenceData.nodeModel && Array.isArray(sequenceData.nodeModel)) {
+                                            currentNode = sequenceData.nodeModel[0];
+                                        }
+                                        console.log(`🔍 Current node (Location 2):`, currentNode);
+                                        
+                                        if (currentNode) {
+                                            nodeAiMode = currentNode.ai_mode || 'auto';
+                                            nodeReviewTime = currentNode.review_time ? parseInt(currentNode.review_time, 10) : null;
+                                            console.log(`🔍 Node AI settings (Location 2):`, {
+                                                ai_mode: currentNode.ai_mode,
+                                                review_time: currentNode.review_time,
+                                                parsed_review_time: nodeReviewTime
+                                            });
+                                        } else {
+                                            console.log(`⚠️ No current node found in sequence data (Location 2)`);
+                                        }
+                                    } else {
+                                        console.log(`⚠️ No campaign data found for campaign ${monitoringData.campaignId} (Location 2)`);
+                                    }
+                                } catch (error) {
+                                    console.error('❌ Error getting campaign data for AI mode:', error);
+                                }
+                                
+                                console.log(`🎯 AI Mode from campaign data: ${nodeAiMode}, Review Time: ${nodeReviewTime} minutes`);
+                                console.log(`🔍 Review time details:`, {
+                                    nodeAiMode: nodeAiMode,
+                                    nodeReviewTime: nodeReviewTime,
+                                    type: typeof nodeReviewTime
+                                });
+                                
+                                // Use campaign data values
+                                const finalAiMode = nodeAiMode;
+                                const finalReviewTime = nodeReviewTime;
+                                
+                                console.log(`🔧 Final values being used:`, {
+                                    finalAiMode: finalAiMode,
+                                    finalReviewTime: finalReviewTime,
+                                    reviewTimeType: typeof finalReviewTime
+                                });
+                                
+                                if (finalAiMode === 'review') {
+                                    console.log(`⏸️ Review mode: Holding message for review (${finalReviewTime} minutes)`);
+                                    // Use setTimeout to send the message after the review time
+                                    setTimeout(async () => {
+                                        console.log(`⏰ Review time elapsed, sending message to ${monitoringData.leadName}`);
+                                        try {
+                                            await sendLinkedInMessage(monitoringData, aiResponse.suggested_response);
+                                            console.log(`✅ Review message sent successfully to ${monitoringData.leadName}`);
+                                        } catch (error) {
+                                            console.error(`❌ Error sending review message to ${monitoringData.leadName}:`, error);
+                                        }
+                                    }, finalReviewTime * 60 * 1000); // Convert minutes to milliseconds
+                                    return;
+                                }
+                                
                                 console.log(`📤 Sending AI response: "${aiResponse.suggested_response}"`);
                                 
                                 // Check if this is a positive response that should trigger calendar link
-                                if (aiResponse.isPositive || 
+                                const shouldSendCalendar = aiResponse.isPositive || 
                                     (aiResponse.analysis && (
                                         aiResponse.analysis.intent === 'available' || 
                                         aiResponse.analysis.intent === 'interested' ||
                                         aiResponse.analysis.intent === 'scheduling_request' ||
-                                        aiResponse.analysis.sentiment === 'positive'
-                                    ))) {
+                                        (aiResponse.analysis.sentiment === 'positive' && 
+                                         aiResponse.analysis.intent !== 'not_interested' &&
+                                         aiResponse.analysis.intent !== 'busy' &&
+                                         aiResponse.analysis.intent !== 'reject')
+                                    ));
+                                
+                                console.log(`🔍 Calendar link decision:`, {
+                                    isPositive: aiResponse.isPositive,
+                                    intent: aiResponse.analysis?.intent,
+                                    sentiment: aiResponse.analysis?.sentiment,
+                                    shouldSendCalendar: shouldSendCalendar
+                                });
+                                
+                                if (shouldSendCalendar) {
                                     console.log(`📅 Positive response detected - generating calendar link for ${monitoringData.leadName}`);
                                     
                                     try {
@@ -7333,6 +7637,9 @@ const checkForCallResponses = async () => {
                                         }
                                     }
                                 } else {
+                                    console.log(`🚫 Not sending calendar link - response not positive enough for ${monitoringData.leadName}`);
+                                    console.log(`📝 Sending regular AI response instead`);
+                                    
                                     // Send the regular AI-generated response
                                     try {
                                         await sendLinkedInMessage(
@@ -7920,6 +8227,279 @@ const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => 
     } catch (error) {
         console.error('❌ Error fetching LinkedIn conversation:', error);
         return null;
+    }
+};
+
+/**
+ * Check for pending messages and send them if ready
+ */
+const checkAndSendPendingMessages = async () => {
+    try {
+        console.log('🔍 Checking for pending messages...');
+        
+        // Get all monitoring data
+        const allStorage = await chrome.storage.local.get();
+        const responseKeys = Object.keys(allStorage).filter(key => key.startsWith('call_response_monitoring_'));
+        
+        for (const key of responseKeys) {
+            const monitoringData = allStorage[key];
+            
+            // Check if this monitoring data has a pending message
+            if (monitoringData.status === 'pending_review' && monitoringData.scheduledSendAt) {
+                const scheduledTime = new Date(monitoringData.scheduledSendAt);
+                const now = new Date();
+                
+                console.log(`🔍 Checking pending message for ${monitoringData.leadName}:`, {
+                    scheduledTime: scheduledTime.toISOString(),
+                    currentTime: now.toISOString(),
+                    isReady: scheduledTime <= now
+                });
+                
+                if (scheduledTime <= now) {
+                    console.log(`⏰ Pending message ready to send for ${monitoringData.leadName}`);
+                    
+                    if (monitoringData.pendingMessage) {
+                        console.log(`📤 Sending pending message: "${monitoringData.pendingMessage}"`);
+                        
+                        const aiSuccess = await sendAIMessage(monitoringData, monitoringData.pendingMessage);
+                        if (aiSuccess) {
+                            console.log(`✅ Pending message sent successfully to ${monitoringData.leadName}`);
+                            
+                            // Update monitoring data to indicate message was sent
+                            monitoringData.status = 'response_sent';
+                            monitoringData.pendingMessage = null;
+                            monitoringData.scheduledSendAt = null;
+                            await chrome.storage.local.set({ [key]: monitoringData });
+                        } else {
+                            console.error(`❌ Failed to send pending message to ${monitoringData.leadName}`);
+                        }
+                    } else {
+                        console.warn(`⚠️ No pending message found for ${monitoringData.leadName}`);
+                    }
+                }
+            }
+        }
+    } catch (error) {
+        console.error('❌ Error checking pending messages:', error);
+    }
+};
+
+/**
+ * Clean up orphaned campaign data from Chrome storage
+ * This function checks if campaigns stored in Chrome still exist in the database
+ * and removes any that have been deleted to prevent interference with the flow
+ */
+const cleanupOrphanedCampaignData = async () => {
+    try {
+        console.log('🧹 Starting cleanup of orphaned campaign data...');
+        
+        // Get LinkedIn ID for API calls
+        const linkedinIdResult = await chrome.storage.local.get(['linkedinId']);
+        const linkedinId = linkedinIdResult.linkedinId || 'vicken-concept';
+        
+        if (!linkedinId) {
+            console.log('⚠️ LinkedIn ID not available, skipping cleanup');
+            return;
+        }
+        
+        // Get all campaigns from the database
+        const response = await fetch(`${PLATFORM_URL}/api/campaigns`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                'lk-id': linkedinId
+            }
+        });
+        
+        if (!response.ok) {
+            console.log('❌ Failed to fetch campaigns from database, skipping cleanup');
+            return;
+        }
+        
+        const data = await response.json();
+        if (data.status !== 200 || !data.data) {
+            console.log('❌ Invalid response from campaigns API, skipping cleanup');
+            return;
+        }
+        
+        const validCampaignIds = data.data.map(campaign => campaign.id);
+        console.log(`📊 Found ${validCampaignIds.length} valid campaigns in database:`, validCampaignIds);
+        
+        // Get all Chrome storage data
+        const allStorage = await chrome.storage.local.get();
+        
+        // Campaign storage keys to check
+        const campaignKeys = [
+            'campaign', 'campaignAccepted', 'campaignNotAccepted', 
+            'campaignCustomLikePost', 'campaignCustomProfileView', 
+            'campaignCustomFollow', 'campaignCustomMessage', 'campaignCustomEndorse'
+        ];
+        
+        // Check each campaign storage key
+        for (const key of campaignKeys) {
+            if (allStorage[key] && allStorage[key].campaign) {
+                const campaignId = allStorage[key].campaign.id;
+                
+                if (!validCampaignIds.includes(campaignId)) {
+                    console.log(`🗑️ Found orphaned campaign data for campaign ${campaignId} in key '${key}', removing...`);
+                    await chrome.storage.local.remove([key]);
+                    console.log(`✅ Removed orphaned campaign data for campaign ${campaignId}`);
+                } else {
+                    console.log(`✅ Campaign ${campaignId} in key '${key}' is still valid`);
+                }
+            }
+        }
+        
+        // Clean up monitoring data for orphaned campaigns
+        const monitoringKeys = Object.keys(allStorage).filter(key => key.startsWith('call_response_monitoring_'));
+        let cleanedMonitoringCount = 0;
+        
+        for (const key of monitoringKeys) {
+            const monitoringData = allStorage[key];
+            if (monitoringData && monitoringData.campaignId && !validCampaignIds.includes(monitoringData.campaignId)) {
+                console.log(`🗑️ Found orphaned monitoring data for campaign ${monitoringData.campaignId}, removing...`);
+                await chrome.storage.local.remove([key]);
+                cleanedMonitoringCount++;
+            }
+        }
+        
+        if (cleanedMonitoringCount > 0) {
+            console.log(`✅ Removed ${cleanedMonitoringCount} orphaned monitoring data entries`);
+        }
+        
+        // Clean up any other campaign-related data
+        const otherKeysToCheck = ['activeCampaigns', 'forceSendInvites'];
+        for (const key of otherKeysToCheck) {
+            if (allStorage[key]) {
+                if (key === 'activeCampaigns' && Array.isArray(allStorage[key])) {
+                    const validActiveCampaigns = allStorage[key].filter(id => validCampaignIds.includes(id));
+                    if (validActiveCampaigns.length !== allStorage[key].length) {
+                        console.log(`🗑️ Cleaning up activeCampaigns, removing orphaned campaign IDs`);
+                        await chrome.storage.local.set({ [key]: validActiveCampaigns });
+                        console.log(`✅ Updated activeCampaigns with ${validActiveCampaigns.length} valid campaigns`);
+                    }
+                } else if (key === 'forceSendInvites' && !validCampaignIds.includes(allStorage[key])) {
+                    console.log(`🗑️ Removing orphaned forceSendInvites flag for campaign ${allStorage[key]}`);
+                    await chrome.storage.local.remove([key]);
+                }
+            }
+        }
+        
+        console.log('✅ Campaign data cleanup completed successfully');
+        
+    } catch (error) {
+        console.error('❌ Error during campaign data cleanup:', error);
+    }
+};
+
+/**
+ * Save campaign sequence data to Chrome storage for AI mode access
+ */
+const saveCampaignSequenceData = async (campaign) => {
+    try {
+        console.log(`💾 Saving campaign sequence data for campaign ${campaign.id}...`);
+        
+        // Get LinkedIn ID for API calls
+        const linkedinIdResult = await chrome.storage.local.get(['linkedinId']);
+        const linkedinId = linkedinIdResult.linkedinId || 'vicken-concept';
+        
+        // Fetch campaign sequence data
+        const response = await fetch(`${PLATFORM_URL}/api/campaign/${campaign.id}/sequence`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                'lk-id': linkedinId
+            }
+        });
+        
+        if (!response.ok) {
+            console.log(`⚠️ Failed to fetch sequence for campaign ${campaign.id}: ${response.status}`);
+            return;
+        }
+        
+        const data = await response.json();
+        if (data.status !== 200 || !data.data) {
+            console.log(`⚠️ Invalid sequence response for campaign ${campaign.id}`);
+            return;
+        }
+        
+        const sequenceData = data.data;
+        console.log(`🔍 Sequence data for campaign ${campaign.id}:`, sequenceData);
+        
+        // Save to Chrome storage with campaign-specific key
+        const storageKey = `campaign_${campaign.id}`;
+        const campaignData = {
+            campaign: campaign,
+            sequence: sequenceData,
+            lastUpdated: new Date().toISOString()
+        };
+        
+        await chrome.storage.local.set({ [storageKey]: campaignData });
+        console.log(`✅ Saved campaign sequence data for ${campaign.id} with key: ${storageKey}`);
+        
+        // Log AI mode settings from first node
+        if (sequenceData && sequenceData[0]) {
+            console.log(`🎯 Campaign ${campaign.id} AI settings:`, {
+                ai_mode: sequenceData[0].ai_mode,
+                review_time: sequenceData[0].review_time
+            });
+        }
+        
+    } catch (error) {
+        console.error(`❌ Error saving campaign sequence data for ${campaign.id}:`, error);
+    }
+};
+
+/**
+ * Debug function to manually check what campaign data is stored
+ */
+const debugCampaignStorage = async () => {
+    try {
+        console.log('🔍 DEBUG: Checking all campaign data in storage...');
+        
+        const allStorage = await chrome.storage.local.get();
+        const campaignKeys = [
+            'campaign', 'campaignAccepted', 'campaignNotAccepted', 
+            'campaignCustomLikePost', 'campaignCustomProfileView', 
+            'campaignCustomFollow', 'campaignCustomMessage', 'campaignCustomEndorse'
+        ];
+        
+        // Also check for campaign-specific keys
+        const campaignSpecificKeys = Object.keys(allStorage).filter(key => key.startsWith('campaign_') && !campaignKeys.includes(key));
+        campaignKeys.push(...campaignSpecificKeys);
+        
+        console.log('📊 All storage keys:', Object.keys(allStorage));
+        console.log('📊 Campaign-specific keys found:', campaignSpecificKeys);
+        
+        for (const key of campaignKeys) {
+            if (allStorage[key]) {
+                console.log(`🔍 Found data in key '${key}':`, allStorage[key]);
+                if (allStorage[key].campaign) {
+                    console.log(`   - Campaign ID: ${allStorage[key].campaign.id}`);
+                    console.log(`   - Campaign Name: ${allStorage[key].campaign.name}`);
+                    console.log(`   - Has sequence: ${!!allStorage[key].sequence}`);
+                    if (allStorage[key].sequence && allStorage[key].sequence[0]) {
+                        console.log(`   - First node AI mode: ${allStorage[key].sequence[0].ai_mode}`);
+                        console.log(`   - First node review time: ${allStorage[key].sequence[0].review_time}`);
+                    }
+                }
+            }
+        }
+        
+        // Check monitoring data
+        const monitoringKeys = Object.keys(allStorage).filter(key => key.startsWith('call_response_monitoring_'));
+        console.log(`📊 Found ${monitoringKeys.length} monitoring entries`);
+        for (const key of monitoringKeys) {
+            const data = allStorage[key];
+            console.log(`🔍 Monitoring ${key}:`, {
+                campaignId: data.campaignId,
+                leadName: data.leadName,
+                status: data.status
+            });
+        }
+        
+    } catch (error) {
+        console.error('❌ Error during debug:', error);
     }
 };
 
@@ -8518,6 +9098,46 @@ const trySendQueuedDraft = async (monitoringData) => {
  };
 
 /**
+ * Set up monitoring for AI message responses
+ */
+const setupAIMessageMonitoring = async (monitoringData) => {
+    try {
+        console.log(`🔍 Setting up AI message monitoring for ${monitoringData.leadName}...`);
+        
+        // Create monitoring key
+        const responseMonitoringKey = `call_response_monitoring_${monitoringData.campaignId}_${monitoringData.connectionId}`;
+        
+        // Check if monitoring already exists
+        const existingMonitoring = await chrome.storage.local.get([responseMonitoringKey]);
+        if (existingMonitoring[responseMonitoringKey]) {
+            console.log(`✅ Monitoring already exists for ${monitoringData.leadName}`);
+            return;
+        }
+        
+        // Create new monitoring entry
+        const newMonitoringData = {
+            callId: monitoringData.callId || null,
+            campaignId: monitoringData.campaignId,
+            connectionId: monitoringData.connectionId,
+            conversationUrnId: monitoringData.conversationUrnId,
+            leadName: monitoringData.leadName,
+            lastCheckedMessageId: null,
+            lastResponseSentAt: Date.now(),
+            responseCount: 1,
+            status: 'response_sent',
+            aiMessageSent: true,
+            aiMessageSentAt: Date.now()
+        };
+        
+        await chrome.storage.local.set({ [responseMonitoringKey]: newMonitoringData });
+        console.log(`✅ AI message monitoring set up for ${monitoringData.leadName} with key: ${responseMonitoringKey}`);
+        
+    } catch (error) {
+        console.error(`❌ Error setting up AI message monitoring for ${monitoringData.leadName}:`, error);
+    }
+};
+
+/**
  * Send AI-generated message
  */
 const sendAIMessage = async (monitoringData, message) => {
@@ -8549,6 +9169,9 @@ const sendAIMessage = async (monitoringData, message) => {
                 // Note: We can't update storage here as we don't have the key, but the next lead message will update it
             }
         }
+        
+        // Set up monitoring for responses to this AI message
+        await setupAIMessageMonitoring(monitoringData);
         
         // Return success status for tracking
         return true;
@@ -8812,6 +9435,9 @@ const checkAllCampaignsForAcceptances = async () => {
         for (const campaign of campaignsToCheck) {
             console.log(`\n🔍 Checking campaign ${campaign.id} (${campaign.name}) [Status: ${campaign.status}]...`);
             try {
+                // Save campaign sequence data to Chrome storage for AI mode access
+                await saveCampaignSequenceData(campaign);
+                
                 // Get leads for this campaign
                 console.log(`📋 Getting leads for campaign ${campaign.id}...`);
                 await getLeadGenRunning(campaign.id);
@@ -8997,6 +9623,8 @@ chrome.runtime.onInstalled.addListener(() => {
     console.log('🔧 LinkDominator extension installed');
     getUserProfile();
     startContinuousMonitoring();
+    
+    // Review messages are now handled by node model timing, no need for database polling
 });
 
 // ========================================
