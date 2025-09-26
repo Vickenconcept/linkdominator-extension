@@ -1116,6 +1116,38 @@ const getAudience = async (audienceId, total, filterApi, callback) => {
     }
 };
 
+// Function to check call status from database
+const getCallStatus = async (callId) => {
+    try {
+        if (!callId) {
+            console.log('⚠️ No call_id provided for status check');
+            return null;
+        }
+        
+        console.log(`🔍 Checking call status for call_id: ${callId}`);
+        
+        const response = await fetch(`${PLATFORM_URL}/api/calls/${callId}/status`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                'lk-id': linkedinId || 'vicken-concept'
+            }
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            console.log(`📊 Call status for ${callId}:`, data.call_status || data.status);
+            return data.call_status || data.status;
+        } else {
+            console.log(`⚠️ Failed to fetch call status: ${response.status}`);
+            return null;
+        }
+    } catch (error) {
+        console.error('❌ Error fetching call status:', error);
+        return null;
+    }
+};
+
 const storeCallStatus = async (callData) => {
     try {
         console.log('🔧 DEBUG: storeCallStatus called with data:', callData);
@@ -7188,6 +7220,60 @@ const checkForCallResponses = async () => {
                                     const scheduledSendAt = new Date(Date.now() + (finalReviewTime * 60 * 1000));
                                     console.log(`⏰ SCHEDULED SEND TIME: ${scheduledSendAt.toISOString()}`);
                                     
+                                    // Check call status before saving pending message
+                                    const callStatus = await getCallStatus(monitoringData.callId);
+                                    if (callStatus === 'pending_review' || callStatus === 'pending') {
+                                        // Check if there's already a pending message for this call
+                                        // First check Chrome storage
+                                        const allStorage = await chrome.storage.local.get();
+                                        const responseKeys = Object.keys(allStorage).filter(key => key.startsWith('call_response_monitoring_'));
+                                        let hasPendingMessage = false;
+                                        
+                                        for (const key of responseKeys) {
+                                            const storedData = allStorage[key];
+                                            console.log(`🔍 Checking stored data for key ${key}:`, {
+                                                callId: storedData.callId,
+                                                hasPendingMessage: !!storedData.pendingMessage,
+                                                status: storedData.status
+                                            });
+                                            if (storedData.callId === monitoringData.callId && storedData.pendingMessage) {
+                                                hasPendingMessage = true;
+                                                console.log(`⏸️ Call ${monitoringData.callId} already has a pending message in Chrome storage - skipping duplicate processing`);
+                                                console.log(`📝 Existing pending message: "${storedData.pendingMessage.substring(0, 50)}..."`);
+                                                return;
+                                            }
+                                        }
+                                        
+                                        // If not found in Chrome storage, check database
+                                        if (!hasPendingMessage) {
+                                            try {
+                                                const response = await fetch(`${PLATFORM_URL}/api/calls/${monitoringData.callId}/status`, {
+                                                    method: 'GET',
+                                                    headers: {
+                                                        'Content-Type': 'application/json',
+                                                        'lk-id': linkedinId || 'vicken-concept'
+                                                    }
+                                                });
+                                                
+                                                if (response.ok) {
+                                                    const data = await response.json();
+                                                    if (data.pending_message) {
+                                                        hasPendingMessage = true;
+                                                        console.log(`⏸️ Call ${monitoringData.callId} already has a pending message in database - skipping duplicate processing`);
+                                                        console.log(`📝 Database pending message: "${data.pending_message.substring(0, 50)}..."`);
+                                                        return;
+                                                    }
+                                                }
+                                            } catch (error) {
+                                                console.error('❌ Error checking database for pending message:', error);
+                                            }
+                                        }
+                                        
+                                        if (!hasPendingMessage) {
+                                            console.log(`⚠️ Call ${monitoringData.callId} is in ${callStatus} status, but no pending message found - processing new lead message...`);
+                                        }
+                                    }
+                                    
                                     // Save pending message to database
                                     try {
                                         const pendingResponse = await fetch(`${PLATFORM_URL}/api/calls/${monitoringData.callId}/pending-message`, {
@@ -7814,6 +7900,55 @@ const checkForCallResponses = async () => {
                                     console.log(`⏸️ REVIEW MODE ACTIVATED: Saving AI response for review (${finalReviewTime} minutes)`);
                                     const scheduledSendAt = new Date(Date.now() + (finalReviewTime * 60 * 1000));
                                     console.log(`⏰ SCHEDULED SEND TIME: ${scheduledSendAt.toISOString()}`);
+                                    
+                                    // Check call status before saving pending message
+                                    const callStatus = await getCallStatus(monitoringData.callId);
+                                    if (callStatus === 'pending_review' || callStatus === 'pending') {
+                                        // Check if there's already a pending message for this call
+                                        // First check Chrome storage
+                                        const allStorage = await chrome.storage.local.get();
+                                        const responseKeys = Object.keys(allStorage).filter(key => key.startsWith('call_response_monitoring_'));
+                                        let hasPendingMessage = false;
+                                        
+                                        for (const key of responseKeys) {
+                                            const storedData = allStorage[key];
+                                            if (storedData.callId === monitoringData.callId && storedData.pendingMessage) {
+                                                hasPendingMessage = true;
+                                                console.log(`⏸️ Call ${monitoringData.callId} already has a pending message in Chrome storage - skipping duplicate processing`);
+                                                console.log(`📝 Existing pending message: "${storedData.pendingMessage.substring(0, 50)}..."`);
+                                                return;
+                                            }
+                                        }
+                                        
+                                        // If not found in Chrome storage, check database
+                                        if (!hasPendingMessage) {
+                                            try {
+                                                const response = await fetch(`${PLATFORM_URL}/api/calls/${monitoringData.callId}/status`, {
+                                                    method: 'GET',
+                                                    headers: {
+                                                        'Content-Type': 'application/json',
+                                                        'lk-id': linkedinId || 'vicken-concept'
+                                                    }
+                                                });
+                                                
+                                                if (response.ok) {
+                                                    const data = await response.json();
+                                                    if (data.pending_message) {
+                                                        hasPendingMessage = true;
+                                                        console.log(`⏸️ Call ${monitoringData.callId} already has a pending message in database - skipping duplicate processing`);
+                                                        console.log(`📝 Database pending message: "${data.pending_message.substring(0, 50)}..."`);
+                                                        return;
+                                                    }
+                                                }
+                                            } catch (error) {
+                                                console.error('❌ Error checking database for pending message:', error);
+                                            }
+                                        }
+                                        
+                                        if (!hasPendingMessage) {
+                                            console.log(`⚠️ Call ${monitoringData.callId} is in ${callStatus} status, but no pending message found - processing new lead message...`);
+                                        }
+                                    }
                                     
                                     // Save pending message to database
                                     try {
