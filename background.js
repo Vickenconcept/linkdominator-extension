@@ -6910,14 +6910,22 @@ const checkForCallResponses = async () => {
         // console.log('🔍 Response monitoring keys:', responseKeys);
         
         for (const key of responseKeys) {
-            const monitoringData = allStorage[key];
+            let monitoringData = allStorage[key];
             console.log(`🔍 Checking monitoring data for key: ${key}`, monitoringData);
             
-            if (monitoringData.status === 'waiting_for_response') {
+            if (monitoringData.status === 'waiting_for_response' || monitoringData.status === 'pending_review') {
                 console.log(`🔍 Checking LinkedIn conversation for ${monitoringData.leadName} (Call ID: ${monitoringData.callId})`);
                 console.log(`🔍 Monitoring data status: ${monitoringData.status}`);
                 console.log(`🔍 Lead name: ${monitoringData.leadName}`);
                 console.log(`🔍 Connection ID: ${monitoringData.connectionId}`);
+                
+                // Skip processing if there's a pending message
+                if (monitoringData.status === 'pending_review') {
+                    console.log(`⏸️ SKIPPING PROCESSING: Pending message exists for ${monitoringData.leadName}`);
+                    console.log(`📝 Pending message: "${monitoringData.pendingMessage?.substring(0, 50)}..."`);
+                    console.log(`⏰ Scheduled send time: ${monitoringData.scheduledSendAt}`);
+                    continue; // Skip to next monitoring entry
+                }
                 
                 try {
                     // Check LinkedIn conversation for new messages
@@ -7012,6 +7020,34 @@ const checkForCallResponses = async () => {
                         // Only proceed with AI analysis if message is from lead
                         if (latestMessage.isFromLead) {
                             try {
+                            // CRITICAL: Refresh monitoring data from storage to get the latest status
+                            const refreshedMonitoringData = await chrome.storage.local.get([key]);
+                            if (refreshedMonitoringData[key]) {
+                                console.log(`🔄 REFRESHING MONITORING DATA BEFORE CHECK:`, {
+                                    oldStatus: monitoringData.status,
+                                    newStatus: refreshedMonitoringData[key].status,
+                                    hasPendingMessage: !!refreshedMonitoringData[key].pendingMessage,
+                                    scheduledSendAt: refreshedMonitoringData[key].scheduledSendAt
+                                });
+                                // Update the monitoring data with the refreshed data
+                                monitoringData = refreshedMonitoringData[key];
+                            }
+                            
+                            // Check if there's already a pending message for this lead FIRST
+                            console.log(`🔍 CHECKING PENDING MESSAGE STATUS:`, {
+                                status: monitoringData.status,
+                                hasPendingMessage: !!monitoringData.pendingMessage,
+                                scheduledSendAt: monitoringData.scheduledSendAt,
+                                leadName: monitoringData.leadName
+                            });
+                            
+                            if (monitoringData.status === 'pending_review') {
+                                console.log(`⏸️ Pending message already exists for ${monitoringData.leadName}, skipping ALL processing to avoid waste`);
+                                console.log(`📝 Pending message: "${monitoringData.pendingMessage?.substring(0, 50)}..."`);
+                                console.log(`⏰ Scheduled send time: ${monitoringData.scheduledSendAt}`);
+                                return; // Skip ALL processing - no storage, no AI analysis, nothing
+                            }
+
                             // Store the lead's message in conversation history
                             console.log('🔍 DEBUG: Storing conversation message with call_id:', monitoringData.callId);
                             console.log('🔍 DEBUG: Monitoring data:', monitoringData);
@@ -7174,6 +7210,22 @@ const checkForCallResponses = async () => {
                                             monitoringData.pendingMessage = suggestedResponse;
                                             monitoringData.scheduledSendAt = scheduledSendAt.toISOString();
                                             await chrome.storage.local.set({ [key]: monitoringData });
+                                            console.log(`🔄 UPDATED MONITORING DATA STATUS:`, {
+                                                status: monitoringData.status,
+                                                hasPendingMessage: !!monitoringData.pendingMessage,
+                                                scheduledSendAt: monitoringData.scheduledSendAt,
+                                                key: key
+                                            });
+                                            
+                                            // CRITICAL: Refresh monitoring data from storage to get updated status
+                                            const refreshedData = await chrome.storage.local.get([key]);
+                                            if (refreshedData[key]) {
+                                                console.log(`🔄 REFRESHED MONITORING DATA:`, {
+                                                    status: refreshedData[key].status,
+                                                    hasPendingMessage: !!refreshedData[key].pendingMessage,
+                                                    scheduledSendAt: refreshedData[key].scheduledSendAt
+                                                });
+                                            }
                                         } else if (pendingResponse.status === 404) {
                                             console.warn(`⚠️ Database column not available (404), storing in Chrome storage as fallback`);
                                             // Store in Chrome storage as fallback when database column doesn't exist
@@ -7182,6 +7234,23 @@ const checkForCallResponses = async () => {
                                             monitoringData.scheduledSendAt = scheduledSendAt.toISOString();
                                             monitoringData.storedInChrome = true; // Flag to indicate it's stored locally
                                             await chrome.storage.local.set({ [key]: monitoringData });
+                                            console.log(`🔄 UPDATED MONITORING DATA STATUS (Chrome storage):`, {
+                                                status: monitoringData.status,
+                                                hasPendingMessage: !!monitoringData.pendingMessage,
+                                                scheduledSendAt: monitoringData.scheduledSendAt,
+                                                key: key
+                                            });
+                                            
+                                            // CRITICAL: Refresh monitoring data from storage to get updated status
+                                            const refreshedData = await chrome.storage.local.get([key]);
+                                            if (refreshedData[key]) {
+                                                console.log(`🔄 REFRESHED MONITORING DATA (Chrome storage):`, {
+                                                    status: refreshedData[key].status,
+                                                    hasPendingMessage: !!refreshedData[key].pendingMessage,
+                                                    scheduledSendAt: refreshedData[key].scheduledSendAt
+                                                });
+                                            }
+                                            
                                             console.log(`✅ Pending message stored in Chrome storage for review (${finalReviewTime} minutes)`);
                                         } else {
                                             console.error(`❌ Failed to save pending message: ${pendingResponse.status}`);
@@ -7289,10 +7358,16 @@ const checkForCallResponses = async () => {
                                 } else {
                                     // Check if there's already a pending message for this lead
                                     if (monitoringData.status === 'pending_review') {
-                                        console.log(`⏸️ Pending message already exists for ${monitoringData.leadName}, skipping new message generation (Location 2)`);
-                                        console.log(`📝 Pending message: "${monitoringData.pendingMessage?.substring(0, 50)}..."`);
-                                        console.log(`⏰ Scheduled send time: ${monitoringData.scheduledSendAt}`);
-                                        return; // Skip processing this message
+                                        console.log(`🔄 Lead sent new message while pending message exists, canceling pending message and processing new message`);
+                                        console.log(`📝 Canceling pending message: "${monitoringData.pendingMessage?.substring(0, 50)}..."`);
+                                        console.log(`⏰ Was scheduled for: ${monitoringData.scheduledSendAt}`);
+                                        
+                                        // Cancel the pending message and reset status
+                                        monitoringData.status = 'response_sent';
+                                        monitoringData.pendingMessage = null;
+                                        monitoringData.scheduledSendAt = null;
+                                        await chrome.storage.local.set({ [key]: monitoringData });
+                                        console.log(`✅ Pending message canceled, processing new lead message`);
                                     }
                                     
                                     // Send AI-generated response for non-scheduling scenarios
@@ -7411,6 +7486,16 @@ const checkForCallResponses = async () => {
                     monitoringData.pendingMessage = suggestedResponse;
                     monitoringData.scheduledSendAt = scheduledSendAt.toISOString();
                     await chrome.storage.local.set({ [key]: monitoringData });
+                    
+                    // CRITICAL: Refresh monitoring data from storage to get updated status
+                    const refreshedData = await chrome.storage.local.get([key]);
+                    if (refreshedData[key]) {
+                        console.log(`🔄 REFRESHED MONITORING DATA (Location 2):`, {
+                            status: refreshedData[key].status,
+                            hasPendingMessage: !!refreshedData[key].pendingMessage,
+                            scheduledSendAt: refreshedData[key].scheduledSendAt
+                        });
+                    }
                 } else {
                     console.error(`❌ Failed to save pending message: ${pendingResponse.status}`);
                     // Fallback: send immediately if database save fails
@@ -7611,10 +7696,16 @@ const checkForCallResponses = async () => {
 
                             // Check if there's already a pending message for this lead
                             if (monitoringData.status === 'pending_review') {
-                                console.log(`⏸️ Pending message already exists for ${monitoringData.leadName}, skipping new message generation`);
-                                console.log(`📝 Pending message: "${monitoringData.pendingMessage?.substring(0, 50)}..."`);
-                                console.log(`⏰ Scheduled send time: ${monitoringData.scheduledSendAt}`);
-                                return; // Skip processing this message
+                                console.log(`🔄 Lead sent new message while pending message exists, canceling pending message and processing new message`);
+                                console.log(`📝 Canceling pending message: "${monitoringData.pendingMessage?.substring(0, 50)}..."`);
+                                console.log(`⏰ Was scheduled for: ${monitoringData.scheduledSendAt}`);
+                                
+                                // Cancel the pending message and reset status
+                                monitoringData.status = 'response_sent';
+                                monitoringData.pendingMessage = null;
+                                monitoringData.scheduledSendAt = null;
+                                await chrome.storage.local.set({ [key]: monitoringData });
+                                console.log(`✅ Pending message canceled, processing new lead message`);
                             }
 
                             // Process the call reply with AI
@@ -7746,6 +7837,16 @@ const checkForCallResponses = async () => {
                                             monitoringData.pendingMessage = aiResponse.suggested_response;
                                             monitoringData.scheduledSendAt = scheduledSendAt.toISOString();
                                             await chrome.storage.local.set({ [key]: monitoringData });
+                                            
+                                            // CRITICAL: Refresh monitoring data from storage to get updated status
+                                            const refreshedData = await chrome.storage.local.get([key]);
+                                            if (refreshedData[key]) {
+                                                console.log(`🔄 REFRESHED MONITORING DATA (Location 3):`, {
+                                                    status: refreshedData[key].status,
+                                                    hasPendingMessage: !!refreshedData[key].pendingMessage,
+                                                    scheduledSendAt: refreshedData[key].scheduledSendAt
+                                                });
+                                            }
                                         } else if (pendingResponse.status === 404) {
                                             console.warn(`⚠️ Database column not available (404), storing in Chrome storage as fallback`);
                                             // Store in Chrome storage as fallback when database column doesn't exist
@@ -7754,6 +7855,17 @@ const checkForCallResponses = async () => {
                                             monitoringData.scheduledSendAt = scheduledSendAt.toISOString();
                                             monitoringData.storedInChrome = true; // Flag to indicate it's stored locally
                                             await chrome.storage.local.set({ [key]: monitoringData });
+                                            
+                                            // CRITICAL: Refresh monitoring data from storage to get updated status
+                                            const refreshedData = await chrome.storage.local.get([key]);
+                                            if (refreshedData[key]) {
+                                                console.log(`🔄 REFRESHED MONITORING DATA (Location 3 Chrome storage):`, {
+                                                    status: refreshedData[key].status,
+                                                    hasPendingMessage: !!refreshedData[key].pendingMessage,
+                                                    scheduledSendAt: refreshedData[key].scheduledSendAt
+                                                });
+                                            }
+                                            
                                             console.log(`✅ Pending message stored in Chrome storage for review (${finalReviewTime} minutes)`);
                                         } else {
                                             console.error(`❌ Failed to save pending message: ${pendingResponse.status}`);
@@ -9372,8 +9484,8 @@ const setupAIMessageMonitoring = async (monitoringData) => {
         
     } catch (error) {
         console.error(`❌ Error setting up AI message monitoring for ${monitoringData.leadName}:`, error);
-    }
-};
+     }
+ };
 
 /**
  * Send AI-generated message
