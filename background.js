@@ -6935,7 +6935,58 @@ const checkForCallResponses = async () => {
         
         if (responseKeys.length === 0) {
             console.log('📭 No call responses to monitor');
-            return;
+            
+            // Check if there are any call_id entries that need monitoring setup
+            const callIdKeys = Object.keys(allStorage).filter(key => key.startsWith('call_id_'));
+            if (callIdKeys.length > 0) {
+                console.log('🔍 Found call_id entries that need monitoring setup:', callIdKeys);
+                
+                // Try to set up monitoring for existing call_ids
+                for (const callIdKey of callIdKeys) {
+                    const connectionId = callIdKey.replace('call_id_', '');
+                    const callId = allStorage[callIdKey];
+                    
+                    console.log(`🔧 Setting up monitoring for connection ${connectionId} with call_id ${callId}`);
+                    
+                    // Find the campaign for this connection
+                    const campaignKeys = Object.keys(allStorage).filter(key => key.startsWith('campaign_'));
+                    for (const campaignKey of campaignKeys) {
+                        const campaignData = allStorage[campaignKey];
+                        if (campaignData && campaignData.campaign) {
+                            const campaignId = campaignData.campaign.id;
+                            
+                            // Create monitoring entry
+                            const monitoringKey = `call_response_monitoring_${campaignId}_${connectionId}`;
+                            const monitoringData = {
+                                callId: callId,
+                                campaignId: campaignId,
+                                connectionId: connectionId,
+                                leadName: 'Unknown Lead', // We'll update this when we get the actual name
+                                status: 'waiting_for_response',
+                                lastCheckedMessageId: null,
+                                lastResponseSentAt: null,
+                                responseCount: 0,
+                                conversationUrnId: null
+                            };
+                            
+                            await chrome.storage.local.set({ [monitoringKey]: monitoringData });
+                            console.log(`✅ Created monitoring entry: ${monitoringKey}`);
+                        }
+                    }
+                }
+                
+                // Re-check for monitoring entries after setup
+                const newStorage = await chrome.storage.local.get();
+                const newResponseKeys = Object.keys(newStorage).filter(key => key.startsWith('call_response_monitoring_'));
+                if (newResponseKeys.length > 0) {
+                    console.log(`📊 Now found ${newResponseKeys.length} call responses to check`);
+                    // Continue with the monitoring process
+                } else {
+                    return;
+                }
+            } else {
+                return;
+            }
         }
         
         console.log(`📊 Found ${responseKeys.length} call responses to check`);
@@ -8749,6 +8800,35 @@ const checkAndSendPendingMessages = async () => {
                         const aiSuccess = await sendAIMessage(monitoringData, monitoringData.pendingMessage);
                         if (aiSuccess) {
                             console.log(`✅ Pending message sent successfully to ${monitoringData.leadName}`);
+                            
+                            // Update backend to clear pending message and scheduled_send_at
+                            if (monitoringData.callId) {
+                                try {
+                                    const linkedinIdResult = await chrome.storage.local.get(['linkedinId']);
+                                    const linkedinId = linkedinIdResult.linkedinId || 'vicken-concept';
+                                    
+                                    const updateResponse = await fetch(`${PLATFORM_URL}/api/calls/${monitoringData.callId}/update-status`, {
+                                        method: 'POST',
+                                        headers: {
+                                            'Content-Type': 'application/json',
+                                            'lk-id': linkedinId
+                                        },
+                                        body: JSON.stringify({
+                                            status: 'response_sent',
+                                            pending_message: null,
+                                            scheduled_send_at: null
+                                        })
+                                    });
+                                    
+                                    if (updateResponse.ok) {
+                                        console.log(`✅ Backend updated: cleared pending message for call ${monitoringData.callId}`);
+                                    } else {
+                                        console.error(`❌ Failed to update backend for call ${monitoringData.callId}:`, updateResponse.status);
+                                    }
+                                } catch (error) {
+                                    console.error('❌ Error updating backend after sending pending message:', error);
+                                }
+                            }
                             
                             // Update monitoring data to indicate message was sent
                             monitoringData.status = 'response_sent';
