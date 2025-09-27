@@ -6958,8 +6958,8 @@ const checkForCallResponses = async () => {
         // Deduplicate monitoring entries by connectionId - only process one per connection
         const connectionMap = new Map();
         const uniqueMonitoringEntries = [];
-        
-        for (const key of responseKeys) {
+                                        
+                                        for (const key of responseKeys) {
             const monitoringData = allStorage[key];
             
             if (!monitoringData) {
@@ -6978,7 +6978,7 @@ const checkForCallResponses = async () => {
                 connectionMap.set(connectionId, { key, monitoringData });
                 uniqueMonitoringEntries.push({ key, monitoringData });
                 console.log(`✅ CALL FLOW: Selected monitoring entry for connection ${connectionId}: ${key}`);
-            } else {
+                                            } else {
                 console.log(`⏭️ CALL FLOW: Skipping duplicate monitoring entry for connection ${connectionId}: ${key}`);
             }
         }
@@ -6990,8 +6990,8 @@ const checkForCallResponses = async () => {
                             
             // Use consolidated call flow processor
             await processCallFlow(monitoringData, key);
-                                    }
-                                } catch (error) {
+                                                }
+                                            } catch (error) {
         console.error('❌ CALL FLOW: Error checking call responses:', error);
     }
 };
@@ -8643,25 +8643,25 @@ const sendSchedulingMessage = async (monitoringData, message, calendarLink) => {
         // Store the scheduling message in conversation history
         console.log('🔍 DEBUG: Storing scheduling message in conversation history');
         if (monitoringData.callId) {
-            const result = await storeConversationMessage({
+        const result = await storeConversationMessage({
                 call_id: String(monitoringData.callId),
-                message: finalMessage,
-                sender: 'ai',
-                message_type: 'calendar_link',
-                lead_name: monitoringData.leadName,
-                connection_id: monitoringData.connectionId,
-                conversation_urn_id: monitoringData.conversationUrnId
-            });
-            
-            if (!result) {
-                console.error('❌ Failed to store scheduling message in conversation history');
-            } else {
-                // Update monitoring data with the real call_id from server response
-                if (result.call_id && result.call_id !== monitoringData.callId) {
-                    console.log('🔄 Updating monitoring data with real call_id from scheduling message:', result.call_id);
-                    monitoringData.callId = result.call_id;
-                    // Note: We can't update storage here as we don't have the key, but the next lead message will update it
-                }
+            message: finalMessage,
+            sender: 'ai',
+            message_type: 'calendar_link',
+            lead_name: monitoringData.leadName,
+            connection_id: monitoringData.connectionId,
+            conversation_urn_id: monitoringData.conversationUrnId
+        });
+        
+        if (!result) {
+            console.error('❌ Failed to store scheduling message in conversation history');
+        } else {
+            // Update monitoring data with the real call_id from server response
+            if (result.call_id && result.call_id !== monitoringData.callId) {
+                console.log('🔄 Updating monitoring data with real call_id from scheduling message:', result.call_id);
+                monitoringData.callId = result.call_id;
+                // Note: We can't update storage here as we don't have the key, but the next lead message will update it
+            }
             }
         } else {
             console.log('⚠️ No call_id available for scheduling message, skipping conversation storage');
@@ -9045,25 +9045,25 @@ const sendAIMessage = async (monitoringData, message) => {
         // Store the AI response in conversation history
         console.log('🔍 DEBUG: Storing AI response in conversation history');
         if (monitoringData.callId) {
-            const result = await storeConversationMessage({
+        const result = await storeConversationMessage({
                 call_id: String(monitoringData.callId),
-                message: message,
-                sender: 'ai',
-                message_type: 'ai_response',
-                lead_name: monitoringData.leadName,
-                connection_id: monitoringData.connectionId,
-                conversation_urn_id: monitoringData.conversationUrnId
-            });
-            
-            if (!result) {
-                console.error('❌ Failed to store AI response in conversation history');
-            } else {
-                // Update monitoring data with the real call_id from server response
-                if (result.call_id && result.call_id !== monitoringData.callId) {
-                    console.log('🔄 Updating monitoring data with real call_id from AI response:', result.call_id);
-                    monitoringData.callId = result.call_id;
-                    // Note: We can't update storage here as we don't have the key, but the next lead message will update it
-                }
+            message: message,
+            sender: 'ai',
+            message_type: 'ai_response',
+            lead_name: monitoringData.leadName,
+            connection_id: monitoringData.connectionId,
+            conversation_urn_id: monitoringData.conversationUrnId
+        });
+        
+        if (!result) {
+            console.error('❌ Failed to store AI response in conversation history');
+        } else {
+            // Update monitoring data with the real call_id from server response
+            if (result.call_id && result.call_id !== monitoringData.callId) {
+                console.log('🔄 Updating monitoring data with real call_id from AI response:', result.call_id);
+                monitoringData.callId = result.call_id;
+                // Note: We can't update storage here as we don't have the key, but the next lead message will update it
+            }
             }
         } else {
             console.log('⚠️ No call_id available for AI response, skipping conversation storage');
