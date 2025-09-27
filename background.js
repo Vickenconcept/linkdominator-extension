@@ -7762,6 +7762,16 @@ const handleSchedulingResponse = async (monitoringData, analysisResponse, latest
             const schedulingMessage = calendarData.scheduling_message || 
                 `Perfect! I'd love to schedule a call with you. Please book a convenient time here: ${calendarData.calendar_link}\n\nLooking forward to speaking with you!`;
             
+            // Check if we're in review mode for scheduling messages
+            const reviewModeResult = await handleReviewMode(monitoringData, schedulingMessage, analysisResponse, key);
+            
+            if (reviewModeResult) {
+                console.log(`⏸️ CALL FLOW: Review mode activated for scheduling message to ${monitoringData.leadName}`);
+                return;
+            }
+            
+            // Auto mode - send immediately
+            console.log(`📤 CALL FLOW: Auto mode - sending scheduling message to ${monitoringData.leadName}`);
             const schedulingSuccess = await sendSchedulingMessage(monitoringData, schedulingMessage, calendarData.calendar_link);
             if (schedulingSuccess) {
                 await updateMessageTracking(monitoringData, latestMessage.id, key);
