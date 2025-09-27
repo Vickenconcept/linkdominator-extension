@@ -467,37 +467,37 @@ const keepServiceWorkerAlive = () => {
             // Check if service worker is active by testing storage access
             await chrome.storage.local.get(['activeCampaigns']);
             
-            // Check for pending messages that are ready to send
-            await checkAndSendPendingMessages();
-            
-            // Clean up orphaned campaign data (run every 5 minutes)
-            const now = Date.now();
-            if (!lastCleanupTime || (now - lastCleanupTime) > 300000) { // 5 minutes
-                await cleanupOrphanedCampaignData();
-                lastCleanupTime = now;
-            }
-            
-            // Debug campaign storage (run every 2 minutes for debugging)
-            if (!lastDebugTime || (now - lastDebugTime) > 120000) { // 2 minutes
-                await debugCampaignStorage();
-                lastDebugTime = now;
-            }
-            
-            // Check if we have any active campaigns
-            chrome.storage.local.get(['activeCampaigns'], (result) => {
+        // Check for pending messages that are ready to send
+        await checkAndSendPendingMessages();
+        
+        // Clean up orphaned campaign data (run every 5 minutes)
+        const now = Date.now();
+        if (!lastCleanupTime || (now - lastCleanupTime) > 300000) { // 5 minutes
+            await cleanupOrphanedCampaignData();
+            lastCleanupTime = now;
+        }
+        
+        // Debug campaign storage (run every 2 minutes for debugging)
+        if (!lastDebugTime || (now - lastDebugTime) > 120000) { // 2 minutes
+            await debugCampaignStorage();
+            lastDebugTime = now;
+        }
+        
+        // Check if we have any active campaigns
+        chrome.storage.local.get(['activeCampaigns'], (result) => {
                 if (chrome.runtime.lastError) {
                     console.log('⚠️ Service worker inactive, skipping campaign check');
                     return;
                 }
-                const activeCampaigns = result.activeCampaigns || [];
-                if (activeCampaigns.length > 0) {
-                    console.log('🔄 Found active campaigns, keeping service worker alive');
-                    isServiceWorkerActive = true;
-                } else {
-                    console.log('⏸️ No active campaigns, service worker can sleep');
-                    isServiceWorkerActive = false;
-                }
-            });
+            const activeCampaigns = result.activeCampaigns || [];
+            if (activeCampaigns.length > 0) {
+                console.log('🔄 Found active campaigns, keeping service worker alive');
+                isServiceWorkerActive = true;
+            } else {
+                console.log('⏸️ No active campaigns, service worker can sleep');
+                isServiceWorkerActive = false;
+            }
+        });
         } catch (error) {
             if (error.message && error.message.includes('No SW')) {
                 console.log('⚠️ Service worker inactive, skipping keep-alive operations');
@@ -8556,25 +8556,29 @@ const sendSchedulingMessage = async (monitoringData, message, calendarLink) => {
         
         // Store the scheduling message in conversation history
         console.log('🔍 DEBUG: Storing scheduling message in conversation history');
-        const result = await storeConversationMessage({
-            call_id: monitoringData.callId ? String(monitoringData.callId) : null,
-            message: finalMessage,
-            sender: 'ai',
-            message_type: 'calendar_link',
-            lead_name: monitoringData.leadName,
-            connection_id: monitoringData.connectionId,
-            conversation_urn_id: monitoringData.conversationUrnId
-        });
-        
-        if (!result) {
-            console.error('❌ Failed to store scheduling message in conversation history');
-        } else {
-            // Update monitoring data with the real call_id from server response
-            if (result.call_id && result.call_id !== monitoringData.callId) {
-                console.log('🔄 Updating monitoring data with real call_id from scheduling message:', result.call_id);
-                monitoringData.callId = result.call_id;
-                // Note: We can't update storage here as we don't have the key, but the next lead message will update it
+        if (monitoringData.callId) {
+            const result = await storeConversationMessage({
+                call_id: String(monitoringData.callId),
+                message: finalMessage,
+                sender: 'ai',
+                message_type: 'calendar_link',
+                lead_name: monitoringData.leadName,
+                connection_id: monitoringData.connectionId,
+                conversation_urn_id: monitoringData.conversationUrnId
+            });
+            
+            if (!result) {
+                console.error('❌ Failed to store scheduling message in conversation history');
+            } else {
+                // Update monitoring data with the real call_id from server response
+                if (result.call_id && result.call_id !== monitoringData.callId) {
+                    console.log('🔄 Updating monitoring data with real call_id from scheduling message:', result.call_id);
+                    monitoringData.callId = result.call_id;
+                    // Note: We can't update storage here as we don't have the key, but the next lead message will update it
+                }
             }
+        } else {
+            console.log('⚠️ No call_id available for scheduling message, skipping conversation storage');
         }
         
         // Return success status for tracking
@@ -8954,25 +8958,29 @@ const sendAIMessage = async (monitoringData, message) => {
         
         // Store the AI response in conversation history
         console.log('🔍 DEBUG: Storing AI response in conversation history');
-        const result = await storeConversationMessage({
-            call_id: monitoringData.callId ? String(monitoringData.callId) : null,
-            message: message,
-            sender: 'ai',
-            message_type: 'ai_response',
-            lead_name: monitoringData.leadName,
-            connection_id: monitoringData.connectionId,
-            conversation_urn_id: monitoringData.conversationUrnId
-        });
-        
-        if (!result) {
-            console.error('❌ Failed to store AI response in conversation history');
-        } else {
-            // Update monitoring data with the real call_id from server response
-            if (result.call_id && result.call_id !== monitoringData.callId) {
-                console.log('🔄 Updating monitoring data with real call_id from AI response:', result.call_id);
-                monitoringData.callId = result.call_id;
-                // Note: We can't update storage here as we don't have the key, but the next lead message will update it
+        if (monitoringData.callId) {
+            const result = await storeConversationMessage({
+                call_id: String(monitoringData.callId),
+                message: message,
+                sender: 'ai',
+                message_type: 'ai_response',
+                lead_name: monitoringData.leadName,
+                connection_id: monitoringData.connectionId,
+                conversation_urn_id: monitoringData.conversationUrnId
+            });
+            
+            if (!result) {
+                console.error('❌ Failed to store AI response in conversation history');
+            } else {
+                // Update monitoring data with the real call_id from server response
+                if (result.call_id && result.call_id !== monitoringData.callId) {
+                    console.log('🔄 Updating monitoring data with real call_id from AI response:', result.call_id);
+                    monitoringData.callId = result.call_id;
+                    // Note: We can't update storage here as we don't have the key, but the next lead message will update it
+                }
             }
+        } else {
+            console.log('⚠️ No call_id available for AI response, skipping conversation storage');
         }
         
         // Set up monitoring for responses to this AI message
@@ -10154,7 +10162,58 @@ async function storeConversationMessage(messageData) {
                 messageData.call_id = String(existingCallId);
                 console.log('🔍 Using existing call_id:', messageData.call_id);
             } else {
-                console.log('🔍 No existing call_id found, creating new call record...');
+                console.log('🔍 No existing call_id found, checking backend for existing call record...');
+                
+                // Check if call record already exists in backend database
+                try {
+                    const checkResponse = await fetch(`${PLATFORM_URL}/api/calls/check-existing?connection_id=${messageData.connection_id}`, {
+                        method: 'GET',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json',
+                            'X-Requested-With': 'XMLHttpRequest',
+                            'lk-id': currentLinkedInId,
+                            'csrf-token': tokenResult.csrfToken
+                        }
+                    });
+                    
+                    if (checkResponse.ok) {
+                        const checkResult = await checkResponse.json();
+                        if (checkResult.exists && checkResult.call_id) {
+                            console.log('✅ Found existing call record in backend:', checkResult.call_id);
+                            messageData.call_id = String(checkResult.call_id);
+                            
+                            // Update monitoring data with the found call_id
+                            const allStorage = await chrome.storage.local.get();
+                            const monitoringKeys = Object.keys(allStorage).filter(key => 
+                                key.startsWith('call_response_monitoring_') && 
+                                allStorage[key].connectionId === messageData.connection_id
+                            );
+                            
+                            for (const key of monitoringKeys) {
+                                const monitoringData = allStorage[key];
+                                if (monitoringData && !monitoringData.callId) {
+                                    monitoringData.callId = messageData.call_id;
+                                    await chrome.storage.local.set({ [key]: monitoringData });
+                                    console.log(`✅ Updated monitoring data ${key} with existing call_id: ${messageData.call_id}`);
+                                }
+                            }
+                        } else {
+                            console.log('🔍 No existing call record in backend, creating new one...');
+                            // Continue to create new call record below
+                        }
+                    } else {
+                        console.log('⚠️ Could not check backend for existing call record, creating new one...');
+                        // Continue to create new call record below
+                    }
+                } catch (error) {
+                    console.log('⚠️ Error checking backend for existing call record:', error);
+                    // Continue to create new call record below
+                }
+                
+                // Only create new call record if we still don't have a call_id
+                if (!messageData.call_id) {
+                    console.log('🔍 Creating new call record...');
                 
                 try {
                 // Get campaign data for proper naming
@@ -10251,6 +10310,7 @@ async function storeConversationMessage(messageData) {
                     console.log('⚠️ Skipping conversation message storage due to call record creation error');
                     return null;
                 }
+                } // Close the if (!messageData.call_id) block
             }
         }
         
