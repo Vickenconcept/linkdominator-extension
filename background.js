@@ -6955,14 +6955,38 @@ const checkForCallResponses = async () => {
         
         console.log(`🔍 CALL FLOW: Found ${responseKeys.length} call responses to monitor`);
         
-        // Process each monitoring entry using consolidated flow
+        // Deduplicate monitoring entries by connectionId - only process one per connection
+        const connectionMap = new Map();
+        const uniqueMonitoringEntries = [];
+        
         for (const key of responseKeys) {
             const monitoringData = allStorage[key];
             
             if (!monitoringData) {
                 console.log(`⚠️ CALL FLOW: No monitoring data for key: ${key}`);
-                                continue;
-                            }
+                continue;
+            }
+            
+            const connectionId = monitoringData.connectionId;
+            if (!connectionId) {
+                console.log(`⚠️ CALL FLOW: No connectionId for key: ${key}`);
+                continue;
+            }
+            
+            // Only keep the first monitoring entry for each connection
+            if (!connectionMap.has(connectionId)) {
+                connectionMap.set(connectionId, { key, monitoringData });
+                uniqueMonitoringEntries.push({ key, monitoringData });
+                console.log(`✅ CALL FLOW: Selected monitoring entry for connection ${connectionId}: ${key}`);
+            } else {
+                console.log(`⏭️ CALL FLOW: Skipping duplicate monitoring entry for connection ${connectionId}: ${key}`);
+            }
+        }
+        
+        console.log(`🔍 CALL FLOW: Processing ${uniqueMonitoringEntries.length} unique connections`);
+        
+        // Process each unique monitoring entry using consolidated flow
+        for (const { key, monitoringData } of uniqueMonitoringEntries) {
                             
             // Use consolidated call flow processor
             await processCallFlow(monitoringData, key);
@@ -7586,8 +7610,8 @@ const processCallFlow = async (monitoringData, key) => {
         const shouldAnalyze = await shouldAnalyzeMessage(monitoringData, latestMessage);
         if (!shouldAnalyze) {
             console.log(`⏭️ CALL FLOW: Skipping analysis for ${monitoringData.leadName}`);
-            monitoringData.lastCheckedMessageId = latestMessage.id;
-            await chrome.storage.local.set({ [key]: monitoringData });
+            // Update all monitoring entries for this connection
+            await updateAllMonitoringEntriesForConnection(monitoringData.connectionId, latestMessage.id);
             return;
         }
         
@@ -7610,8 +7634,32 @@ const processCallFlow = async (monitoringData, key) => {
         // Step 8: Process response based on analysis
         await processAnalysisResponse(monitoringData, analysisResponse, latestMessage, key);
         
+        // Step 9: Update all monitoring entries for this connection to mark message as processed
+        await updateAllMonitoringEntriesForConnection(monitoringData.connectionId, latestMessage.id);
+        
     } catch (error) {
         console.error(`❌ CALL FLOW: Error processing ${monitoringData.leadName}:`, error);
+    }
+};
+
+/**
+ * Update all monitoring entries for a connection to mark a message as processed
+ */
+const updateAllMonitoringEntriesForConnection = async (connectionId, messageId) => {
+    try {
+        const allStorage = await chrome.storage.local.get();
+        const responseKeys = Object.keys(allStorage).filter(key => key.startsWith('call_response_monitoring_'));
+        
+        for (const key of responseKeys) {
+            const monitoringData = allStorage[key];
+            if (monitoringData && monitoringData.connectionId === connectionId) {
+                monitoringData.lastCheckedMessageId = messageId;
+                await chrome.storage.local.set({ [key]: monitoringData });
+                console.log(`✅ Updated monitoring entry ${key} with message ID: ${messageId}`);
+            }
+        }
+    } catch (error) {
+        console.error('❌ Error updating monitoring entries for connection:', error);
     }
 };
 
@@ -7635,6 +7683,27 @@ const shouldAnalyzeMessage = async (monitoringData, latestMessage) => {
     // Don't analyze if we already processed this message
     if (monitoringData.lastCheckedMessageId === latestMessage.id) {
         console.log(`⏭️ SKIP ANALYSIS: Already processed message for ${monitoringData.leadName}`);
+        return false;
+    }
+    
+    // Check if this message has been analyzed by any monitoring entry for this connection
+    const allStorage = await chrome.storage.local.get();
+    const responseKeys = Object.keys(allStorage).filter(key => key.startsWith('call_response_monitoring_'));
+    
+    for (const key of responseKeys) {
+        const otherMonitoringData = allStorage[key];
+        if (otherMonitoringData.connectionId === monitoringData.connectionId && 
+            otherMonitoringData.lastCheckedMessageId === latestMessage.id) {
+            console.log(`⏭️ SKIP ANALYSIS: Message already processed by another monitoring entry for ${monitoringData.leadName}`);
+            return false;
+        }
+    }
+    
+    // Check if there's a pending message for this connection (review mode)
+    const pendingMessageKey = `pending_message_${monitoringData.connectionId}`;
+    const pendingMessage = allStorage[pendingMessageKey];
+    if (pendingMessage && pendingMessage.scheduledTime && new Date(pendingMessage.scheduledTime) > new Date()) {
+        console.log(`⏭️ SKIP ANALYSIS: Pending message exists for ${monitoringData.leadName} (review mode)`);
         return false;
     }
     
@@ -7985,7 +8054,7 @@ const checkAndSendPendingMessages = async () => {
                             const linkedinId = linkedinIdResult.linkedinId || 'vicken-concept';
                             
                             console.log(`🔍 Fetching latest pending message from database for call ${monitoringData.callId}`);
-                            const fetchResponse = await fetch(`${PLATFORM_URL}/api/calls/${monitoringData.callId}`, {
+                            const fetchResponse = await fetch(`${PLATFORM_URL}/api/calls/${monitoringData.callId}/status`, {
                                 method: 'GET',
                                 headers: {
                                     'Content-Type': 'application/json',
@@ -8039,6 +8108,13 @@ const checkAndSendPendingMessages = async () => {
                                     
                                     if (updateResponse.ok) {
                                         console.log(`✅ Backend updated: cleared pending message for call ${monitoringData.callId}`);
+                                        
+                                        // Update monitoring data status to response_sent
+                                        monitoringData.status = 'response_sent';
+                                        monitoringData.pendingMessage = null;
+                                        monitoringData.scheduledSendAt = null;
+                                        await chrome.storage.local.set({ [key]: monitoringData });
+                                        console.log(`✅ Monitoring data updated: status set to response_sent for ${monitoringData.leadName}`);
                                     } else {
                                         console.error(`❌ Failed to update backend for call ${monitoringData.callId}:`, updateResponse.status);
                                     }
