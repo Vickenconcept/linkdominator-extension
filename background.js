@@ -7273,7 +7273,7 @@ const checkForCallResponses = async () => {
                                     
                                     // Check call status before saving pending message
                                     const callStatus = await getCallStatus(monitoringData.callId);
-                                    if (callStatus === 'pending_review' || callStatus === 'pending') {
+                                    if (callStatus === 'pending_review') {
                                         // Check if there's already a pending message for this call
                                         // First check Chrome storage
                                         const allStorage = await chrome.storage.local.get();
@@ -7954,7 +7954,7 @@ const checkForCallResponses = async () => {
                                     
                                     // Check call status before saving pending message
                                     const callStatus = await getCallStatus(monitoringData.callId);
-                                    if (callStatus === 'pending_review' || callStatus === 'pending') {
+                                    if (callStatus === 'pending_review') {
                                         // Check if there's already a pending message for this call
                                         // First check Chrome storage
                                         const allStorage = await chrome.storage.local.get();
@@ -8794,10 +8794,44 @@ const checkAndSendPendingMessages = async () => {
                 if (scheduledTime <= now) {
                     console.log(`⏰ Pending message ready to send for ${monitoringData.leadName}`);
                     
-                    if (monitoringData.pendingMessage) {
-                        console.log(`📤 Sending pending message: "${monitoringData.pendingMessage}"`);
+                    // Fetch the latest pending message from database to ensure we send the most current version
+                    let messageToSend = monitoringData.pendingMessage; // fallback to Chrome storage
+                    
+                    if (monitoringData.callId) {
+                        try {
+                            const linkedinIdResult = await chrome.storage.local.get(['linkedinId']);
+                            const linkedinId = linkedinIdResult.linkedinId || 'vicken-concept';
+                            
+                            console.log(`🔍 Fetching latest pending message from database for call ${monitoringData.callId}`);
+                            const fetchResponse = await fetch(`${PLATFORM_URL}/api/calls/${monitoringData.callId}`, {
+                                method: 'GET',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'lk-id': linkedinId
+                                }
+                            });
+                            
+                            if (fetchResponse.ok) {
+                                const callData = await fetchResponse.json();
+                                if (callData.pending_message) {
+                                    messageToSend = callData.pending_message;
+                                    console.log(`✅ Retrieved latest pending message from database: "${messageToSend.substring(0, 50)}..."`);
+                                } else {
+                                    console.log(`⚠️ No pending message found in database, using Chrome storage fallback`);
+                                }
+                            } else {
+                                console.warn(`⚠️ Failed to fetch from database (${fetchResponse.status}), using Chrome storage fallback`);
+                            }
+                        } catch (error) {
+                            console.error(`❌ Error fetching latest pending message from database:`, error);
+                            console.log(`📤 Using Chrome storage fallback message`);
+                        }
+                    }
+                    
+                    if (messageToSend) {
+                        console.log(`📤 Sending pending message: "${messageToSend}"`);
                         
-                        const aiSuccess = await sendAIMessage(monitoringData, monitoringData.pendingMessage);
+                        const aiSuccess = await sendAIMessage(monitoringData, messageToSend);
                         if (aiSuccess) {
                             console.log(`✅ Pending message sent successfully to ${monitoringData.leadName}`);
                             
@@ -8816,7 +8850,8 @@ const checkAndSendPendingMessages = async () => {
                                         body: JSON.stringify({
                                             status: 'response_sent',
                                             pending_message: null,
-                                            scheduled_send_at: null
+                                            scheduled_send_at: null,
+                                            sent_message: messageToSend
                                         })
                                     });
                                     
@@ -8830,10 +8865,11 @@ const checkAndSendPendingMessages = async () => {
                                 }
                             }
                             
-                            // Update monitoring data to indicate message was sent
-                            monitoringData.status = 'response_sent';
+                            // Update monitoring data to indicate message was sent (but keep original status)
                             monitoringData.pendingMessage = null;
                             monitoringData.scheduledSendAt = null;
+                            monitoringData.lastResponseSentAt = Date.now();
+                            monitoringData.responseCount = (monitoringData.responseCount || 0) + 1;
                             await chrome.storage.local.set({ [key]: monitoringData });
                         } else {
                             console.error(`❌ Failed to send pending message to ${monitoringData.leadName}`);
