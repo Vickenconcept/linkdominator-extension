@@ -10492,3 +10492,118 @@ async function clearOldCallIds() {
         console.error('❌ Error clearing old call IDs:', error);
     }
 }
+
+/**
+ * Clear all Chrome storage data (for debugging)
+ * Call this from console: clearAllStorage()
+ */
+globalThis.clearAllStorage = async function() {
+    try {
+        console.log('🧹 Starting to clear all Chrome storage...');
+        
+        // Get all storage keys
+        const allStorage = await chrome.storage.local.get();
+        const keys = Object.keys(allStorage);
+        
+        console.log(`📊 Found ${keys.length} storage keys to clear:`, keys);
+        
+        // Clear all storage
+        await chrome.storage.local.clear();
+        
+        console.log('✅ All Chrome storage cleared successfully');
+        console.log('🔄 Extension will need to reinitialize data');
+        
+        return {
+            success: true,
+            clearedKeys: keys.length,
+            message: 'All storage cleared successfully'
+        };
+    } catch (error) {
+        console.error('❌ Error clearing storage:', error);
+        return {
+            success: false,
+            error: error.message
+        };
+    }
+};
+
+/**
+ * Clear specific storage patterns (for debugging)
+ * Call this from console: clearStoragePattern('call_response_monitoring')
+ */
+globalThis.clearStoragePattern = async function(pattern) {
+    try {
+        console.log(`🧹 Starting to clear storage with pattern: ${pattern}...`);
+        
+        // Get all storage keys
+        const allStorage = await chrome.storage.local.get();
+        const keys = Object.keys(allStorage);
+        
+        // Filter keys that match the pattern
+        const matchingKeys = keys.filter(key => key.includes(pattern));
+        
+        console.log(`📊 Found ${matchingKeys.length} keys matching pattern "${pattern}":`, matchingKeys);
+        
+        if (matchingKeys.length === 0) {
+            console.log('ℹ️ No keys found matching the pattern');
+            return { success: true, clearedKeys: 0, message: 'No keys found' };
+        }
+        
+        // Remove matching keys
+        await chrome.storage.local.remove(matchingKeys);
+        
+        console.log(`✅ Cleared ${matchingKeys.length} storage keys successfully`);
+        
+        return {
+            success: true,
+            clearedKeys: matchingKeys.length,
+            clearedKeysList: matchingKeys,
+            message: `Cleared ${matchingKeys.length} keys matching "${pattern}"`
+        };
+    } catch (error) {
+        console.error('❌ Error clearing storage pattern:', error);
+        return {
+            success: false,
+            error: error.message
+        };
+    }
+};
+
+/**
+ * Show current storage usage (for debugging)
+ * Call this from console: showStorageInfo()
+ */
+globalThis.showStorageInfo = async function() {
+    try {
+        const allStorage = await chrome.storage.local.get();
+        const keys = Object.keys(allStorage);
+        
+        console.log(`📊 Storage Info:`);
+        console.log(`- Total keys: ${keys.length}`);
+        console.log(`- Keys:`, keys);
+        
+        // Group by pattern
+        const patterns = {
+            'call_response_monitoring': keys.filter(k => k.startsWith('call_response_monitoring_')),
+            'campaign_': keys.filter(k => k.startsWith('campaign_')),
+            'pending_message_': keys.filter(k => k.startsWith('pending_message_')),
+            'other': keys.filter(k => !k.startsWith('call_response_monitoring_') && !k.startsWith('campaign_') && !k.startsWith('pending_message_'))
+        };
+        
+        console.log(`📋 Storage by pattern:`);
+        Object.entries(patterns).forEach(([pattern, patternKeys]) => {
+            if (patternKeys.length > 0) {
+                console.log(`- ${pattern}: ${patternKeys.length} keys`);
+            }
+        });
+        
+        return {
+            totalKeys: keys.length,
+            patterns: patterns,
+            allKeys: keys
+        };
+    } catch (error) {
+        console.error('❌ Error getting storage info:', error);
+        return { error: error.message };
+    }
+};
