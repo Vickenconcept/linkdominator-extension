@@ -2518,7 +2518,19 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
             console.log('👁️ Executing profile view action...');
             _viewProfile(lead)
         }else if(nodeModel.value == 'follow'){
-            console.log('👥 Executing follow action...');
+            console.log('\n' + '='.repeat(80));
+            console.log('👥 FOLLOW FLOW: STARTING');
+            console.log('='.repeat(80));
+            console.log(`👤 Lead: ${lead.name}`);
+            console.log(`🔗 Connection ID: ${lead.connectionId}`);
+            console.log(`🆔 Member URN: ${lead.memberUrn || 'Not available'}`);
+            console.log(`📊 Network Distance: ${lead.networkDistance}`);
+            console.log(`🎯 Action: Follow (${nodeModel.value})`);
+            console.log(`🔧 Node key: ${nodeModel.key}`);
+            console.log(`📊 Run status: ${nodeModel.runStatus}`);
+            console.log(`⏰ Delay: ${nodeModel.delayInMinutes || 0} minutes`);
+            console.log('─'.repeat(80));
+            console.log('🚀 FOLLOW FLOW: Sending follow request...');
             _followConnection(lead)
         }else if(nodeModel.value == 'like-post'){
             console.log('👍 Executing like post action...');
@@ -3869,6 +3881,15 @@ const _viewProfile = (lead) => {
  * @param {object} lead 
  */
 const _followConnection = (lead) => {
+    console.log('─'.repeat(80));
+    console.log('🚀 FOLLOW FLOW: PREPARING REQUEST');
+    console.log('─'.repeat(80));
+    console.log(`👤 Lead: ${lead.name}`);
+    console.log(`🔗 Connection ID: ${lead.connectionId}`);
+    console.log(`🆔 Member URN: ${lead.memberUrn || 'Not available'}`);
+    console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
+    console.log('─'.repeat(80));
+    
     chrome.cookies.get({
         url: inURL,
         name: 'JSESSIONID'
@@ -3882,7 +3903,15 @@ const _followConnection = (lead) => {
     });
 
     chrome.storage.local.get(["csrfToken"]).then((result) => {
-        fetch(`${VOYAGER_API}/identity/profiles/${lead.connectionId}/profileActions?versionTag=3533619214&action=follow`, {
+        console.log('✅ CSRF token obtained for follow action');
+        
+        const apiUrl = `${VOYAGER_API}/identity/profiles/${lead.connectionId}/profileActions?versionTag=3533619214&action=follow`;
+        console.log('🌐 API URL:', apiUrl);
+        console.log('👤 Profile ID used:', lead.connectionId);
+        console.log('─'.repeat(80));
+        console.log('📤 Sending follow request...');
+        
+        fetch(apiUrl, {
             method: 'post',
             headers: {
                 'csrf-token': result.csrfToken,
@@ -3898,11 +3927,53 @@ const _followConnection = (lead) => {
                 overflowActions: []
             })
         })
-        .then(res => res.json())
         .then(res => {
-            console.log('Connection followed...')
+            console.log('─'.repeat(80));
+            console.log('📊 FOLLOW FLOW: API RESPONSE');
+            console.log('─'.repeat(80));
+            console.log(`📊 Status: ${res.status}`);
+            console.log(`👤 Lead: ${lead.name}`);
+            
+            if (res.ok) {
+                console.log('─'.repeat(80));
+                console.log('✅ FOLLOW FLOW: SUCCESS! ✅');
+                console.log('='.repeat(80));
+                console.log('🎉 Profile followed successfully!');
+                console.log(`👤 Lead: ${lead.name}`);
+                console.log(`🔗 Connection ID: ${lead.connectionId}`);
+                console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
+                console.log(`📊 Response Status: ${res.status}`);
+                console.log('='.repeat(80));
+            } else {
+                console.log('─'.repeat(80));
+                console.error('❌ FOLLOW FLOW: FAILED');
+                console.log('─'.repeat(80));
+                console.error(`❌ Status: ${res.status}`);
+                console.error(`👤 Lead: ${lead.name}`);
+                console.error(`🔗 Connection ID: ${lead.connectionId}`);
+                console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
+                console.log('💡 Possible reasons:');
+                console.log('   1. Already following this profile');
+                console.log('   2. Profile privacy settings');
+                console.log('   3. Rate limit reached');
+                console.log('   4. Invalid profile ID');
+                console.log('─'.repeat(80));
+            }
+            
+            return res.json();
         })
-        .catch(err => console.log(err))
+        .then(res => {
+            console.log('🎉 FOLLOW COMPLETED:', lead.name);
+        })
+        .catch(err => {
+            console.log('─'.repeat(80));
+            console.error('❌ FOLLOW FLOW: ERROR');
+            console.log('─'.repeat(80));
+            console.error('❌ Error:', err);
+            console.error(`👤 Lead: ${lead.name}`);
+            console.error(`🔗 Connection ID: ${lead.connectionId}`);
+            console.log('─'.repeat(80));
+        })
     })
 }
 
