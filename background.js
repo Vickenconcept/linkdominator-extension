@@ -3070,7 +3070,8 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
     }
 
     console.log('🔄 Updating sequence node model...');
-    await updateSequenceNodeModel(currentCampaign, nodeModel);
+    // Mark the current node as completed
+    await updateSequenceNodeModel(currentCampaign, { ...nodeModel, runStatus: true });
     
     // Check if this is a direct-action campaign and we need to execute the next node
     console.log('🔍 Checking if next node should be executed...');
@@ -3095,11 +3096,11 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
         
         console.log(`📋 Found sequence with ${sequenceNodes.length} nodes`);
         
-        // Find the next unrun action node
+        // Find the next unrun action node (only nodes AFTER the current one)
         const nextNode = sequenceNodes.find(node => 
             node.type === 'action' && 
             node.runStatus === false && 
-            node.key !== nodeModel.key &&
+            node.key > nodeModel.key &&  // Only find nodes AFTER current node
             node.value !== 'end'
         );
         
@@ -3133,6 +3134,31 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
             }
         } else {
             console.log('📭 No next node found - sequence completed');
+            
+            // Check if the sequence has an "end" node - if so, mark campaign as completed
+            const endNode = sequenceNodes.find(node => node.type === 'end' || node.value === 'end');
+            if (endNode) {
+                console.log('🏁 END node detected - marking campaign as completed');
+                console.log(`🔑 End node key: ${endNode.key}`);
+                
+                try {
+                    // Mark the end node as complete
+                    await updateSequenceNodeModel(currentCampaign, { ...endNode, runStatus: true });
+                    
+                    // Mark the campaign as completed
+                    await updateCampaign({
+                        campaignId: currentCampaign.id,
+                        status: 'completed'
+                    });
+                    
+                    console.log('✅ Campaign marked as COMPLETED');
+                    updateCampaignStatus('completed', 'All sequence steps completed');
+                } catch (error) {
+                    console.error('❌ Failed to mark campaign as completed:', error);
+                }
+            } else {
+                console.log('⚠️ No "end" node found in sequence - campaign will remain active');
+            }
         }
     } else {
         console.log('⚠️ Could not find sequence data in storage');
