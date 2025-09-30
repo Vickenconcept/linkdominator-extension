@@ -2515,7 +2515,19 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
             console.log(`🚀 ENDORSEMENT FLOW: Fetching skills for ${lead.name}...`);
             _getFeaturedSkill(lead, nodeModel);
         }else if(nodeModel.value == 'profile-view'){
-            console.log('👁️ Executing profile view action...');
+            console.log('\n' + '='.repeat(80));
+            console.log('👁️ PROFILE FLOW: STARTING');
+            console.log('='.repeat(80));
+            console.log(`👤 Lead: ${lead.name}`);
+            console.log(`🔗 Connection ID: ${lead.connectionId}`);
+            console.log(`🆔 Member URN: ${lead.memberUrn || 'Not available'}`);
+            console.log(`📊 Network Distance: ${lead.networkDistance}`);
+            console.log(`🎯 Action: View Profile (${nodeModel.value})`);
+            console.log(`🔧 Node key: ${nodeModel.key}`);
+            console.log(`📊 Run status: ${nodeModel.runStatus}`);
+            console.log(`⏰ Delay: ${nodeModel.delayInMinutes || 0} minutes`);
+            console.log('─'.repeat(80));
+            console.log('🚀 PROFILE FLOW: Viewing profile...');
             _viewProfile(lead)
         }else if(nodeModel.value == 'follow'){
             console.log('\n' + '='.repeat(80));
@@ -3821,6 +3833,16 @@ const _endorseConnection = (data, result) => {
  * @param {object} lead 
  */
 const _viewProfile = (lead) => {
+    console.log('─'.repeat(80));
+    console.log('🚀 PROFILE FLOW: PREPARING REQUEST');
+    console.log('─'.repeat(80));
+    console.log(`👤 Lead: ${lead.name}`);
+    console.log(`🔗 Connection ID: ${lead.connectionId}`);
+    console.log(`🆔 Member URN: ${lead.memberUrn || 'Not available'}`);
+    console.log(`📊 Network Distance: ${lead.networkDistance}`);
+    console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
+    console.log('─'.repeat(80));
+    
     chrome.cookies.get({
         url: inURL,
         name: 'JSESSIONID'
@@ -3834,7 +3856,14 @@ const _viewProfile = (lead) => {
     });
 
     chrome.storage.local.get(["csrfToken"]).then((result) => {
+        console.log('✅ CSRF token obtained for profile view action');
+        
         let targetId = lead.memberUrn.replace('urn:li:member:','')
+        
+        console.log(`🎯 Target Member ID: ${targetId}`);
+        console.log(`🌐 API URL: ${LINKEDIN_URL}/li/track`);
+        console.log('─'.repeat(80));
+        console.log('📤 Sending profile view request...');
 
         fetch(`${LINKEDIN_URL}/li/track`, {
             method: 'post',
@@ -3880,11 +3909,69 @@ const _viewProfile = (lead) => {
                 }
             }])
         })
-        .then(res => res.json())
         .then(res => {
-            console.log('Profile view...')
+            console.log('─'.repeat(80));
+            console.log('📊 PROFILE FLOW: API RESPONSE');
+            console.log('─'.repeat(80));
+            console.log(`📊 Status: ${res.status}`);
+            console.log(`👤 Lead: ${lead.name}`);
+            
+            if (res.ok) {
+                console.log('─'.repeat(80));
+                console.log('✅ PROFILE FLOW: SUCCESS! ✅');
+                console.log('='.repeat(80));
+                console.log('🎉 Profile viewed successfully!');
+                console.log(`👤 Lead: ${lead.name}`);
+                console.log(`🔗 Connection ID: ${lead.connectionId}`);
+                console.log(`🆔 Member URN: ${lead.memberUrn}`);
+                console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
+                console.log(`📊 Response Status: ${res.status}`);
+                console.log('='.repeat(80));
+            } else {
+                console.log('─'.repeat(80));
+                console.error('❌ PROFILE FLOW: FAILED');
+                console.log('─'.repeat(80));
+                console.error(`❌ Status: ${res.status}`);
+                console.error(`👤 Lead: ${lead.name}`);
+                console.error(`🔗 Connection ID: ${lead.connectionId}`);
+                console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
+                console.log('💡 Possible reasons:');
+                console.log('   1. Invalid member URN');
+                console.log('   2. Rate limit reached');
+                console.log('   3. Profile unavailable');
+                console.log('   4. Authentication issue');
+                console.log('─'.repeat(80));
+            }
+            
+            // LinkedIn's tracking API might return text on errors, handle carefully
+            if (res.ok) {
+                console.log(`🎉 PROFILE VIEW COMPLETED: ${lead.name}`);
+                return res.text().then(text => {
+                    try {
+                        return text ? JSON.parse(text) : {};
+                    } catch (e) {
+                        return {};
+                    }
+                });
+            } else {
+                return res.text().then(text => {
+                    console.log(`📄 Error response: ${text}`);
+                    return {};
+                });
+            }
         })
-        .catch(err => console.log(err))
+        .then(res => {
+            // Response already handled above
+        })
+        .catch(err => {
+            console.log('─'.repeat(80));
+            console.error('❌ PROFILE FLOW: ERROR');
+            console.log('─'.repeat(80));
+            console.error('❌ Error:', err);
+            console.error(`👤 Lead: ${lead.name}`);
+            console.error(`🔗 Connection ID: ${lead.connectionId}`);
+            console.log('─'.repeat(80));
+        })
     })
 }
 
