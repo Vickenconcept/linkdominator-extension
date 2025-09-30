@@ -746,6 +746,12 @@ let arConnectionModel = {
 
 // Missing utility functions
 const changeMessageVariableNames = (message, lead) => {
+    // Validate message is not null/undefined
+    if (!message || typeof message !== 'string') {
+        console.warn('⚠️ changeMessageVariableNames: Invalid message provided:', message);
+        return ''; // Return empty string instead of crashing
+    }
+    
     return message
         .replace(/\{firstName\}/g, lead.firstName || '')
         .replace(/\{lastName\}/g, lead.lastName || '')
@@ -1859,21 +1865,29 @@ chrome.alarms.onAlarm.addListener((alarm) => {
                 console.log('❌ No action data found for alarm:', alarm.name);
             }
         });
-    }else if(alarm.name.startsWith('fallback_')){
-        console.log('🎯 Starting general campaign alarm for:', alarm.name);
+    }else if(alarm.name.startsWith('fallback_') || alarm.name.startsWith('direct_')){
+        const campaignType = alarm.name.startsWith('direct_') ? 'direct-action' : 'fallback';
+        console.log(`🎯 Starting ${campaignType} campaign alarm for: ${alarm.name}`);
+        
         chrome.storage.local.get(["campaign","nodeModel","sequence"]).then(async (result) => {
-            console.log('Campaign', alarm.name, 'sequence is running...')
+            console.log(`Campaign ${alarm.name} sequence is running...`)
             let currentCampaign = result.campaign,
             nodeModel = result.nodeModel;
             console.log('📊 Retrieved campaign data:', currentCampaign);
             console.log('🔗 Retrieved node model:', nodeModel);
             console.log('🎯 Node action type:', nodeModel?.value);
+            console.log(`💡 Campaign type: ${campaignType}`);
+            
             try {
                 // Determine which leads to use based on action type
                 const actionType = nodeModel?.value;
-                console.log(`🔍 Action type for fallback: ${actionType}`);
+                console.log(`🔍 Action type: ${actionType}`);
                 
                 let leadsToProcess = [];
+                
+                // Check if this is a direct-action campaign (first node is NOT send-invites)
+                const isDirectActionCampaign = campaignType === 'direct-action';
+                console.log(`🔍 Is direct-action campaign: ${isDirectActionCampaign}`);
                 
                 // Actions that require connection (1st degree)
                 const requiresConnection = ['call', 'message'];
@@ -1881,7 +1895,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
                 // Actions that DON'T require connection (can be done to anyone)
                 const noConnectionRequired = ['endorse', 'follow', 'like-post', 'profile-view'];
                 
-                if (requiresConnection.includes(actionType)) {
+                if (requiresConnection.includes(actionType) && !isDirectActionCampaign) {
                     console.log(`📧 Action "${actionType}" requires connection - fetching accepted leads only`);
                     
                     // Fetch accepted leads from DB first
@@ -1916,10 +1930,11 @@ chrome.alarms.onAlarm.addListener((alarm) => {
                     
                     leadsToProcess = acceptedLeads;
                     
-                } else if (noConnectionRequired.includes(actionType)) {
+                } else if (noConnectionRequired.includes(actionType) || isDirectActionCampaign) {
                     console.log(`🌐 Action "${actionType}" does NOT require connection - fetching ALL leads`);
                     
                     // For these actions, we can use ALL campaign leads (not just accepted connections)
+                    // Also use ALL leads for direct-action campaigns (even for message/call)
                     await new Promise((resolve) => {
                         getCampaignLeads(currentCampaign.id, (leadsData) => {
                             leadsToProcess = leadsData || [];
@@ -1949,9 +1964,10 @@ chrome.alarms.onAlarm.addListener((alarm) => {
             } catch (err) {
                 console.error(`❌ Error executing ${alarm.name} sequence:`, err);
             } finally {
-                // Clear the fallback alarm to prevent repeats
+                // Clear the alarm to prevent repeats
                 chrome.alarms.clear(alarm.name);
                 console.log(`🧹 Cleared ${alarm.name} alarm after execution`);
+                console.log(`✅ ${campaignType} campaign execution completed`);
             }
         });
         return;
@@ -2112,428 +2128,13 @@ const setCampaignAlarm = async (campaign) => {
                 delayInMinutes = 0.10;
                 console.log('✅ Setting up send-invites node with 0.1 minute delay');
             }else{
-                console.log('🔄 Send-invites marked as completed, but checking if invites were actually sent...');
+                console.log('✅ Send-invites ALREADY COMPLETED - invites were sent!');
                 console.log(`📊 Node 0 (send-invites) runStatus: ${nodeModelArr[0].runStatus}`);
+                console.log('⏸️ Skipping alarm creation - waiting for acceptance check to handle next steps');
+                console.log('💡 The continuous_invite_monitoring will detect acceptances and trigger next actions');
                 
-                await getLeadGenRunning(campaign.id);
-                console.log(`📋 Found ${campaignLeadgenRunning.length} leads in campaign leadgen running`);
-                
-                // Check if we have a force flag to bypass runStatus
-                const forceResult = await chrome.storage.local.get(['forceSendInvites']);
-                if (forceResult.forceSendInvites === campaign.id) {
-                    console.log('🚀 FORCE MODE ACTIVATED: Bypassing runStatus check');
-                    console.log('🔄 Running send-invites despite runStatus = true');
-                    
-                    // Clear the force flag
-                    chrome.storage.local.remove('forceSendInvites');
-                    
-                    // Check if there's a next node available before forcing send-invites
-                    const nextNode = nodeModelArr.find(node => 
-                        node.value !== 'send-invites' && !node.runStatus
-                    );
-                    
-                    if (nextNode) {
-                        console.log(`🔄 Force mode detected, but next node available: ${nextNode.label} (${nextNode.value})`);
-                        console.log('⏭️ Skipping force send-invites, advancing to next node instead');
-                        nodeItem = nextNode;
-                        delayInMinutes = 0.10;
-                        console.log('✅ Next node set up instead of forcing send-invites');
-                    } else {
-                        // Force run send-invites only if no next node available
-                        console.log('🔧 DEBUG: Force mode - resetting send-invites to false (no next node)');
-                        nodeModelArr[0].runStatus = false; // Temporarily override
-                        nodeItem = nodeModelArr[0];
-                        delayInMinutes = 0.10;
-                        console.log('✅ Send-invites forced to run - proceeding to alarm creation');
-                    }
-                    // Don't return here, let it continue to alarm creation
-                } else {
-                    // Normal diagnostic flow
-                    console.log('🔍 DIAGNOSTIC: Checking if LinkedIn invitations were actually sent...');
-                    console.log('💡 To verify: Go to LinkedIn → My Network → Sent invitations');
-                    console.log('📅 Expected invitations sent in last 24 hours for:');
-                    
-                    // Show which leads should have invitations
-                    const uniqueLeads = campaignLeadgenRunning.filter((lead, index, arr) => 
-                        arr.findIndex(item => item.id === lead.id) === index
-                    );
-                    uniqueLeads.slice(0, 5).forEach((lead, idx) => {
-                        console.log(`   ${idx + 1}. ${lead.name} (${lead.connectionId})`);
-                    });
-                    
-                    if(uniqueLeads.length > 5) {
-                        console.log(`   ... and ${uniqueLeads.length - 5} more`);
-                    }
-                    
-                 
-                }
-                
-                if(campaignLeadgenRunning.length){
-                    // Remove duplicates based on lead ID
-                    const uniqueLeads = campaignLeadgenRunning.filter((lead, index, arr) => 
-                        arr.findIndex(item => item.id === lead.id) === index
-                    );
-                    
-                    if(uniqueLeads.length !== campaignLeadgenRunning.length) {
-                        console.log(`🔄 Removed ${campaignLeadgenRunning.length - uniqueLeads.length} duplicate leads`);
-                        console.log(`📊 Processing ${uniqueLeads.length} unique leads instead of ${campaignLeadgenRunning.length}`);
-                        campaignLeadgenRunning = uniqueLeads;
-                    }
-                    
-                    acceptedLeads = [];
-                    notAcceptedLeads = [];
-
-                    // Split leads into accepted and not accepted sent-invites
-                    console.log(`🔍 Processing ${campaignLeadgenRunning.length} unique leads from leadgen running:`);
-                    
-                    for(const [idx, lead] of campaignLeadgenRunning.entries()){
-                        // Initialize missing values if they're undefined (backend issue)
-                        if(lead.acceptedStatus === undefined || lead.acceptedStatus === null) {
-                            lead.acceptedStatus = false; // Default to not accepted
-                            console.log(`🔧 Initialized acceptedStatus to false for ${lead.name}`);
-                        }
-                        if(lead.statusLastId === undefined || lead.statusLastId === null) {
-                            lead.statusLastId = 1; // Start at step 1
-                            console.log(`🔧 Initialized statusLastId to 1 for ${lead.name}`);
-                        }
-                        
-                        console.log(`👤 Lead ${idx + 1}: ${lead.name} - Current acceptedStatus: ${lead.acceptedStatus}, statusLastId: ${lead.statusLastId}`);
-                        
-                        if(lead.acceptedStatus === false){
-                            console.log(`🌐 Checking network info for ${lead.name}...`);
-                            let networkInfo = await _getProfileNetworkInfo(lead);
-                            lead['networkDegree'] = networkInfo.data.distance.value
-                            console.log(`📊 Network degree for ${lead.name}: ${lead.networkDegree}`);
-                            await updateLeadNetworkDegree(lead)
-                            
-                            // Check if invite was accepted
-                            const wasAccepted = lead['networkDegree'] == 'DISTANCE_1';
-                            if(wasAccepted) {
-                                console.log(`🎉 INVITE ACCEPTED! ${lead.name} is now a 1st degree connection`);
-                                
-                                // Update the database to mark as accepted
-                                try {
-                                    await updateLeadGenRunning(campaign.id, lead.id || lead.connectionId, {
-                                        acceptedStatus: true,
-                                        statusLastId: 3, // 3 = accepted
-                                        currentNodeKey: lead.currentNodeKey || 0,
-                                        nextNodeKey: lead.nextNodeKey || 0
-                                    });
-                                    console.log(`✅ Database updated: ${lead.name} marked as accepted`);
-                                } catch (updateError) {
-                                    console.error(`❌ Failed to update database for ${lead.name}:`, updateError);
-                                }
-                                
-                                // Automatically create call response monitoring for accepted connections
-                                try {
-                                    const responseMonitoringKey = `call_response_monitoring_${campaign.id}_${lead.connectionId}`;
-                                    
-                                    // Get LinkedIn ID for call record creation
-                                    const linkedinIdResult = await chrome.storage.local.get(['linkedinId']);
-                                    const currentLinkedInId = linkedinIdResult.linkedinId || 'vicken-concept';
-                                    
-                                    // Get CSRF token
-                                    const tokenResult = await chrome.storage.local.get(['csrfToken']);
-                                    if (!tokenResult.csrfToken) {
-                                        console.error('❌ No CSRF token found for call record creation');
-                                        return;
-                                    }
-                                    
-                                    // Create a real call record first
-                                    let realCallId = null;
-                                    try {
-                                        const callData = {
-                                            recipient: lead.name,
-                                            profile: currentLinkedInId,
-                                            sequence: campaign.name || `Campaign ${campaign.id}`,
-                                            callStatus: 'suggested',
-                                            connection_id: lead.connectionId,
-                                            conversation_urn_id: null, // Will be updated when we fetch conversations
-                                            campaign_id: campaign.id,
-                                            campaign_name: campaign.name || `Campaign ${campaign.id}`,
-                                            original_message: 'Lead accepted connection invitation',
-                                            is_acceptance_update: true // Preserve existing conversation data
-                                        };
-                                        
-                                        const callResponse = await fetch(`${PLATFORM_URL}/api/book-call/store`, {
-                                            method: 'POST',
-                                            headers: {
-                                                'Content-Type': 'application/json',
-                                                'Accept': 'application/json',
-                                                'X-Requested-With': 'XMLHttpRequest',
-                                                'lk-id': currentLinkedInId,
-                                                'csrf-token': tokenResult.csrfToken
-                                            },
-                                            body: JSON.stringify(callData)
-                                        });
-                                        
-                                        if (callResponse.ok) {
-                                            const callContentType = callResponse.headers.get('content-type') || '';
-                                            if (callContentType.includes('application/json')) {
-                                                const callResult = await callResponse.json();
-                                                realCallId = String(callResult.call_id || callResult.id);
-                                                console.log(`✅ Created real call record for ${lead.name} with ID: ${realCallId}`);
-                                            }
-                                        }
-                                    } catch (callError) {
-                                        console.error(`❌ Failed to create call record for ${lead.name}:`, callError);
-                                    }
-                                    
-                                    await chrome.storage.local.set({ 
-                                        [responseMonitoringKey]: {
-                                            callId: realCallId, // Use real call ID from database
-                                            leadId: lead.id,
-                                            leadName: lead.name,
-                                            connectionId: lead.connectionId,
-                                            campaignId: campaign.id,
-                                            conversationUrnId: null, // Will be updated when we fetch conversations
-                                            sentAt: Date.now(),
-                                            status: 'waiting_for_response',
-                                            lastCheckedMessageId: null,
-                                            messageCount: 0,
-                                            responseCount: 0, // Track how many times we've responded
-                                            lastResponseSentAt: null // Track when we last sent a response
-                                        }
-                                    });
-                                    console.log(`📊 Auto-created response monitoring for ${lead.name}: ${responseMonitoringKey} with call_id: ${realCallId}`);
-                                } catch (monitoringError) {
-                                    console.error(`❌ Failed to create response monitoring for ${lead.name}:`, monitoringError);
-                                }
-                            }
-                            
-                            lead.acceptedStatus = wasAccepted;
-                            console.log(`✅ Updated acceptedStatus for ${lead.name}: ${lead.acceptedStatus}`);
-                        } else if(lead.acceptedStatus === true) {
-                            // Lead is already marked as accepted, verify they're still 1st degree
-                            console.log(`✅ ${lead.name} is already marked as accepted, verifying network status...`);
-                            let networkInfo = await _getProfileNetworkInfo(lead);
-                            lead['networkDegree'] = networkInfo.data.distance.value
-                            console.log(`📊 Network degree for ${lead.name}: ${lead.networkDegree}`);
-                            await updateLeadNetworkDegree(lead)
-                            
-                            // If they're still 1st degree, they're ready for the next sequence step
-                            if(lead['networkDegree'] == 'DISTANCE_1') {
-                                console.log(`🎯 ${lead.name} is confirmed 1st degree and ready for sequence execution`);
-                            } else {
-                                console.log(`⚠️ ${lead.name} is no longer 1st degree, may need re-invitation`);
-                            }
-                        }
-                        
-                        if(lead.acceptedStatus === true){
-                            acceptedLeads.push(lead)
-                            console.log(`✅ Added ${lead.name} to acceptedLeads`);
-                        }else{
-                            notAcceptedLeads.push(lead)
-                            console.log(`❌ Added ${lead.name} to notAcceptedLeads`);
-                        }
-                        await delay(10000)
-                    }
-                    
-                    console.log(`📊 Final counts - Accepted: ${acceptedLeads.length}, Not Accepted: ${notAcceptedLeads.length}`);
-                    // Set variables for accepted leads
-                    if(acceptedLeads.length){
-                        console.log(`🎯 Processing ${acceptedLeads.length} accepted leads...`);
-                        // Set node and delay properties
-                        let baseStatusId = acceptedLeads[0].statusLastId || 1; // Default to 1 if undefined
-                        statusLastId = baseStatusId + 1;
-                        console.log(`📊 Base statusLastId: ${baseStatusId}, Looking for nodes with statusLastId: ${statusLastId}`);
-                        
-                        console.log(`🔍 Analyzing node structure:`, nodeModelArr.map(node => ({
-                            key: node.key,
-                            type: node.type,
-                            value: node.value,
-                            acceptedTime: node.acceptedTime,
-                            acceptedAction: node.acceptedAction,
-                            notAcceptedTime: node.notAcceptedTime,
-                            notAcceptedAction: node.notAcceptedAction,
-                            runStatus: node.runStatus
-                        })));
-                        
-                        // Debug: Show what we're looking for vs what we have
-                        console.log(`🔍 DEBUG: Looking for nodes with statusLastId: ${statusLastId}`);
-                        console.log(`🔍 DEBUG: Available acceptedAction values:`, nodeModelArr.map(n => n.acceptedAction).filter(v => v !== undefined));
-                        console.log(`🔍 DEBUG: Available notAcceptedAction values:`, nodeModelArr.map(n => n.notAcceptedAction).filter(v => v !== undefined));
-                        
-                        // Debug: Show all action nodes and their status
-                        const actionNodes = nodeModelArr.filter(n => n.type === 'action');
-                        console.log(`🔍 DEBUG: Available action nodes:`, actionNodes.map(n => ({
-                            key: n.key,
-                            label: n.label,
-                            value: n.value,
-                            runStatus: n.runStatus
-                        })));
-                        
-                        for(let nodeModel of nodeModelArr){
-                            if(nodeModel.hasOwnProperty('acceptedTime') && nodeModel.acceptedTime == statusLastId){
-                                console.log(`⏰ Found acceptedTime node: ${nodeModel.key} - ${nodeModel.label}`);
-                                delayInMinuteAccepted = nodeModel.time == 'days' 
-                                    ? nodeModel.value * 24 * 60
-                                    : nodeModel.value * 60;
-                                console.log(`⏰ Delay set to: ${delayInMinuteAccepted} minutes`);
-                            }
-                            if(nodeModel.hasOwnProperty('acceptedAction') && nodeModel.acceptedAction == statusLastId){
-                                console.log(`🎯 Found acceptedAction node: ${nodeModel.key} - ${nodeModel.label}`);
-                                acceptedNodeItem = nodeModel
-                                currentNodeKey = nodeModel.key
-                            }
-                        }
-                        
-                        // If no node found with exact statusLastId match, try to find the next available action node
-                        if (!acceptedNodeItem) {
-                            console.log(`🔍 No exact match found for statusLastId: ${statusLastId}, looking for next available action...`);
-                            
-                            // Debug: Show all action nodes and their properties
-                            const availableActionNodes = nodeModelArr.filter(n => n.type === 'action');
-                            console.log(`🔍 DEBUG: Checking ${availableActionNodes.length} action nodes:`);
-                            availableActionNodes.forEach((node, index) => {
-                                console.log(`   ${index + 1}. Key: ${node.key}, Label: ${node.label}, Value: ${node.value}, RunStatus: ${node.runStatus}`);
-                            });
-                            
-                            for(let nodeModel of nodeModelArr){
-                                console.log(`🔍 Checking node: ${nodeModel.key} - ${nodeModel.label} (${nodeModel.value})`);
-                                console.log(`   - type: ${nodeModel.type}`);
-                                console.log(`   - runStatus: ${nodeModel.runStatus}`);
-                                console.log(`   - value: ${nodeModel.value}`);
-                                
-                                if(nodeModel.type === 'action' && nodeModel.runStatus === false && nodeModel.value !== 'send-invites'){
-                                    console.log(`🎯 FOUND MATCHING ACTION NODE: ${nodeModel.key} - ${nodeModel.label} (${nodeModel.value})`);
-                                    acceptedNodeItem = nodeModel
-                                    currentNodeKey = nodeModel.key
-                                    break;
-                                } else {
-                                    console.log(`   ❌ Skipped: type=${nodeModel.type === 'action'}, runStatus=${nodeModel.runStatus === false}, value=${nodeModel.value !== 'send-invites'}`);
-                                }
-                            }
-                        }
-                        
-                        console.log(`📋 acceptedNodeItem found:`, acceptedNodeItem ? `${acceptedNodeItem.key} - ${acceptedNodeItem.label}` : 'None');
-                        
-                        // Set alarm
-                        if(acceptedNodeItem && Object.keys(acceptedNodeItem).length){
-                            // Update leadgen status, current node keys
-                            for(let lead of acceptedLeads){
-                                const leadId = lead.id || lead.connectionId;
-                                await updateLeadGenRunning(campaign.id, leadId, {
-                                    acceptedStatus: lead.acceptedStatus,
-                                    currentNodeKey: currentNodeKey,
-                                    nextNodeKey: 0,
-                                    statusLastId: statusLastId
-                                })
-                            }
-
-                            alarmName = 'accepted_leads'
-                            campaignModel = {
-                                campaignAccepted: campaign,
-                                nodeModelAccepted: acceptedNodeItem
-                            }
-                            chrome.storage.local.set(campaignModel).then(() => {
-                                chrome.alarms.create(
-                                    alarmName, {delayInMinutes: 2} // delayInMinuteAccepted}
-                                );
-                                console.log(alarmName +" alarm is set");
-                            });
-                            
-                            // Exit function - we've set up the specific alarm
-                            console.log('✅ Accepted leads alarm created, exiting setCampaignAlarm');
-                            return;
-                        }
-                    }
-                    // Set variables for not accepted leads
-                    if(notAcceptedLeads.length){
-                        console.log(`🎯 Processing ${notAcceptedLeads.length} not accepted leads...`);
-                        // Set node and delay properties
-                        let baseStatusId = notAcceptedLeads[0].statusLastId || 1; // Default to 1 if undefined
-                        statusLastId = baseStatusId + 1;
-                        console.log(`📊 Base statusLastId: ${baseStatusId}, Looking for not-accepted nodes with statusLastId: ${statusLastId}`);
-                        
-                        for(let nodeModel of nodeModelArr){
-                            if(nodeModel.hasOwnProperty('notAcceptedTime') && nodeModel.notAcceptedTime == statusLastId){
-                                console.log(`⏰ Found notAcceptedTime node: ${nodeModel.key} - ${nodeModel.label}`);
-                                delayInMinuteNotAccepted = nodeModel.time == 'days' 
-                                    ? nodeModel.value * 24 * 60
-                                    : nodeModel.value * 60;
-                                console.log(`⏰ Not-accepted delay set to: ${delayInMinuteNotAccepted} minutes`);
-                            }
-                            if(nodeModel.hasOwnProperty('notAcceptedAction') && nodeModel.notAcceptedAction == statusLastId){
-                                console.log(`🎯 Found notAcceptedAction node: ${nodeModel.key} - ${nodeModel.label}`);
-                                notAcceptedNodeItem = nodeModel
-                                currentNodeKey = nodeModel.key
-                            }
-                        }
-                        
-                        console.log(`📋 notAcceptedNodeItem found:`, notAcceptedNodeItem ? `${notAcceptedNodeItem.key} - ${notAcceptedNodeItem.label}` : 'None');
-                        // Set alarm
-                        if(notAcceptedNodeItem && Object.keys(notAcceptedNodeItem).length){
-                            // Update leadgen status, current node keys
-                            for(let lead of notAcceptedLeads){
-                                const leadId = lead.id || lead.connectionId;
-                                await updateLeadGenRunning(campaign.id, leadId, {
-                                    acceptedStatus: lead.acceptedStatus,
-                                    currentNodeKey: currentNodeKey,
-                                    nextNodeKey: 0,
-                                    statusLastId: statusLastId
-                                })
-                            }
-
-                            alarmName = 'not_accepted_leads'
-                            campaignModel = {
-                                campaignNotAccepted: campaign,
-                                nodeModelNotAccepted: notAcceptedNodeItem
-                            }
-                            chrome.storage.local.set(campaignModel).then(() => {
-                                chrome.alarms.create(
-                                    alarmName, {delayInMinutes: 2} // delayInMinuteNotAccepted}
-                                );
-                                console.log(alarmName +" alarm is set");
-                            });
-                            
-                            // Exit function - we've set up the specific alarm
-                            console.log('✅ Not-accepted leads alarm created, exiting setCampaignAlarm');
-                            return;
-                        }
-                    }
-                } else {
-                    // Check if the send-invites node is already completed
-                    if (nodeModelArr[0].runStatus === true) {
-                        console.log('✅ Send-invites node is already completed, checking for next node...');
-                        
-                        // Find the next node after send-invites
-                        const nextNode = nodeModelArr.find(node => 
-                            node.value !== 'send-invites' && !node.runStatus
-                        );
-                        
-                        if (nextNode) {
-                            console.log(`🔄 Found next node: ${nextNode.label} (${nextNode.value})`);
-                            nodeItem = nextNode;
-                            delayInMinutes = 0.10;
-                            console.log('⏰ Setting up next node execution...');
-                        } else {
-                            console.log('❌ No next node found, campaign completed');
-                            return; // Exit without setting up alarm
-                        }
-                    } else {
-                        console.log('❌ No leads found in campaign leadgen running table!');
-                        console.log('🔍 This means either:');
-                        console.log('   1. No invites were actually sent successfully');
-                        console.log('   2. createLeadGenRunning was not called after sending invites');
-                        console.log('   3. There was an error in the invite sending process');
-                        console.log('');
-                        console.log('💡 SOLUTION: Reset the send-invites node to run again');
-                        console.log('   - The send-invites node will be reset to runStatus: false');
-                        console.log('   - This will allow invites to be sent again');
-                        
-                        // Reset the send-invites node to try again
-                        console.log('🔧 DEBUG: Resetting send-invites node to false (no leads found)');
-                        nodeModelArr[0].runStatus = false;
-                        await updateSequenceNodeModel(campaign, nodeModelArr[0]);
-                        console.log('🔧 DEBUG: Send-invites node reset to false completed');
-                        
-                        // Now set up the send-invites node to run
-                        nodeItem = nodeModelArr[0];
-                        delayInMinutes = 0.10;
-                        console.log('🔄 Reset send-invites node and scheduling it to run again');
-                    }
-                }
+                // Don't create any alarm - let the acceptance monitoring handle it
+                return;
             }
         }else if(nodeModelArr[0].value == 'like-post'){
             let nodeItemCustomLikePost;
@@ -2802,25 +2403,24 @@ const setCampaignAlarm = async (campaign) => {
             console.log('⏰ Alarm created:', alarmName, 'with 0.1 minute delay');
         });
     } else {
-        console.log('❌ No node item found or node item is empty, skipping alarm creation');
-        console.log('🔍 Possible reasons:');
-        console.log('   1. No accepted or not-accepted leads found');
-        console.log('   2. Node structure missing acceptedAction/notAcceptedAction properties');
-        console.log('   3. statusLastId not matching expected values in nodes');
+        console.log('💡 No invite-based node setup needed (campaign does not use send-invites workflow)');
+        console.log('🔍 Checking for direct-action campaign (endorse/message/follow/etc. without invites)...');
         
-        // For debugging: let's try a simpler approach - find ANY unrun action node (including first node)
-        console.log('🔄 Attempting fallback: find next unrun action node...');
-        console.log(`🔍 DEBUG: Checking ${nodeModelArr.length} nodes for fallback (starting from index 0)...`);
+        // For non-invite campaigns, find the first unrun action node and execute it directly
+        console.log(`🔍 Scanning ${nodeModelArr.length} nodes for next action to execute...`);
         
         // Start from index 0 to include the first node
         for(let i = 0; i < nodeModelArr.length; i++) {
             let node = nodeModelArr[i];
-            console.log(`🔍 Fallback check ${i}: Key: ${node.key}, Type: ${node.type}, Value: ${node.value}, RunStatus: ${node.runStatus}`);
+            console.log(`🔍 Node ${i}: Key: ${node.key}, Type: ${node.type}, Value: ${node.value}, RunStatus: ${node.runStatus}`);
             
             if(node.type === 'action' && node.runStatus === false && node.value !== 'end' && node.value !== 'add-action') {
-                console.log(`✅ Found unrun action node: ${node.key} - ${node.label} (${node.value})`);
+                console.log(`✅ Found next action to execute: ${node.key} - ${node.label} (${node.value})`);
+                console.log(`📋 Action type: ${node.value}`);
+                console.log(`💡 This is a direct-action campaign (does not require send-invites first)`);
+                
                 nodeItem = node;
-                alarmName = `fallback_${node.value}`;
+                alarmName = `direct_${node.value}`;
                 
                 // Calculate delay if there's a previous delay node
                 if(i > 0 && nodeModelArr[i-1].type === 'delay') {
@@ -2830,34 +2430,43 @@ const setCampaignAlarm = async (campaign) => {
                     console.log(`⏰ Using delay from previous node: ${delayInMinutes} minutes`);
                 } else {
                     delayInMinutes = 0.10;
-                    console.log(`⏰ No previous delay node, using default: 0.1 minutes`);
+                    console.log(`⏰ No previous delay, using immediate execution: 0.1 minutes`);
                 }
                 
                 break;
             } else {
-                console.log(`❌ Skipped: type=${node.type === 'action'}, runStatus=${node.runStatus === false}, value=${node.value !== 'end'}`);
+                console.log(`⏭️ Skipped: type=${node.type === 'action'}, runStatus=${node.runStatus === false}, value=${node.value !== 'end'}`);
             }
         }
         
         if(nodeItem) {
-            console.log('🔄 Creating fallback alarm...');
+            console.log('─'.repeat(80));
+            console.log(`🚀 Setting up direct-action campaign: ${nodeItem.value}`);
+            console.log('─'.repeat(80));
+            console.log(`📋 Action: ${nodeItem.label} (${nodeItem.value})`);
+            console.log(`⏰ Alarm name: ${alarmName}`);
+            console.log(`⏱️ Delay: ${delayInMinutes} minutes`);
+            console.log(`💡 Will use campaign_list leads (no invite tracking needed)`);
+            console.log('─'.repeat(80));
+            
             campaignModel = {
                 campaign: campaign,
                 nodeModel: nodeItem,
                 sequence: nodeModelArr // Save the full sequence array for AI mode access
             }
             chrome.storage.local.set(campaignModel).then(() => {
-                console.log('💾 Fallback campaign model saved to storage:', campaignModel);
-                console.log('🔍 Fallback sequence data saved:', nodeModelArr);
-                console.log('🔍 Fallback first node AI mode:', nodeModelArr[0]?.ai_mode);
-                console.log('🔍 Fallback first node review time:', nodeModelArr[0]?.review_time);
+                console.log('💾 Direct-action campaign model saved to storage');
+                console.log('🔍 Sequence data:', nodeModelArr.length, 'nodes');
+                console.log('🎯 Next action:', nodeItem.label);
                 chrome.alarms.create(
                     alarmName, {
                         delayInMinutes: 0.1
                     }
                 );
-                console.log('⏰ Fallback alarm created:', alarmName);
+                console.log(`⏰ Direct-action alarm created: ${alarmName}`);
             });
+        } else {
+            console.log('❌ No executable action found in campaign sequence');
         }
     }
 }
@@ -2906,15 +2515,58 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
             console.log(`🚀 ENDORSEMENT FLOW: Fetching skills for ${lead.name}...`);
             _getFeaturedSkill(lead, nodeModel);
         }else if(nodeModel.value == 'profile-view'){
-            console.log('👁️ Executing profile view action...');
+            console.log('\n' + '='.repeat(80));
+            console.log('👁️ PROFILE FLOW: STARTING');
+            console.log('='.repeat(80));
+            console.log(`👤 Lead: ${lead.name}`);
+            console.log(`🔗 Connection ID: ${lead.connectionId}`);
+            console.log(`🆔 Member URN: ${lead.memberUrn || 'Not available'}`);
+            console.log(`📊 Network Distance: ${lead.networkDistance}`);
+            console.log(`🎯 Action: View Profile (${nodeModel.value})`);
+            console.log(`🔧 Node key: ${nodeModel.key}`);
+            console.log(`📊 Run status: ${nodeModel.runStatus}`);
+            console.log(`⏰ Delay: ${nodeModel.delayInMinutes || 0} minutes`);
+            console.log('─'.repeat(80));
+            console.log('🚀 PROFILE FLOW: Viewing profile...');
             _viewProfile(lead)
         }else if(nodeModel.value == 'follow'){
-            console.log('👥 Executing follow action...');
+            console.log('\n' + '='.repeat(80));
+            console.log('👥 FOLLOW FLOW: STARTING');
+            console.log('='.repeat(80));
+            console.log(`👤 Lead: ${lead.name}`);
+            console.log(`🔗 Connection ID: ${lead.connectionId}`);
+            console.log(`🆔 Member URN: ${lead.memberUrn || 'Not available'}`);
+            console.log(`📊 Network Distance: ${lead.networkDistance}`);
+            console.log(`🎯 Action: Follow (${nodeModel.value})`);
+            console.log(`🔧 Node key: ${nodeModel.key}`);
+            console.log(`📊 Run status: ${nodeModel.runStatus}`);
+            console.log(`⏰ Delay: ${nodeModel.delayInMinutes || 0} minutes`);
+            console.log('─'.repeat(80));
+            console.log('🚀 FOLLOW FLOW: Sending follow request...');
             _followConnection(lead)
         }else if(nodeModel.value == 'like-post'){
-            console.log('👍 Executing like post action...');
+            console.log('\n' + '='.repeat(80));
+            console.log('👍 LIKE FLOW: STARTING');
+            console.log('='.repeat(80));
+            console.log(`👤 Lead: ${lead.name}`);
+            console.log(`🔗 Connection ID: ${lead.connectionId}`);
+            console.log(`🆔 Member URN: ${lead.memberUrn || 'Not available'}`);
+            console.log(`📊 Network Distance: ${lead.networkDistance}`);
+            console.log(`🎯 Action: Like Post (${nodeModel.value})`);
+            console.log(`🔧 Node key: ${nodeModel.key}`);
+            console.log(`📊 Run status: ${nodeModel.runStatus}`);
+            console.log(`⏰ Delay: ${nodeModel.delayInMinutes || 0} minutes`);
+            console.log('─'.repeat(80));
+            console.log('🚀 LIKE FLOW: Fetching posts...');
             _getProfilePosts(lead)
         }else if(['message','call'].includes(nodeModel.value)){
+            // Validate lead has required fields
+            if (!lead.connectionId) {
+                console.error(`❌ Invalid lead data - missing connectionId:`, lead);
+                console.log('⏭️ Skipping this lead (appears to be audience object, not individual lead)');
+                continue; // Skip to next lead
+            }
+            
             if(nodeModel.value == 'message'){
                 console.log('\n' + '='.repeat(80));
                 console.log('💬 MESSAGE FLOW: STARTING');
@@ -2930,6 +2582,13 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                 console.log('─'.repeat(80));
                 console.log(`📝 Message preview: ${nodeModel.message ? nodeModel.message.substring(0, 100) + '...' : 'No message'}`);
                 console.log('─'.repeat(80));
+                
+                // Validate message exists
+                if (!nodeModel.message || nodeModel.message.trim() === '') {
+                    console.error('❌ MESSAGE FLOW: No message content found in node!');
+                    console.log('⏭️ Skipping message send - message is empty');
+                    continue; // Skip to next lead
+                }
             } else {
                 console.log(`💬 Executing ${nodeModel.value} action...`);
             }
@@ -3447,9 +3106,100 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
     }
 
     console.log('🔄 Updating sequence node model...');
-    await updateSequenceNodeModel(currentCampaign, nodeModel);
-    console.log('⏰ Setting next campaign alarm...');
-    setCampaignAlarm(currentCampaign);
+    // Mark the current node as completed
+    await updateSequenceNodeModel(currentCampaign, { ...nodeModel, runStatus: true });
+    
+    // Check if this is a direct-action campaign and we need to execute the next node
+    console.log('🔍 Checking if next node should be executed...');
+    console.log(`📊 Current node: ${nodeModel.label} (${nodeModel.value})`);
+    console.log(`🔑 Current node key: ${nodeModel.key}`);
+    
+    // Get the updated sequence from storage to find next node
+    const campaignKey = `campaign_${currentCampaign.id}`;
+    const campaignData = await chrome.storage.local.get([campaignKey]);
+    
+    if (campaignData[campaignKey] && campaignData[campaignKey].sequence) {
+        // Sequence can be an array directly OR an object with nodeModel array
+        const sequenceNodes = Array.isArray(campaignData[campaignKey].sequence) 
+            ? campaignData[campaignKey].sequence 
+            : campaignData[campaignKey].sequence.nodeModel;
+        
+        if (!sequenceNodes || !Array.isArray(sequenceNodes)) {
+            console.log('⚠️ Could not find valid sequence array');
+            console.log('🎉 runSequence complete.');
+            return;
+        }
+        
+        console.log(`📋 Found sequence with ${sequenceNodes.length} nodes`);
+        
+        // Find the next unrun action node (only nodes AFTER the current one)
+        const nextNode = sequenceNodes.find(node => 
+            node.type === 'action' && 
+            node.runStatus === false && 
+            node.key > nodeModel.key &&  // Only find nodes AFTER current node
+            node.value !== 'end'
+        );
+        
+        if (nextNode) {
+            console.log(`🎯 FOUND NEXT NODE: ${nextNode.label} (${nextNode.value})`);
+            console.log(`🔑 Next node key: ${nextNode.key}`);
+            console.log(`⏰ Next node delay: ${nextNode.delayInMinutes || 0} minutes`);
+            
+            // Check if this is a direct-action campaign (first node is NOT send-invites)
+            const firstNode = sequenceNodes[0];
+            const isDirectActionCampaign = firstNode && firstNode.value !== 'send-invites';
+            
+            if (isDirectActionCampaign) {
+                console.log('💡 This is a direct-action campaign - executing next node immediately');
+                
+                // Filter out audience objects - only keep actual lead objects with connectionId
+                const validLeads = leads.filter(lead => lead.connectionId && lead.firstName);
+                console.log(`👥 Filtered leads: ${validLeads.length} valid out of ${leads.length} total`);
+                
+                if (validLeads.length > 0) {
+                    setTimeout(() => {
+                        runSequence(currentCampaign, validLeads, nextNode);
+                    }, 2000); // Small delay to allow current action to complete
+                    
+                    console.log('✅ Next node scheduled for execution');
+                } else {
+                    console.log('⚠️ No valid leads found for next node execution');
+                }
+            } else {
+                console.log('⏸️ Invite-based campaign - let continuous_invite_monitoring handle next steps');
+            }
+        } else {
+            console.log('📭 No next node found - sequence completed');
+            
+            // Check if the sequence has an "end" node - if so, mark campaign as completed
+            const endNode = sequenceNodes.find(node => node.type === 'end' || node.value === 'end');
+            if (endNode) {
+                console.log('🏁 END node detected - marking campaign as completed');
+                console.log(`🔑 End node key: ${endNode.key}`);
+                
+                try {
+                    // Mark the end node as complete
+                    await updateSequenceNodeModel(currentCampaign, { ...endNode, runStatus: true });
+                    
+                    // Mark the campaign as completed
+                    await updateCampaign({
+                        campaignId: currentCampaign.id,
+                        status: 'completed'
+                    });
+                    
+                    console.log('✅ Campaign marked as COMPLETED');
+                    updateCampaignStatus('completed', 'All sequence steps completed');
+                } catch (error) {
+                    console.error('❌ Failed to mark campaign as completed:', error);
+                }
+            } else {
+                console.log('⚠️ No "end" node found in sequence - campaign will remain active');
+            }
+        }
+    } else {
+        console.log('⚠️ Could not find sequence data in storage');
+    }
+    
     console.log('🎉 runSequence complete.');
 }
 
@@ -3778,11 +3528,41 @@ const _getFeaturedSkill =  (lead, node) => {
     });
 
     chrome.storage.local.get(["csrfToken"]).then((result) => {
-        // Use memberUrn if available, otherwise fall back to connectionId
-        const profileId = lead.memberUrn ? lead.memberUrn.replace('urn:li:member:', '') : lead.connectionId;
+        // FIXED: Use connectionId FIRST (this is what the working endorsement code uses!)
+        // Priority: connectionId > conId > publicIdentifier > extract from memberUrn
+        let profileId;
+        
+        if (lead.connectionId) {
+            profileId = lead.connectionId;
+            console.log(`✅ Using connectionId: ${profileId}`);
+        } else if (lead.conId) {
+            profileId = lead.conId;
+            console.log(`✅ Using conId: ${profileId}`);
+        } else if (lead.publicIdentifier) {
+            profileId = lead.publicIdentifier;
+            console.log(`✅ Using publicIdentifier: ${profileId}`);
+        } else if (lead.memberUrn) {
+            profileId = lead.memberUrn.replace('urn:li:member:', '');
+            console.log(`⚠️ Extracted from memberUrn (last resort): ${profileId}`);
+        } else {
+            console.error(`❌ No valid profile ID found for ${lead.name}`);
+            profileId = null;
+        }
+        
+        if (!profileId) {
+            console.error('❌ ENDORSEMENT FLOW: Cannot proceed without profile ID');
+            return;
+        }
+        
         const apiUrl = `${LINKEDIN_URL}/voyager/api/identity/profiles/${profileId}/featuredSkills?includeHiddenEndorsers=false&count=${node.totalSkills}&_=${dInt}`;
         console.log(`🌐 Fetching skills from: ${apiUrl}`);
-        console.log(`👤 Using profile ID: ${profileId} (memberUrn: ${lead.memberUrn}, connectionId: ${lead.connectionId})`);
+        console.log(`👤 Profile ID used: ${profileId}`);
+        console.log(`📊 Available ID fields:`, {
+            connectionId: lead.connectionId || 'N/A',
+            conId: lead.conId || 'N/A',
+            publicIdentifier: lead.publicIdentifier || 'N/A',
+            memberUrn: lead.memberUrn || 'N/A'
+        });
         
         fetch(apiUrl, {
             method: 'get',
@@ -3852,6 +3632,8 @@ const _getFeaturedSkill =  (lead, node) => {
                         _endorseConnection({
                             connectionId: lead.connectionId,
                             memberUrn: lead.memberUrn,
+                            conId: lead.conId, // Add conId field
+                            publicIdentifier: lead.publicIdentifier, // Add publicIdentifier field
                             entityUrn: item.entityUrn,
                             skillName: item.name,
                             leadName: lead.name
@@ -3903,11 +3685,41 @@ const _endorseConnection = (data, result) => {
     console.log(`🔗 Entity URN: ${data.entityUrn}`);
     console.log(`🆔 Member URN: ${data.memberUrn || 'Not set'}`);
     
-    // Use the same profile ID logic as in _getFeaturedSkill
-    const profileId = data.memberUrn ? data.memberUrn.replace('urn:li:member:', '') : data.connectionId;
+    // FIXED: Use connectionId FIRST (this is what the working endorsement code uses!)
+    // Priority: connectionId > conId > publicIdentifier > extract from memberUrn
+    let profileId;
+    
+    if (data.connectionId) {
+        profileId = data.connectionId;
+        console.log(`✅ Using connectionId: ${profileId}`);
+    } else if (data.conId) {
+        profileId = data.conId;
+        console.log(`✅ Using conId: ${profileId}`);
+    } else if (data.publicIdentifier) {
+        profileId = data.publicIdentifier;
+        console.log(`✅ Using publicIdentifier: ${profileId}`);
+    } else if (data.memberUrn) {
+        profileId = data.memberUrn.replace('urn:li:member:', '');
+        console.log(`⚠️ Extracted from memberUrn (last resort): ${profileId}`);
+    } else {
+        console.error(`❌ No valid profile ID found for ${data.leadName}`);
+        profileId = null;
+    }
+    
+    if (!profileId) {
+        console.error('❌ ENDORSEMENT FLOW: Cannot proceed without profile ID');
+        return;
+    }
+    
     const endorseUrl = `${VOYAGER_API}/identity/profiles/${profileId}/normEndorsements`;
     console.log(`🌐 API URL: ${endorseUrl}`);
-    console.log(`👤 Profile ID: ${profileId}`);
+    console.log(`👤 Profile ID used: ${profileId}`);
+    console.log(`📊 Available ID fields:`, {
+        connectionId: data.connectionId || 'N/A',
+        conId: data.conId || 'N/A',
+        publicIdentifier: data.publicIdentifier || 'N/A',
+        memberUrn: data.memberUrn || 'N/A'
+    });
     console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
     console.log('─'.repeat(80));
     console.log(`📤 Sending endorsement request...`);
@@ -4021,6 +3833,16 @@ const _endorseConnection = (data, result) => {
  * @param {object} lead 
  */
 const _viewProfile = (lead) => {
+    console.log('─'.repeat(80));
+    console.log('🚀 PROFILE FLOW: PREPARING REQUEST');
+    console.log('─'.repeat(80));
+    console.log(`👤 Lead: ${lead.name}`);
+    console.log(`🔗 Connection ID: ${lead.connectionId}`);
+    console.log(`🆔 Member URN: ${lead.memberUrn || 'Not available'}`);
+    console.log(`📊 Network Distance: ${lead.networkDistance}`);
+    console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
+    console.log('─'.repeat(80));
+    
     chrome.cookies.get({
         url: inURL,
         name: 'JSESSIONID'
@@ -4034,7 +3856,14 @@ const _viewProfile = (lead) => {
     });
 
     chrome.storage.local.get(["csrfToken"]).then((result) => {
+        console.log('✅ CSRF token obtained for profile view action');
+        
         let targetId = lead.memberUrn.replace('urn:li:member:','')
+        
+        console.log(`🎯 Target Member ID: ${targetId}`);
+        console.log(`🌐 API URL: ${LINKEDIN_URL}/li/track`);
+        console.log('─'.repeat(80));
+        console.log('📤 Sending profile view request...');
 
         fetch(`${LINKEDIN_URL}/li/track`, {
             method: 'post',
@@ -4080,11 +3909,69 @@ const _viewProfile = (lead) => {
                 }
             }])
         })
-        .then(res => res.json())
         .then(res => {
-            console.log('Profile view...')
+            console.log('─'.repeat(80));
+            console.log('📊 PROFILE FLOW: API RESPONSE');
+            console.log('─'.repeat(80));
+            console.log(`📊 Status: ${res.status}`);
+            console.log(`👤 Lead: ${lead.name}`);
+            
+            if (res.ok) {
+                console.log('─'.repeat(80));
+                console.log('✅ PROFILE FLOW: SUCCESS! ✅');
+                console.log('='.repeat(80));
+                console.log('🎉 Profile viewed successfully!');
+                console.log(`👤 Lead: ${lead.name}`);
+                console.log(`🔗 Connection ID: ${lead.connectionId}`);
+                console.log(`🆔 Member URN: ${lead.memberUrn}`);
+                console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
+                console.log(`📊 Response Status: ${res.status}`);
+                console.log('='.repeat(80));
+            } else {
+                console.log('─'.repeat(80));
+                console.error('❌ PROFILE FLOW: FAILED');
+                console.log('─'.repeat(80));
+                console.error(`❌ Status: ${res.status}`);
+                console.error(`👤 Lead: ${lead.name}`);
+                console.error(`🔗 Connection ID: ${lead.connectionId}`);
+                console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
+                console.log('💡 Possible reasons:');
+                console.log('   1. Invalid member URN');
+                console.log('   2. Rate limit reached');
+                console.log('   3. Profile unavailable');
+                console.log('   4. Authentication issue');
+                console.log('─'.repeat(80));
+            }
+            
+            // LinkedIn's tracking API might return text on errors, handle carefully
+            if (res.ok) {
+                console.log(`🎉 PROFILE VIEW COMPLETED: ${lead.name}`);
+                return res.text().then(text => {
+                    try {
+                        return text ? JSON.parse(text) : {};
+                    } catch (e) {
+                        return {};
+                    }
+                });
+            } else {
+                return res.text().then(text => {
+                    console.log(`📄 Error response: ${text}`);
+                    return {};
+                });
+            }
         })
-        .catch(err => console.log(err))
+        .then(res => {
+            // Response already handled above
+        })
+        .catch(err => {
+            console.log('─'.repeat(80));
+            console.error('❌ PROFILE FLOW: ERROR');
+            console.log('─'.repeat(80));
+            console.error('❌ Error:', err);
+            console.error(`👤 Lead: ${lead.name}`);
+            console.error(`🔗 Connection ID: ${lead.connectionId}`);
+            console.log('─'.repeat(80));
+        })
     })
 }
 
@@ -4093,6 +3980,15 @@ const _viewProfile = (lead) => {
  * @param {object} lead 
  */
 const _followConnection = (lead) => {
+    console.log('─'.repeat(80));
+    console.log('🚀 FOLLOW FLOW: PREPARING REQUEST');
+    console.log('─'.repeat(80));
+    console.log(`👤 Lead: ${lead.name}`);
+    console.log(`🔗 Connection ID: ${lead.connectionId}`);
+    console.log(`🆔 Member URN: ${lead.memberUrn || 'Not available'}`);
+    console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
+    console.log('─'.repeat(80));
+    
     chrome.cookies.get({
         url: inURL,
         name: 'JSESSIONID'
@@ -4106,7 +4002,15 @@ const _followConnection = (lead) => {
     });
 
     chrome.storage.local.get(["csrfToken"]).then((result) => {
-        fetch(`${VOYAGER_API}/identity/profiles/${lead.connectionId}/profileActions?versionTag=3533619214&action=follow`, {
+        console.log('✅ CSRF token obtained for follow action');
+        
+        const apiUrl = `${VOYAGER_API}/identity/profiles/${lead.connectionId}/profileActions?versionTag=3533619214&action=follow`;
+        console.log('🌐 API URL:', apiUrl);
+        console.log('👤 Profile ID used:', lead.connectionId);
+        console.log('─'.repeat(80));
+        console.log('📤 Sending follow request...');
+        
+        fetch(apiUrl, {
             method: 'post',
             headers: {
                 'csrf-token': result.csrfToken,
@@ -4122,11 +4026,53 @@ const _followConnection = (lead) => {
                 overflowActions: []
             })
         })
-        .then(res => res.json())
         .then(res => {
-            console.log('Connection followed...')
+            console.log('─'.repeat(80));
+            console.log('📊 FOLLOW FLOW: API RESPONSE');
+            console.log('─'.repeat(80));
+            console.log(`📊 Status: ${res.status}`);
+            console.log(`👤 Lead: ${lead.name}`);
+            
+            if (res.ok) {
+                console.log('─'.repeat(80));
+                console.log('✅ FOLLOW FLOW: SUCCESS! ✅');
+                console.log('='.repeat(80));
+                console.log('🎉 Profile followed successfully!');
+                console.log(`👤 Lead: ${lead.name}`);
+                console.log(`🔗 Connection ID: ${lead.connectionId}`);
+                console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
+                console.log(`📊 Response Status: ${res.status}`);
+                console.log('='.repeat(80));
+            } else {
+                console.log('─'.repeat(80));
+                console.error('❌ FOLLOW FLOW: FAILED');
+                console.log('─'.repeat(80));
+                console.error(`❌ Status: ${res.status}`);
+                console.error(`👤 Lead: ${lead.name}`);
+                console.error(`🔗 Connection ID: ${lead.connectionId}`);
+                console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
+                console.log('💡 Possible reasons:');
+                console.log('   1. Already following this profile');
+                console.log('   2. Profile privacy settings');
+                console.log('   3. Rate limit reached');
+                console.log('   4. Invalid profile ID');
+                console.log('─'.repeat(80));
+            }
+            
+            return res.json();
         })
-        .catch(err => console.log(err))
+        .then(res => {
+            console.log('🎉 FOLLOW COMPLETED:', lead.name);
+        })
+        .catch(err => {
+            console.log('─'.repeat(80));
+            console.error('❌ FOLLOW FLOW: ERROR');
+            console.log('─'.repeat(80));
+            console.error('❌ Error:', err);
+            console.error(`👤 Lead: ${lead.name}`);
+            console.error(`🔗 Connection ID: ${lead.connectionId}`);
+            console.log('─'.repeat(80));
+        })
     })
 }
 
@@ -4135,6 +4081,15 @@ const _followConnection = (lead) => {
  * @param {object} lead 
  */
 const _getProfilePosts = (lead) => {
+    console.log('─'.repeat(80));
+    console.log('🔍 LIKE FLOW: FETCHING POSTS');
+    console.log('─'.repeat(80));
+    console.log(`👤 Lead: ${lead.name}`);
+    console.log(`🔗 Connection ID: ${lead.connectionId}`);
+    console.log(`🆔 Member URN: ${lead.memberUrn || 'Not available'}`);
+    console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
+    console.log('─'.repeat(80));
+    
     chrome.cookies.get({
         url: inURL,
         name: 'JSESSIONID'
@@ -4148,8 +4103,14 @@ const _getProfilePosts = (lead) => {
     });
 
     chrome.storage.local.get(["csrfToken"]).then((result) => {
+        console.log('✅ CSRF token obtained for like post action');
+        
         let params = `count=1&start=0&q=memberShareFeed&moduleKey=member-shares%3Aphone&profileUrn=urn%3Ali%3Afsd_profile%3A${lead.connectionId}`
         let url = `${VOYAGER_API}/identity/profileUpdatesV2?${params}`
+        
+        console.log('🌐 Fetching posts from:', url);
+        console.log(`👤 Profile ID used: ${lead.connectionId}`);
+        console.log('─'.repeat(80));
 
         fetch(url, {
             headers: {
@@ -4164,23 +4125,61 @@ const _getProfilePosts = (lead) => {
         })
         .then(res => res.json())
         .then(res => {
-            console.log('get connection post...')
-            if(res.elements.length){
-                for(let item of res.elements){
-                    _likePost(item, result)
+            console.log('─'.repeat(80));
+            console.log('📋 LIKE FLOW: POSTS API RESPONSE');
+            console.log('─'.repeat(80));
+            console.log(`📊 Response received for: ${lead.name}`);
+            console.log(`📊 Posts found: ${res.elements?.length || 0}`);
+            
+            if(res.elements && res.elements.length){
+                console.log('─'.repeat(80));
+                console.log(`✅ LIKE FLOW: ${res.elements.length} POST(S) FOUND`);
+                console.log('─'.repeat(80));
+                console.log('🚀 LIKE FLOW: STARTING TO LIKE POSTS');
+                console.log('─'.repeat(80));
+                
+                for(let [idx, item] of res.elements.entries()){
+                    console.log(`\n📝 Liking post ${idx + 1}/${res.elements.length}:`);
+                    console.log(`   🔗 Post URN: ${item.socialDetail?.urn || 'N/A'}`);
+                    _likePost(item, result, lead)
                 }
+            } else {
+                console.log('─'.repeat(80));
+                console.log('⚠️ LIKE FLOW: NO POSTS FOUND');
+                console.log('─'.repeat(80));
+                console.log(`👤 Lead: ${lead.name}`);
+                console.log('💡 This user may not have any recent posts');
+                console.log('─'.repeat(80));
             }
         })
-        .catch(err => console.log(err))
+        .catch(err => {
+            console.log('─'.repeat(80));
+            console.error('❌ LIKE FLOW: ERROR FETCHING POSTS');
+            console.log('─'.repeat(80));
+            console.error('❌ Error:', err);
+            console.error(`👤 Lead: ${lead.name}`);
+            console.error(`🔗 Connection ID: ${lead.connectionId}`);
+            console.log('─'.repeat(80));
+        })
     })
 }
 
 /**
  * Like post for a given LinkedIn profile.
- * @param {object} lead 
+ * @param {object} post 
  * @param {object} result 
+ * @param {object} lead 
  */
-const _likePost = (post, result) => {
+const _likePost = (post, result, lead) => {
+    console.log('─'.repeat(80));
+    console.log('🚀 LIKE FLOW: LIKING POST');
+    console.log('─'.repeat(80));
+    console.log(`👤 Lead: ${lead?.name || 'Unknown'}`);
+    console.log(`🔗 Post URN: ${post.socialDetail?.urn || 'N/A'}`);
+    console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
+    console.log('─'.repeat(80));
+    console.log('📤 Sending like request...');
+    
     fetch(`${VOYAGER_API}/feed/reactions`, {
         method: 'post',
         headers: {
@@ -4197,11 +4196,60 @@ const _likePost = (post, result) => {
             reactionType: 'LIKE'
         })
     })
-    .then(res => res.json())
     .then(res => {
-        console.log('post liked...')
+        console.log('─'.repeat(80));
+        console.log('📊 LIKE FLOW: API RESPONSE');
+        console.log('─'.repeat(80));
+        console.log(`📊 Status: ${res.status}`);
+        console.log(`👤 Lead: ${lead?.name || 'Unknown'}`);
+        console.log(`🔗 Post URN: ${post.socialDetail?.urn || 'N/A'}`);
+        
+        if (res.ok) {
+            console.log('─'.repeat(80));
+            console.log('✅ LIKE FLOW: SUCCESS! ✅');
+            console.log('='.repeat(80));
+            console.log('🎉 Post liked successfully!');
+            console.log(`👤 Lead: ${lead?.name || 'Unknown'}`);
+            console.log(`🔗 Post URN: ${post.socialDetail?.urn || 'N/A'}`);
+            console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
+            console.log(`📊 Response Status: ${res.status}`);
+            console.log('='.repeat(80));
+        } else {
+            console.log('─'.repeat(80));
+            console.error('❌ LIKE FLOW: FAILED');
+            console.log('─'.repeat(80));
+            console.error(`❌ Status: ${res.status}`);
+            console.error(`👤 Lead: ${lead?.name || 'Unknown'}`);
+            console.error(`🔗 Post URN: ${post.socialDetail?.urn || 'N/A'}`);
+            console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
+            console.log('💡 Possible reasons:');
+            console.log('   1. Already liked this post');
+            console.log('   2. Post was deleted');
+            console.log('   3. Rate limit reached');
+            console.log('   4. Invalid post URN');
+            console.log('─'.repeat(80));
+        }
+        
+        // LinkedIn's like API returns empty response on success, so don't parse JSON
+        if (res.ok) {
+            console.log(`🎉 LIKE COMPLETED for ${lead?.name || 'Unknown'}`);
+            return Promise.resolve();
+        } else {
+            return res.json();
+        }
     })
-    .catch(err => console.log(err))
+    .then(res => {
+        // Response already handled above
+    })
+    .catch(err => {
+        console.log('─'.repeat(80));
+        console.error('❌ LIKE FLOW: ERROR');
+        console.log('─'.repeat(80));
+        console.error('❌ Error:', err);
+        console.error(`👤 Lead: ${lead?.name || 'Unknown'}`);
+        console.error(`🔗 Post URN: ${post.socialDetail?.urn || 'N/A'}`);
+        console.log('─'.repeat(80));
+    })
 }
 /**
  * Send connection request to a given LinkedIn profile.
