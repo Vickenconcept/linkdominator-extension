@@ -2533,7 +2533,19 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
             console.log('🚀 FOLLOW FLOW: Sending follow request...');
             _followConnection(lead)
         }else if(nodeModel.value == 'like-post'){
-            console.log('👍 Executing like post action...');
+            console.log('\n' + '='.repeat(80));
+            console.log('👍 LIKE FLOW: STARTING');
+            console.log('='.repeat(80));
+            console.log(`👤 Lead: ${lead.name}`);
+            console.log(`🔗 Connection ID: ${lead.connectionId}`);
+            console.log(`🆔 Member URN: ${lead.memberUrn || 'Not available'}`);
+            console.log(`📊 Network Distance: ${lead.networkDistance}`);
+            console.log(`🎯 Action: Like Post (${nodeModel.value})`);
+            console.log(`🔧 Node key: ${nodeModel.key}`);
+            console.log(`📊 Run status: ${nodeModel.runStatus}`);
+            console.log(`⏰ Delay: ${nodeModel.delayInMinutes || 0} minutes`);
+            console.log('─'.repeat(80));
+            console.log('🚀 LIKE FLOW: Fetching posts...');
             _getProfilePosts(lead)
         }else if(['message','call'].includes(nodeModel.value)){
             // Validate lead has required fields
@@ -3982,6 +3994,15 @@ const _followConnection = (lead) => {
  * @param {object} lead 
  */
 const _getProfilePosts = (lead) => {
+    console.log('─'.repeat(80));
+    console.log('🔍 LIKE FLOW: FETCHING POSTS');
+    console.log('─'.repeat(80));
+    console.log(`👤 Lead: ${lead.name}`);
+    console.log(`🔗 Connection ID: ${lead.connectionId}`);
+    console.log(`🆔 Member URN: ${lead.memberUrn || 'Not available'}`);
+    console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
+    console.log('─'.repeat(80));
+    
     chrome.cookies.get({
         url: inURL,
         name: 'JSESSIONID'
@@ -3995,8 +4016,14 @@ const _getProfilePosts = (lead) => {
     });
 
     chrome.storage.local.get(["csrfToken"]).then((result) => {
+        console.log('✅ CSRF token obtained for like post action');
+        
         let params = `count=1&start=0&q=memberShareFeed&moduleKey=member-shares%3Aphone&profileUrn=urn%3Ali%3Afsd_profile%3A${lead.connectionId}`
         let url = `${VOYAGER_API}/identity/profileUpdatesV2?${params}`
+        
+        console.log('🌐 Fetching posts from:', url);
+        console.log(`👤 Profile ID used: ${lead.connectionId}`);
+        console.log('─'.repeat(80));
 
         fetch(url, {
             headers: {
@@ -4011,23 +4038,61 @@ const _getProfilePosts = (lead) => {
         })
         .then(res => res.json())
         .then(res => {
-            console.log('get connection post...')
-            if(res.elements.length){
-                for(let item of res.elements){
-                    _likePost(item, result)
+            console.log('─'.repeat(80));
+            console.log('📋 LIKE FLOW: POSTS API RESPONSE');
+            console.log('─'.repeat(80));
+            console.log(`📊 Response received for: ${lead.name}`);
+            console.log(`📊 Posts found: ${res.elements?.length || 0}`);
+            
+            if(res.elements && res.elements.length){
+                console.log('─'.repeat(80));
+                console.log(`✅ LIKE FLOW: ${res.elements.length} POST(S) FOUND`);
+                console.log('─'.repeat(80));
+                console.log('🚀 LIKE FLOW: STARTING TO LIKE POSTS');
+                console.log('─'.repeat(80));
+                
+                for(let [idx, item] of res.elements.entries()){
+                    console.log(`\n📝 Liking post ${idx + 1}/${res.elements.length}:`);
+                    console.log(`   🔗 Post URN: ${item.socialDetail?.urn || 'N/A'}`);
+                    _likePost(item, result, lead)
                 }
+            } else {
+                console.log('─'.repeat(80));
+                console.log('⚠️ LIKE FLOW: NO POSTS FOUND');
+                console.log('─'.repeat(80));
+                console.log(`👤 Lead: ${lead.name}`);
+                console.log('💡 This user may not have any recent posts');
+                console.log('─'.repeat(80));
             }
         })
-        .catch(err => console.log(err))
+        .catch(err => {
+            console.log('─'.repeat(80));
+            console.error('❌ LIKE FLOW: ERROR FETCHING POSTS');
+            console.log('─'.repeat(80));
+            console.error('❌ Error:', err);
+            console.error(`👤 Lead: ${lead.name}`);
+            console.error(`🔗 Connection ID: ${lead.connectionId}`);
+            console.log('─'.repeat(80));
+        })
     })
 }
 
 /**
  * Like post for a given LinkedIn profile.
- * @param {object} lead 
+ * @param {object} post 
  * @param {object} result 
+ * @param {object} lead 
  */
-const _likePost = (post, result) => {
+const _likePost = (post, result, lead) => {
+    console.log('─'.repeat(80));
+    console.log('🚀 LIKE FLOW: LIKING POST');
+    console.log('─'.repeat(80));
+    console.log(`👤 Lead: ${lead?.name || 'Unknown'}`);
+    console.log(`🔗 Post URN: ${post.socialDetail?.urn || 'N/A'}`);
+    console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
+    console.log('─'.repeat(80));
+    console.log('📤 Sending like request...');
+    
     fetch(`${VOYAGER_API}/feed/reactions`, {
         method: 'post',
         headers: {
@@ -4044,11 +4109,60 @@ const _likePost = (post, result) => {
             reactionType: 'LIKE'
         })
     })
-    .then(res => res.json())
     .then(res => {
-        console.log('post liked...')
+        console.log('─'.repeat(80));
+        console.log('📊 LIKE FLOW: API RESPONSE');
+        console.log('─'.repeat(80));
+        console.log(`📊 Status: ${res.status}`);
+        console.log(`👤 Lead: ${lead?.name || 'Unknown'}`);
+        console.log(`🔗 Post URN: ${post.socialDetail?.urn || 'N/A'}`);
+        
+        if (res.ok) {
+            console.log('─'.repeat(80));
+            console.log('✅ LIKE FLOW: SUCCESS! ✅');
+            console.log('='.repeat(80));
+            console.log('🎉 Post liked successfully!');
+            console.log(`👤 Lead: ${lead?.name || 'Unknown'}`);
+            console.log(`🔗 Post URN: ${post.socialDetail?.urn || 'N/A'}`);
+            console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
+            console.log(`📊 Response Status: ${res.status}`);
+            console.log('='.repeat(80));
+        } else {
+            console.log('─'.repeat(80));
+            console.error('❌ LIKE FLOW: FAILED');
+            console.log('─'.repeat(80));
+            console.error(`❌ Status: ${res.status}`);
+            console.error(`👤 Lead: ${lead?.name || 'Unknown'}`);
+            console.error(`🔗 Post URN: ${post.socialDetail?.urn || 'N/A'}`);
+            console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
+            console.log('💡 Possible reasons:');
+            console.log('   1. Already liked this post');
+            console.log('   2. Post was deleted');
+            console.log('   3. Rate limit reached');
+            console.log('   4. Invalid post URN');
+            console.log('─'.repeat(80));
+        }
+        
+        // LinkedIn's like API returns empty response on success, so don't parse JSON
+        if (res.ok) {
+            console.log(`🎉 LIKE COMPLETED for ${lead?.name || 'Unknown'}`);
+            return Promise.resolve();
+        } else {
+            return res.json();
+        }
     })
-    .catch(err => console.log(err))
+    .then(res => {
+        // Response already handled above
+    })
+    .catch(err => {
+        console.log('─'.repeat(80));
+        console.error('❌ LIKE FLOW: ERROR');
+        console.log('─'.repeat(80));
+        console.error('❌ Error:', err);
+        console.error(`👤 Lead: ${lead?.name || 'Unknown'}`);
+        console.error(`🔗 Post URN: ${post.socialDetail?.urn || 'N/A'}`);
+        console.log('─'.repeat(80));
+    })
 }
 /**
  * Send connection request to a given LinkedIn profile.
