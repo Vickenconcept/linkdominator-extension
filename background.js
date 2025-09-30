@@ -746,6 +746,12 @@ let arConnectionModel = {
 
 // Missing utility functions
 const changeMessageVariableNames = (message, lead) => {
+    // Validate message is not null/undefined
+    if (!message || typeof message !== 'string') {
+        console.warn('⚠️ changeMessageVariableNames: Invalid message provided:', message);
+        return ''; // Return empty string instead of crashing
+    }
+    
     return message
         .replace(/\{firstName\}/g, lead.firstName || '')
         .replace(/\{lastName\}/g, lead.lastName || '')
@@ -1879,13 +1885,17 @@ chrome.alarms.onAlarm.addListener((alarm) => {
                 
                 let leadsToProcess = [];
                 
+                // Check if this is a direct-action campaign (first node is NOT send-invites)
+                const isDirectActionCampaign = campaignType === 'direct-action';
+                console.log(`🔍 Is direct-action campaign: ${isDirectActionCampaign}`);
+                
                 // Actions that require connection (1st degree)
                 const requiresConnection = ['call', 'message'];
                 
                 // Actions that DON'T require connection (can be done to anyone)
                 const noConnectionRequired = ['endorse', 'follow', 'like-post', 'profile-view'];
                 
-                if (requiresConnection.includes(actionType)) {
+                if (requiresConnection.includes(actionType) && !isDirectActionCampaign) {
                     console.log(`📧 Action "${actionType}" requires connection - fetching accepted leads only`);
                     
                     // Fetch accepted leads from DB first
@@ -1920,10 +1930,11 @@ chrome.alarms.onAlarm.addListener((alarm) => {
                     
                     leadsToProcess = acceptedLeads;
                     
-                } else if (noConnectionRequired.includes(actionType)) {
+                } else if (noConnectionRequired.includes(actionType) || isDirectActionCampaign) {
                     console.log(`🌐 Action "${actionType}" does NOT require connection - fetching ALL leads`);
                     
                     // For these actions, we can use ALL campaign leads (not just accepted connections)
+                    // Also use ALL leads for direct-action campaigns (even for message/call)
                     await new Promise((resolve) => {
                         getCampaignLeads(currentCampaign.id, (leadsData) => {
                             leadsToProcess = leadsData || [];
@@ -2513,6 +2524,13 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
             console.log('👍 Executing like post action...');
             _getProfilePosts(lead)
         }else if(['message','call'].includes(nodeModel.value)){
+            // Validate lead has required fields
+            if (!lead.connectionId) {
+                console.error(`❌ Invalid lead data - missing connectionId:`, lead);
+                console.log('⏭️ Skipping this lead (appears to be audience object, not individual lead)');
+                continue; // Skip to next lead
+            }
+            
             if(nodeModel.value == 'message'){
                 console.log('\n' + '='.repeat(80));
                 console.log('💬 MESSAGE FLOW: STARTING');
@@ -2528,6 +2546,13 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                 console.log('─'.repeat(80));
                 console.log(`📝 Message preview: ${nodeModel.message ? nodeModel.message.substring(0, 100) + '...' : 'No message'}`);
                 console.log('─'.repeat(80));
+                
+                // Validate message exists
+                if (!nodeModel.message || nodeModel.message.trim() === '') {
+                    console.error('❌ MESSAGE FLOW: No message content found in node!');
+                    console.log('⏭️ Skipping message send - message is empty');
+                    continue; // Skip to next lead
+                }
             } else {
                 console.log(`💬 Executing ${nodeModel.value} action...`);
             }
@@ -3047,8 +3072,72 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
     console.log('🔄 Updating sequence node model...');
     await updateSequenceNodeModel(currentCampaign, nodeModel);
     
-    // Don't recreate campaign alarm - let continuous_invite_monitoring handle next steps
-    console.log('⏸️ Skipping alarm recreation - continuous_invite_monitoring will handle next actions');
+    // Check if this is a direct-action campaign and we need to execute the next node
+    console.log('🔍 Checking if next node should be executed...');
+    console.log(`📊 Current node: ${nodeModel.label} (${nodeModel.value})`);
+    console.log(`🔑 Current node key: ${nodeModel.key}`);
+    
+    // Get the updated sequence from storage to find next node
+    const campaignKey = `campaign_${currentCampaign.id}`;
+    const campaignData = await chrome.storage.local.get([campaignKey]);
+    
+    if (campaignData[campaignKey] && campaignData[campaignKey].sequence) {
+        // Sequence can be an array directly OR an object with nodeModel array
+        const sequenceNodes = Array.isArray(campaignData[campaignKey].sequence) 
+            ? campaignData[campaignKey].sequence 
+            : campaignData[campaignKey].sequence.nodeModel;
+        
+        if (!sequenceNodes || !Array.isArray(sequenceNodes)) {
+            console.log('⚠️ Could not find valid sequence array');
+            console.log('🎉 runSequence complete.');
+            return;
+        }
+        
+        console.log(`📋 Found sequence with ${sequenceNodes.length} nodes`);
+        
+        // Find the next unrun action node
+        const nextNode = sequenceNodes.find(node => 
+            node.type === 'action' && 
+            node.runStatus === false && 
+            node.key !== nodeModel.key &&
+            node.value !== 'end'
+        );
+        
+        if (nextNode) {
+            console.log(`🎯 FOUND NEXT NODE: ${nextNode.label} (${nextNode.value})`);
+            console.log(`🔑 Next node key: ${nextNode.key}`);
+            console.log(`⏰ Next node delay: ${nextNode.delayInMinutes || 0} minutes`);
+            
+            // Check if this is a direct-action campaign (first node is NOT send-invites)
+            const firstNode = sequenceNodes[0];
+            const isDirectActionCampaign = firstNode && firstNode.value !== 'send-invites';
+            
+            if (isDirectActionCampaign) {
+                console.log('💡 This is a direct-action campaign - executing next node immediately');
+                
+                // Filter out audience objects - only keep actual lead objects with connectionId
+                const validLeads = leads.filter(lead => lead.connectionId && lead.firstName);
+                console.log(`👥 Filtered leads: ${validLeads.length} valid out of ${leads.length} total`);
+                
+                if (validLeads.length > 0) {
+                    setTimeout(() => {
+                        runSequence(currentCampaign, validLeads, nextNode);
+                    }, 2000); // Small delay to allow current action to complete
+                    
+                    console.log('✅ Next node scheduled for execution');
+                } else {
+                    console.log('⚠️ No valid leads found for next node execution');
+                }
+            } else {
+                console.log('⏸️ Invite-based campaign - let continuous_invite_monitoring handle next steps');
+            }
+        } else {
+            console.log('📭 No next node found - sequence completed');
+        }
+    } else {
+        console.log('⚠️ Could not find sequence data in storage');
+    }
+    
     console.log('🎉 runSequence complete.');
 }
 
