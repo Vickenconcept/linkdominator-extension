@@ -1739,72 +1739,99 @@ chrome.alarms.onAlarm.addListener((alarm) => {
         // console.log('🕐 Alarm fired at:', new Date().toLocaleTimeString());
         checkAllCampaignsForAcceptances();
     }else if(alarm.name == 'custom_like_post'){
+        console.log('👍 LIKE POST: Custom like post alarm triggered');
         chrome.storage.local.get(["campaignCustomLikePost","nodeModelCustomLikePost"]).then((result) => {
             console.log(`Campaign ${alarm.name} sequence is running...`)
             let currentCampaign = result.campaignCustomLikePost,
             nodeModel = result.nodeModelCustomLikePost;
+            
+            console.log(`💡 Note: Liking posts does NOT require connection - will attempt for all leads`);
 
             try {
                 getCampaignLeads(currentCampaign.id, (leadsData) => {
+                    console.log(`👥 LIKE POST: Retrieved ${leadsData.length} leads`);
                     if(leadsData.length) runSequence(currentCampaign, leadsData, nodeModel);
                 })
             } catch (err) {
-                console.log(err)
+                console.error('❌ Error in custom_like_post alarm:', err);
             }
         });
     }else if(alarm.name == 'custom_profile_view'){
+        console.log('👁️ PROFILE VIEW: Custom profile view alarm triggered');
         chrome.storage.local.get(["campaignCustomProfileView","nodeModelCustomProfileView"]).then((result) => {
             console.log(`Campaign ${alarm.name} sequence is running...`)
             let currentCampaign = result.campaignCustomProfileView,
             nodeModel = result.nodeModelCustomProfileView;
+            
+            console.log(`💡 Note: Viewing profiles does NOT require connection - will attempt for all leads`);
 
             try {
                 getCampaignLeads(currentCampaign.id, (leadsData) => {
+                    console.log(`👥 PROFILE VIEW: Retrieved ${leadsData.length} leads`);
                     if(leadsData.length) runSequence(currentCampaign, leadsData, nodeModel);
                 })
             } catch (err) {
-                console.log(err)
+                console.error('❌ Error in custom_profile_view alarm:', err);
             }
         });
     }else if(alarm.name == 'custom_follow'){
+        console.log('👥 FOLLOW: Custom follow alarm triggered');
         chrome.storage.local.get(["campaignCustomFollow","nodeModelCustomFollow"]).then((result) => {
             console.log(`Campaign ${alarm.name} sequence is running...`)
             let currentCampaign = result.campaignCustomFollow,
             nodeModel = result.nodeModelCustomFollow;
+            
+            console.log(`💡 Note: Following does NOT require connection - will attempt for all leads`);
 
             try {
                 getCampaignLeads(currentCampaign.id, (leadsData) => {
+                    console.log(`👥 FOLLOW: Retrieved ${leadsData.length} leads`);
                     if(leadsData.length) runSequence(currentCampaign, leadsData, nodeModel);
                 })
             } catch (err) {
-                console.log(err)
+                console.error('❌ Error in custom_follow alarm:', err);
             }
         });
     }else if(alarm.name == 'custom_message'){
+        console.log('💬 MESSAGE: Custom message alarm triggered');
         chrome.storage.local.get(["campaignCustomMessage","nodeModelCustomMessage"]).then((result) => {
             console.log(`Campaign ${alarm.name} sequence is running...`)
             let currentCampaign = result.campaignCustomMessage,
             nodeModel = result.nodeModelCustomMessage;
+            
+            console.log(`⚠️ Note: Messaging requires connection - will use accepted/connected leads only`);
 
             try {
                 getCampaignLeads(currentCampaign.id, (leadsData) => {
+                    console.log(`👥 MESSAGE: Retrieved ${leadsData.length} leads (will filter for connected)`);
                     if(leadsData.length) runSequence(currentCampaign, leadsData, nodeModel);
                 })
             } catch (err) {
-                console.log(err)
+                console.error('❌ Error in custom_message alarm:', err);
             }
         });
     }else if(alarm.name == 'custom_endorse'){
+        console.log('🏷️ ENDORSEMENT: Custom endorse alarm triggered');
         chrome.storage.local.get(["campaignCustomEndorse","nodeModelCustomEndorse"]).then((result) => {
             console.log(`Campaign ${alarm.name} sequence is running...`)
             let currentCampaign = result.campaignCustomEndorse,
             nodeModel = result.nodeModelCustomEndorse;
+            
+            console.log(`🔍 Endorse campaign: ${currentCampaign.name} (ID: ${currentCampaign.id})`);
+            console.log(`🎯 Skills to endorse per lead: ${nodeModel.totalSkills || 1}`);
+            
             try {
                 getCampaignLeads(currentCampaign.id, (leadsData) => {
-                    if(leadsData.length) runSequence(currentCampaign, leadsData, nodeModel);
+                    console.log(`👥 ENDORSEMENT: Retrieved ${leadsData.length} leads`);
+                    console.log(`💡 Note: Endorsement does NOT require connection - will attempt for all leads`);
+                    if(leadsData.length) {
+                        runSequence(currentCampaign, leadsData, nodeModel);
+                    } else {
+                        console.log('❌ No leads found for endorsement campaign');
+                    }
                 })
             } catch (err) {
-                console.log(err)
+                console.error('❌ Error in custom_endorse alarm:', err);
             }
         });
     }else if(alarm.name === 'check_review_messages'){
@@ -1832,56 +1859,99 @@ chrome.alarms.onAlarm.addListener((alarm) => {
                 console.log('❌ No action data found for alarm:', alarm.name);
             }
         });
-    }else if(alarm.name === 'fallback_call'){
+    }else if(alarm.name.startsWith('fallback_')){
         console.log('🎯 Starting general campaign alarm for:', alarm.name);
-        chrome.storage.local.get(["campaign","nodeModel"]).then(async (result) => {
+        chrome.storage.local.get(["campaign","nodeModel","sequence"]).then(async (result) => {
             console.log('Campaign', alarm.name, 'sequence is running...')
             let currentCampaign = result.campaign,
             nodeModel = result.nodeModel;
             console.log('📊 Retrieved campaign data:', currentCampaign);
             console.log('🔗 Retrieved node model:', nodeModel);
+            console.log('🎯 Node action type:', nodeModel?.value);
             try {
-                // Fetch accepted leads from DB first
-                await getLeadGenRunning(currentCampaign.id);
-                let acceptedLeads = (campaignLeadgenRunning || []).filter(l => l.acceptedStatus === true || l.accept_status === true || l.statusLastId === 3 || l.status_last_id === 3);
-                console.log(`👥 Found ${acceptedLeads.length} accepted leads for fallback_call execution (DB)`);
+                // Determine which leads to use based on action type
+                const actionType = nodeModel?.value;
+                console.log(`🔍 Action type for fallback: ${actionType}`);
                 
-                // If none found, recompute by checking network distance for campaignLeadgenRunning
-                if (acceptedLeads.length === 0) {
-                    const candidates = (campaignLeadgenRunning || []);
-                    console.log(`🔎 Recomputing accepted leads from campaignLeadgenRunning, candidates: ${candidates.length}`);
-                    const computedAccepted = [];
-                    for (const cand of candidates) {
-                        try {
-                            const networkInfo = await _getProfileNetworkInfo(cand);
-                            const degree = networkInfo?.data?.distance?.value;
-                            if (degree === 'DISTANCE_1' || cand.networkDistance == 1) {
-                                computedAccepted.push({
-                                    ...cand,
-                                    acceptedStatus: true,
-                                    networkDistance: 1
-                                });
+                let leadsToProcess = [];
+                
+                // Actions that require connection (1st degree)
+                const requiresConnection = ['call', 'message'];
+                
+                // Actions that DON'T require connection (can be done to anyone)
+                const noConnectionRequired = ['endorse', 'follow', 'like-post', 'profile-view'];
+                
+                if (requiresConnection.includes(actionType)) {
+                    console.log(`📧 Action "${actionType}" requires connection - fetching accepted leads only`);
+                    
+                    // Fetch accepted leads from DB first
+                    await getLeadGenRunning(currentCampaign.id);
+                    let acceptedLeads = (campaignLeadgenRunning || []).filter(l => l.acceptedStatus === true || l.accept_status === true || l.statusLastId === 3 || l.status_last_id === 3);
+                    console.log(`👥 Found ${acceptedLeads.length} accepted leads (DB)`);
+                    
+                    // If none found, recompute by checking network distance
+                    if (acceptedLeads.length === 0) {
+                        const candidates = (campaignLeadgenRunning || []);
+                        console.log(`🔎 Recomputing accepted leads, candidates: ${candidates.length}`);
+                        const computedAccepted = [];
+                        for (const cand of candidates) {
+                            try {
+                                const networkInfo = await _getProfileNetworkInfo(cand);
+                                const degree = networkInfo?.data?.distance?.value;
+                                if (degree === 'DISTANCE_1' || cand.networkDistance == 1) {
+                                    computedAccepted.push({
+                                        ...cand,
+                                        acceptedStatus: true,
+                                        networkDistance: 1
+                                    });
+                                }
+                            } catch (e) {
+                                // ignore individual errors
                             }
-                        } catch (e) {
-                            // ignore individual errors
+                            await delay(400);
                         }
-                        await delay(400);
+                        console.log(`👥 Computed accepted leads: ${computedAccepted.length}`);
+                        acceptedLeads = computedAccepted;
                     }
-                    console.log(`👥 Computed accepted leads: ${computedAccepted.length}`);
-                    acceptedLeads = computedAccepted;
+                    
+                    leadsToProcess = acceptedLeads;
+                    
+                } else if (noConnectionRequired.includes(actionType)) {
+                    console.log(`🌐 Action "${actionType}" does NOT require connection - fetching ALL leads`);
+                    
+                    // For these actions, we can use ALL campaign leads (not just accepted connections)
+                    await new Promise((resolve) => {
+                        getCampaignLeads(currentCampaign.id, (leadsData) => {
+                            leadsToProcess = leadsData || [];
+                            console.log(`👥 Retrieved ${leadsToProcess.length} leads from campaign`);
+                            resolve();
+                        });
+                    });
+                } else {
+                    console.log(`⚠️ Unknown action type "${actionType}" - falling back to all leads`);
+                    
+                    // Fallback: try to get all campaign leads
+                    await new Promise((resolve) => {
+                        getCampaignLeads(currentCampaign.id, (leadsData) => {
+                            leadsToProcess = leadsData || [];
+                            console.log(`👥 Retrieved ${leadsToProcess.length} leads from campaign (fallback)`);
+                            resolve();
+                        });
+                    });
                 }
 
-                if (acceptedLeads.length > 0) {
-                    await runSequence(currentCampaign, acceptedLeads, nodeModel);
+                if (leadsToProcess.length > 0) {
+                    console.log(`🚀 Executing sequence for ${leadsToProcess.length} leads`);
+                    await runSequence(currentCampaign, leadsToProcess, nodeModel);
                 } else {
-                    console.log('⚠️ No accepted leads found for fallback_call execution');
+                    console.log(`⚠️ No leads found for ${actionType} execution`);
                 }
             } catch (err) {
-                console.error('❌ Error executing fallback_call sequence:', err);
+                console.error(`❌ Error executing ${alarm.name} sequence:`, err);
             } finally {
                 // Clear the fallback alarm to prevent repeats
-                chrome.alarms.clear('fallback_call');
-                console.log('🧹 Cleared fallback_call alarm after execution');
+                chrome.alarms.clear(alarm.name);
+                console.log(`🧹 Cleared ${alarm.name} alarm after execution`);
             }
         });
         return;
@@ -2031,7 +2101,12 @@ const setCampaignAlarm = async (campaign) => {
         }
     }else if(['Lead generation','Custom'].includes(campaign.sequenceType)){
         console.log('📈 Processing Lead generation/Custom campaign sequence...');
+        console.log(`🔍 First node type: ${nodeModelArr[0].value}`);
+        console.log(`🔍 First node status: ${nodeModelArr[0].runStatus ? 'Completed' : 'Not run'}`);
+        
+        // Support ANY first action (not just send-invites)
         if(nodeModelArr[0].value == 'send-invites'){
+            console.log('📧 First action is SEND INVITES');
             if(nodeModelArr[0].runStatus === false){
                 nodeItem = nodeModelArr[0]
                 delayInMinutes = 0.10;
@@ -2733,18 +2808,31 @@ const setCampaignAlarm = async (campaign) => {
         console.log('   2. Node structure missing acceptedAction/notAcceptedAction properties');
         console.log('   3. statusLastId not matching expected values in nodes');
         
-        // For debugging: let's try a simpler approach - find the next unrun action node
+        // For debugging: let's try a simpler approach - find ANY unrun action node (including first node)
         console.log('🔄 Attempting fallback: find next unrun action node...');
-        console.log(`🔍 DEBUG: Checking ${nodeModelArr.length} nodes for fallback...`);
+        console.log(`🔍 DEBUG: Checking ${nodeModelArr.length} nodes for fallback (starting from index 0)...`);
         
-        for(let i = 1; i < nodeModelArr.length; i++) {
+        // Start from index 0 to include the first node
+        for(let i = 0; i < nodeModelArr.length; i++) {
             let node = nodeModelArr[i];
             console.log(`🔍 Fallback check ${i}: Key: ${node.key}, Type: ${node.type}, Value: ${node.value}, RunStatus: ${node.runStatus}`);
             
-            if(node.type === 'action' && node.runStatus === false && node.value !== 'end') {
-                console.log(`✅ Found next unrun action node: ${node.key} - ${node.label} (${node.value})`);
+            if(node.type === 'action' && node.runStatus === false && node.value !== 'end' && node.value !== 'add-action') {
+                console.log(`✅ Found unrun action node: ${node.key} - ${node.label} (${node.value})`);
                 nodeItem = node;
                 alarmName = `fallback_${node.value}`;
+                
+                // Calculate delay if there's a previous delay node
+                if(i > 0 && nodeModelArr[i-1].type === 'delay') {
+                    delayInMinutes = nodeModelArr[i-1].time == 'days' 
+                        ? nodeModelArr[i-1].value * 24 * 60
+                        : nodeModelArr[i-1].value * 60;
+                    console.log(`⏰ Using delay from previous node: ${delayInMinutes} minutes`);
+                } else {
+                    delayInMinutes = 0.10;
+                    console.log(`⏰ No previous delay node, using default: 0.1 minutes`);
+                }
+                
                 break;
             } else {
                 console.log(`❌ Skipped: type=${node.type === 'action'}, runStatus=${node.runStatus === false}, value=${node.value !== 'end'}`);
@@ -2802,18 +2890,20 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
         console.log(`🔗 Node action: ${nodeModel.value}`);
         
         if(nodeModel.value == 'endorse'){
-            console.log('🏷️ EXECUTING ENDORSE ACTION...');
-            console.log(`👤 Lead: ${lead.name} (${lead.connectionId})`);
+            console.log('\n' + '='.repeat(80));
+            console.log('🏷️ ENDORSEMENT FLOW: STARTING');
+            console.log('='.repeat(80));
+            console.log(`👤 Lead: ${lead.name}`);
+            console.log(`🔗 Connection ID: ${lead.connectionId}`);
+            console.log(`🆔 Member URN: ${lead.memberUrn || 'Not available'}`);
             console.log(`🎯 Action: ${nodeModel.label} (${nodeModel.value})`);
+            console.log(`🔢 Skills to endorse: ${nodeModel.totalSkills || 1}`);
             console.log(`⏰ Delay: ${nodeModel.delayInMinutes || 0} minutes`);
-            console.log(`🔧 Node properties:`, {
-                key: nodeModel.key,
-                type: nodeModel.type,
-                runStatus: nodeModel.runStatus,
-                totalSkills: nodeModel.totalSkills
-            });
+            console.log(`🔧 Node key: ${nodeModel.key}`);
+            console.log(`📊 Run status: ${nodeModel.runStatus}`);
+            console.log('─'.repeat(80));
             
-            console.log(`🚀 Starting skill endorsement process for ${lead.name}...`);
+            console.log(`🚀 ENDORSEMENT FLOW: Fetching skills for ${lead.name}...`);
             _getFeaturedSkill(lead, nodeModel);
         }else if(nodeModel.value == 'profile-view'){
             console.log('👁️ Executing profile view action...');
@@ -2825,7 +2915,25 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
             console.log('👍 Executing like post action...');
             _getProfilePosts(lead)
         }else if(['message','call'].includes(nodeModel.value)){
-            console.log(`💬 Executing ${nodeModel.value} action...`);
+            if(nodeModel.value == 'message'){
+                console.log('\n' + '='.repeat(80));
+                console.log('💬 MESSAGE FLOW: STARTING');
+                console.log('='.repeat(80));
+                console.log(`👤 Lead: ${lead.name}`);
+                console.log(`🔗 Connection ID: ${lead.connectionId}`);
+                console.log(`🆔 Member URN: ${lead.memberUrn || 'Not available'}`);
+                console.log(`📊 Network Distance: ${lead.networkDistance}`);
+                console.log(`🎯 Action: Send Message (${nodeModel.value})`);
+                console.log(`🔧 Node key: ${nodeModel.key}`);
+                console.log(`📊 Run status: ${nodeModel.runStatus}`);
+                console.log(`⏰ Delay: ${nodeModel.delayInMinutes || 0} minutes`);
+                console.log('─'.repeat(80));
+                console.log(`📝 Message preview: ${nodeModel.message ? nodeModel.message.substring(0, 100) + '...' : 'No message'}`);
+                console.log('─'.repeat(80));
+            } else {
+                console.log(`💬 Executing ${nodeModel.value} action...`);
+            }
+            
             arConnectionModel.message = nodeModel.message
             arConnectionModel.distance = lead.networkDistance
             arConnectionModel.connectionId = lead.connectionId
@@ -2834,6 +2942,9 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
             arConnectionModel.lastName = lead.lastName
             arConnectionModel.conversationUrnId = ''
             lead['uploads'] = []
+            
+            // Declare messageSentViaAI flag for both message and call actions
+            let messageSentViaAI = false;
 
             // Check for duplicate call attempts (but don't set flag yet)
             if (nodeModel.value === 'call') {
@@ -2884,7 +2995,6 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                     // Now fetch the AI-generated message from the backend
                     console.log('🔍 Attempting to fetch AI-generated message...');
                     let aiMessage = null;
-                    let messageSentViaAI = false;
                     
                     try {
                         const callId = callResponse.call_id || callResponse.data?.call_id;
@@ -3431,15 +3541,23 @@ const getUserProfile = () => {
  * @param {object} scheduleInfo 
  */
 const messageConnection = scheduleInfo => {
-    console.log('📤 messageConnection called - starting LinkedIn message send...');
-    console.log('📝 Message to send:', arConnectionModel.message);
-    console.log('👤 Connection details:', {
-        connectionId: arConnectionModel.connectionId,
-        conversationUrnId: arConnectionModel.conversationUrnId,
-        distance: arConnectionModel.distance
-    });
+    console.log('─'.repeat(80));
+    console.log('📤 MESSAGE FLOW: SENDING TO LINKEDIN');
+    console.log('─'.repeat(80));
+    console.log(`👤 Lead: ${arConnectionModel.name || 'Unknown'}`);
+    console.log(`🔗 Connection ID: ${arConnectionModel.connectionId}`);
+    console.log(`💬 Conversation URN: ${arConnectionModel.conversationUrnId || 'New conversation'}`);
+    console.log(`📊 Network Distance: ${arConnectionModel.distance}`);
+    console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
+    console.log('─'.repeat(80));
+    console.log(`📝 Original message: ${arConnectionModel.message ? arConnectionModel.message.substring(0, 150) + '...' : 'No message'}`);
+    console.log('─'.repeat(80));
+    console.log('🔄 Processing message variables...');
 
     arConnectionModel.message = changeMessageVariableNames(arConnectionModel.message, arConnectionModel)
+    
+    console.log(`📝 Processed message: ${arConnectionModel.message ? arConnectionModel.message.substring(0, 150) + '...' : 'No message'}`);
+    console.log('─'.repeat(80));
 
     let url = ''
     let conversationObj = {}
@@ -3459,7 +3577,13 @@ const messageConnection = scheduleInfo => {
         conversationObj = {
             eventCreate: messageEvent
         }
-        console.log('📧 Using existing conversation:', arConnectionModel.conversationUrnId);
+        console.log('─'.repeat(80));
+        console.log('💬 MESSAGE FLOW: USING EXISTING CONVERSATION');
+        console.log('─'.repeat(80));
+        console.log(`💬 Conversation URN: ${arConnectionModel.conversationUrnId}`);
+        console.log(`👤 Lead: ${arConnectionModel.name || 'Unknown'}`);
+        console.log(`🔗 Connection ID: ${arConnectionModel.connectionId}`);
+        console.log('─'.repeat(80));
     }else {
         url = `${voyagerApi}/messaging/conversations?action=create`
         conversationObj = {
@@ -3469,7 +3593,14 @@ const messageConnection = scheduleInfo => {
                 subtype: arConnectionModel.distance == 1 ? "MEMBER_TO_MEMBER" : "INMAIL"
             }
         }
-        console.log('📧 Creating new conversation for:', arConnectionModel.connectionId);
+        console.log('─'.repeat(80));
+        console.log('💬 MESSAGE FLOW: CREATING NEW CONVERSATION');
+        console.log('─'.repeat(80));
+        console.log(`👤 Lead: ${arConnectionModel.name || 'Unknown'}`);
+        console.log(`🔗 Connection ID: ${arConnectionModel.connectionId}`);
+        console.log(`📊 Network Distance: ${arConnectionModel.distance}`);
+        console.log(`📧 Message Type: ${arConnectionModel.distance == 1 ? 'MEMBER_TO_MEMBER' : 'INMAIL'}`);
+        console.log('─'.repeat(80));
     }
 
     // Get browser cookie
@@ -3486,9 +3617,16 @@ const messageConnection = scheduleInfo => {
     });
 
     chrome.storage.local.get(["csrfToken"]).then((result) => {
-        console.log('🔑 JSESSIONID retrieved, sending message to LinkedIn API...');
-        console.log('🌐 API URL:', url);
-        console.log('📦 Request body:', JSON.stringify(conversationObj, null, 2));
+        console.log('─'.repeat(80));
+        console.log('📤 MESSAGE FLOW: SENDING REQUEST TO LINKEDIN');
+        console.log('─'.repeat(80));
+        console.log(`🔑 CSRF Token: ${result.csrfToken ? 'Available' : 'Missing'}`);
+        console.log(`🌐 API URL: ${url}`);
+        console.log(`📦 Request type: ${arConnectionModel.conversationUrnId ? 'Add to existing' : 'Create new'}`);
+        console.log(`👤 Lead: ${arConnectionModel.name || 'Unknown'}`);
+        console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
+        console.log('─'.repeat(80));
+        console.log('⏳ Sending request...');
         
         fetch(url, {
             method: 'post',
@@ -3504,19 +3642,41 @@ const messageConnection = scheduleInfo => {
             body: JSON.stringify(conversationObj)
         })
         .then(res => {
-            console.log('📡 LinkedIn API response status:', res.status);
+            console.log('─'.repeat(80));
+            console.log('📊 MESSAGE FLOW: API RESPONSE');
+            console.log('─'.repeat(80));
+            console.log(`📡 Status: ${res.status} ${res.statusText}`);
+            console.log(`👤 Lead: ${arConnectionModel.name || arConnectionModel.connectionId}`);
+            
+            if(res.ok) {
+                console.log('✅ Response: Success');
+            } else {
+                console.error('❌ Response: Failed');
+            }
+            
             return res.json();
         })
         .then(res => {
-            console.log('✅ LinkedIn message sent successfully!');
+            console.log('─'.repeat(80));
+            console.log('✅ MESSAGE FLOW: SUCCESS! ✅');
+            console.log('='.repeat(80));
+            console.log('🎉 Message sent successfully to LinkedIn!');
+            console.log(`👤 Lead: ${arConnectionModel.name || 'Unknown'}`);
+            console.log(`🔗 Connection ID: ${arConnectionModel.connectionId}`);
+            console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
             console.log('📄 Response data:', res);
-            console.log('🎯 Message sent to:', arConnectionModel.connectionId);
             
             // Extract conversation URN ID from response if available
             if (res && res.value && res.value.entityUrn) {
                 const conversationUrnId = res.value.entityUrn.replace('urn:li:fsd_conversation:', '');
                 arConnectionModel.conversationUrnId = conversationUrnId;
-                console.log('🔗 Conversation URN ID extracted:', conversationUrnId);
+                console.log('─'.repeat(80));
+                console.log('🔗 MESSAGE FLOW: CONVERSATION ESTABLISHED');
+                console.log('─'.repeat(80));
+                console.log(`💬 Conversation URN: ${conversationUrnId}`);
+                console.log(`👤 Lead: ${arConnectionModel.name || 'Unknown'}`);
+                console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
+                console.log('─'.repeat(80));
                 
                 // Set up response monitoring if this is a call message
                 if (arConnectionModel.message && arConnectionModel.message.toLowerCase().includes('call')) {
@@ -3559,9 +3719,33 @@ const messageConnection = scheduleInfo => {
                     }, 1000);
                 }
             }
+            
+            console.log('─'.repeat(80));
+            console.log('🎉 MESSAGE FLOW: COMPLETED');
+            console.log('='.repeat(80));
+            console.log(`✅ Message successfully delivered!`);
+            console.log(`👤 Lead: ${arConnectionModel.name || 'Unknown'}`);
+            console.log(`🔗 Connection ID: ${arConnectionModel.connectionId}`);
+            console.log(`💬 Conversation URN: ${arConnectionModel.conversationUrnId || 'N/A'}`);
+            console.log(`📅 Completed at: ${new Date().toLocaleString()}`);
+            console.log('='.repeat(80));
         })
         .catch((err) => {
-        console.error('❌ Failed to send LinkedIn message:', err);
+            console.log('─'.repeat(80));
+            console.error('❌ MESSAGE FLOW: ERROR');
+            console.log('─'.repeat(80));
+            console.error('❌ Failed to send LinkedIn message!');
+            console.error(`👤 Lead: ${arConnectionModel.name || arConnectionModel.connectionId}`);
+            console.error(`🔗 Connection ID: ${arConnectionModel.connectionId}`);
+            console.error(`💬 Conversation URN: ${arConnectionModel.conversationUrnId || 'N/A'}`);
+            console.error(`❌ Error:`, err);
+            console.error(`📅 Timestamp: ${new Date().toLocaleString()}`);
+            console.error(`💡 Possible reasons:`);
+            console.error(`   1. Network connection issue`);
+            console.error(`   2. LinkedIn rate limiting`);
+            console.error(`   3. Invalid connection ID`);
+            console.error(`   4. CSRF token expired`);
+            console.log('─'.repeat(80));
         })
     })
 }
@@ -3571,12 +3755,14 @@ const messageConnection = scheduleInfo => {
  * @param {object} node 
  */
 const _getFeaturedSkill =  (lead, node) => {
-    console.log(`🔍 GETTING FEATURED SKILLS for ${lead.name}...`);
-    console.log(`👤 Lead details:`, {
-        name: lead.name,
-        connectionId: lead.connectionId,
-        totalSkills: node.totalSkills
-    });
+    console.log('─'.repeat(80));
+    console.log('🔍 ENDORSEMENT FLOW: FETCHING SKILLS');
+    console.log('─'.repeat(80));
+    console.log(`👤 Lead: ${lead.name}`);
+    console.log(`🔗 Connection ID: ${lead.connectionId}`);
+    console.log(`🆔 Member URN: ${lead.memberUrn || 'Not set'}`);
+    console.log(`🎯 Max skills to endorse: ${node.totalSkills || 1}`);
+    console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
     
     chrome.cookies.get({
         url: inURL,
@@ -3612,9 +3798,12 @@ const _getFeaturedSkill =  (lead, node) => {
         })
         .then(res => res.json())
         .then(res => {
-            console.log(`📋 FEATURED SKILLS RESPONSE for ${lead.name}:`, res);
-            console.log(`🔍 DEBUGGING SKILLS DATA:`);
-            console.log(`   📊 Response structure:`, {
+            console.log('─'.repeat(80));
+            console.log('📋 ENDORSEMENT FLOW: SKILLS API RESPONSE');
+            console.log('─'.repeat(80));
+            console.log(`📊 Response received for: ${lead.name}`);
+            console.log(`✅ Status: Success`);
+            console.log(`🔍 Response structure:`, {
                 hasData: !!res.data,
                 hasElements: !!(res.data && res.data['*elements']),
                 elementsLength: res.data && res.data['*elements'] ? res.data['*elements'].length : 0,
@@ -3623,50 +3812,78 @@ const _getFeaturedSkill =  (lead, node) => {
             });
             
             if(res.included && res.included.length > 0) {
-                console.log(`📋 ALL AVAILABLE SKILLS for ${lead.name}:`);
+                console.log('─'.repeat(80));
+                console.log(`📋 ENDORSEMENT FLOW: AVAILABLE SKILLS (${res.included.length} total)`);
+                console.log('─'.repeat(80));
                 res.included.forEach((item, index) => {
-                    console.log(`   ${index + 1}. ${item.name || 'No name'} (${item.entityUrn || 'No URN'})`);
-                    console.log(`      📊 Full item data:`, item);
+                    console.log(`   ${index + 1}. ${item.name || 'No name'}`);
+                    console.log(`      🔗 URN: ${item.entityUrn || 'No URN'}`);
                 });
             }
             
             // Also check the main data structure
             if(res.data && res.data['*elements']) {
-                console.log(`📊 MAIN SKILLS DATA:`, res.data['*elements']);
+                console.log(`📊 Main data elements: ${res.data['*elements'].length}`);
             }
             
             if(res.data && res.data['*elements'] && res.data['*elements'].length){
-                console.log(`✅ Found ${res.data['*elements'].length} skills to endorse for ${lead.name}`);
+                console.log('─'.repeat(80));
+                console.log(`✅ ENDORSEMENT FLOW: ${res.data['*elements'].length} SKILLS FOUND`);
+                console.log('─'.repeat(80));
                 
                 if(res.included && res.included.length > 0) {
-                    console.log(`🎯 Processing ${res.included.length} skill items...`);
-                    console.log(`📊 Campaign setting: Only endorse ${node.totalSkills} skill(s)`); 
+                    console.log(`🎯 Campaign limit: ${node.totalSkills} skill(s)`);
+                    console.log(`📋 Available: ${res.included.length} skill(s)`);
                     
                     // Filter skills that have names and limit to the number specified in campaign
                     const skillsToEndorse = res.included
                         .filter(item => item.hasOwnProperty('name'))
                         .slice(0, node.totalSkills || 1);
                     
-                    console.log(`🎯 Will endorse ${skillsToEndorse.length} skills (limited by campaign setting)`);
+                    console.log(`🎯 Will endorse: ${skillsToEndorse.length} skill(s)`);
+                    console.log('─'.repeat(80));
+                    console.log('🚀 ENDORSEMENT FLOW: STARTING ENDORSEMENTS');
+                    console.log('─'.repeat(80));
                     
                     skillsToEndorse.forEach((item, index) => {
-                        console.log(`🏷️ Skill ${index + 1}: ${item.name} (${item.entityUrn})`);
+                        console.log(`\n🏷️ Endorsing skill ${index + 1}/${skillsToEndorse.length}:`);
+                        console.log(`   📝 Name: ${item.name}`);
+                        console.log(`   🔗 URN: ${item.entityUrn}`);
                         _endorseConnection({
                             connectionId: lead.connectionId,
                             memberUrn: lead.memberUrn,
                             entityUrn: item.entityUrn,
-                            skillName: item.name
+                            skillName: item.name,
+                            leadName: lead.name
                         }, result)
                     });
                 } else {
-                    console.log(`⚠️ No skill items found in included array for ${lead.name}`);
+                    console.log('─'.repeat(80));
+                    console.log(`⚠️ ENDORSEMENT FLOW: NO SKILLS IN RESPONSE`);
+                    console.log('─'.repeat(80));
+                    console.log(`❌ No skill items found in included array for ${lead.name}`);
+                    console.log(`📊 Response data:`, res);
                 }
             } else {
-                console.log(`❌ No skills found for ${lead.name} - response data:`, res.data);
+                console.log('─'.repeat(80));
+                console.log(`❌ ENDORSEMENT FLOW: FAILED - NO SKILLS FOUND`);
+                console.log('─'.repeat(80));
+                console.log(`👤 Lead: ${lead.name}`);
+                console.log(`📊 Response data:`, res.data);
+                console.log(`💡 Possible reasons:`);
+                console.log(`   1. Lead has no skills listed`);
+                console.log(`   2. Profile is private`);
+                console.log(`   3. API response structure changed`);
             }
         })
         .catch(err => {
-            console.error(`❌ Error fetching skills for ${lead.name}:`, err);
+            console.log('─'.repeat(80));
+            console.error(`❌ ENDORSEMENT FLOW: ERROR FETCHING SKILLS`);
+            console.log('─'.repeat(80));
+            console.error(`👤 Lead: ${lead.name}`);
+            console.error(`🔗 Connection ID: ${lead.connectionId}`);
+            console.error(`❌ Error:`, err);
+            console.error(`📅 Timestamp: ${new Date().toLocaleString()}`);
         })
     })
 }
@@ -3677,14 +3894,23 @@ const _getFeaturedSkill =  (lead, node) => {
  * @param {object} result 
  */
 const _endorseConnection = (data, result) => {
-    console.log(`🏷️ ENDORSING SKILL: ${data.skillName} for connection ${data.connectionId}`);
+    console.log('─'.repeat(80));
+    console.log('🚀 ENDORSEMENT FLOW: ENDORSING SKILL');
+    console.log('─'.repeat(80));
+    console.log(`👤 Lead: ${data.leadName || 'Unknown'}`);
+    console.log(`🏷️ Skill: ${data.skillName}`);
+    console.log(`🔗 Connection ID: ${data.connectionId}`);
     console.log(`🔗 Entity URN: ${data.entityUrn}`);
+    console.log(`🆔 Member URN: ${data.memberUrn || 'Not set'}`);
     
     // Use the same profile ID logic as in _getFeaturedSkill
     const profileId = data.memberUrn ? data.memberUrn.replace('urn:li:member:', '') : data.connectionId;
     const endorseUrl = `${VOYAGER_API}/identity/profiles/${profileId}/normEndorsements`;
-    console.log(`🌐 Endorsement API URL: ${endorseUrl}`);
-    console.log(`👤 Using profile ID: ${profileId} (memberUrn: ${data.memberUrn}, connectionId: ${data.connectionId})`);
+    console.log(`🌐 API URL: ${endorseUrl}`);
+    console.log(`👤 Profile ID: ${profileId}`);
+    console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
+    console.log('─'.repeat(80));
+    console.log(`📤 Sending endorsement request...`);
     
     fetch(endorseUrl, {
         method: 'post',
@@ -3705,19 +3931,31 @@ const _endorseConnection = (data, result) => {
         })
     })
     .then(res => {
-        console.log(`📊 Endorsement response status: ${res.status} ${res.statusText}`);
+        console.log('─'.repeat(80));
+        console.log(`📊 ENDORSEMENT FLOW: API RESPONSE`);
+        console.log('─'.repeat(80));
+        console.log(`📊 Status: ${res.status} ${res.statusText}`);
+        console.log(`🏷️ Skill: ${data.skillName}`);
+        console.log(`👤 Lead: ${data.leadName || data.connectionId}`);
+        
         if(res.status == 201){
-            console.log(`✅ SKILL ENDORSED SUCCESSFULLY: ${data.skillName}`);
-            console.log(`🎯 ENDORSEMENT DETAILS:`);
-            console.log(`   👤 Lead: ${data.connectionId}`);
-            console.log(`   🏷️ Skill: ${data.skillName}`);
-            console.log(`   🔗 Entity URN: ${data.entityUrn}`);
-            console.log(`   📅 Time: ${new Date().toLocaleString()}`);
-            console.log(`   🌐 Profile ID: ${profileId}`);
+            console.log('─'.repeat(80));
+            console.log(`✅ ENDORSEMENT FLOW: SUCCESS! ✅`);
+            console.log('='.repeat(80));
+            console.log(`🎉 Skill endorsed successfully!`);
+            console.log(`👤 Lead: ${data.leadName || 'Unknown'}`);
+            console.log(`🏷️ Skill: ${data.skillName}`);
+            console.log(`🔗 Connection ID: ${data.connectionId}`);
+            console.log(`🔗 Entity URN: ${data.entityUrn}`);
+            console.log(`🌐 Profile ID: ${profileId}`);
+            console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
+            console.log(`📊 Response Status: ${res.status} ${res.statusText}`);
+            console.log('='.repeat(80));
             
             // Store endorsement record for tracking
             const endorsementRecord = {
                 leadId: data.connectionId,
+                leadName: data.leadName || 'Unknown',
                 skillName: data.skillName,
                 entityUrn: data.entityUrn,
                 profileId: profileId,
@@ -3731,31 +3969,50 @@ const _endorseConnection = (data, result) => {
                 const history = result.endorsementHistory || [];
                 history.push(endorsementRecord);
                 chrome.storage.local.set({ endorsementHistory: history });
-                console.log(`📝 Endorsement record stored. Total endorsements: ${history.length}`);
+                console.log(`📝 Endorsement record saved`);
+                console.log(`📊 Total endorsements in history: ${history.length}`);
+                console.log(`📋 Last 5 endorsements:`, history.slice(-5).map(e => `${e.skillName} for ${e.leadName}`));
             });
             
             return { success: true, message: 'Skill endorsed successfully' };
         } else {
-            console.log(`❌ Failed to endorse skill: ${res.status} ${res.statusText}`);
-            console.log(`🎯 FAILED ENDORSEMENT DETAILS:`);
-            console.log(`   👤 Lead: ${data.connectionId}`);
-            console.log(`   🏷️ Skill: ${data.skillName}`);
-            console.log(`   🔗 Entity URN: ${data.entityUrn}`);
-            console.log(`   📅 Time: ${new Date().toLocaleString()}`);
-            console.log(`   ❌ Error: ${res.status} ${res.statusText}`);
+            console.log('─'.repeat(80));
+            console.error(`❌ ENDORSEMENT FLOW: FAILED`);
+            console.log('─'.repeat(80));
+            console.error(`❌ Status: ${res.status} ${res.statusText}`);
+            console.error(`🏷️ Skill: ${data.skillName}`);
+            console.error(`👤 Lead: ${data.leadName || data.connectionId}`);
+            console.error(`🔗 Connection ID: ${data.connectionId}`);
+            console.error(`🔗 Entity URN: ${data.entityUrn}`);
+            console.error(`📅 Timestamp: ${new Date().toLocaleString()}`);
+            console.error(`💡 Possible reasons:`);
+            console.error(`   1. Already endorsed this skill`);
+            console.error(`   2. Skill no longer available`);
+            console.error(`   3. Rate limit reached`);
+            console.error(`   4. Invalid skill URN`);
+            console.log('─'.repeat(80));
             
             return { success: false, message: `Failed to endorse skill: ${res.status}` };
         }
     })
     .then(result => {
         if(result.success) {
-            console.log(`🎉 ENDORSEMENT COMPLETED: ${data.skillName}`);
+            console.log(`🎉 ENDORSEMENT COMPLETED: ${data.skillName} for ${data.leadName}`);
         } else {
             console.log(`⚠️ Endorsement result:`, result);
         }
     })
     .catch(err => {
-        console.error(`❌ ERROR ENDORSING SKILL ${data.skillName}:`, err);
+        console.log('─'.repeat(80));
+        console.error(`❌ ENDORSEMENT FLOW: ERROR`);
+        console.log('─'.repeat(80));
+        console.error(`❌ Exception caught during endorsement`);
+        console.error(`🏷️ Skill: ${data.skillName}`);
+        console.error(`👤 Lead: ${data.leadName || data.connectionId}`);
+        console.error(`🔗 Connection ID: ${data.connectionId}`);
+        console.error(`❌ Error:`, err);
+        console.error(`📅 Timestamp: ${new Date().toLocaleString()}`);
+        console.log('─'.repeat(80));
     })
 }
 
