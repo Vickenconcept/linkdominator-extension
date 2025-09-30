@@ -6949,6 +6949,31 @@ const checkForCallResponses = async () => {
     console.log('🔍 CALL FLOW: Checking for call responses...');
     
     try {
+        // Get LinkedIn ID first
+        const linkedinIdResult = await chrome.storage.local.get(['linkedinId']);
+        const linkedinId = linkedinIdResult.linkedinId || 'vicken-concept';
+        
+        // Fetch active campaigns to check status
+        let activeCampaignsData = [];
+        try {
+            const campaignsResponse = await fetch(`${PLATFORM_URL}/api/campaigns`, {
+                headers: { 'lk-id': linkedinId }
+            });
+            if (campaignsResponse.ok) {
+                const result = await campaignsResponse.json();
+                activeCampaignsData = result.data || [];
+                console.log(`📊 CALL FLOW: Fetched ${activeCampaignsData.length} campaigns from API`);
+            }
+        } catch (error) {
+            console.error('❌ CALL FLOW: Failed to fetch campaigns:', error);
+        }
+        
+        // Create a map of campaign statuses for quick lookup
+        const campaignStatusMap = new Map();
+        activeCampaignsData.forEach(campaign => {
+            campaignStatusMap.set(campaign.id, campaign.status);
+        });
+        
         // Get all response monitoring keys
         const allStorage = await chrome.storage.local.get();
         const responseKeys = Object.keys(allStorage).filter(key => key.startsWith('call_response_monitoring_'));
@@ -6963,6 +6988,7 @@ const checkForCallResponses = async () => {
         // Deduplicate monitoring entries by connectionId - only process one per connection
         const connectionMap = new Map();
         const uniqueMonitoringEntries = [];
+        const keysToCleanup = []; // Track monitoring entries from stopped campaigns
                                         
                                         for (const key of responseKeys) {
             const monitoringData = allStorage[key];
@@ -6970,6 +6996,20 @@ const checkForCallResponses = async () => {
             if (!monitoringData) {
                 console.log(`⚠️ CALL FLOW: No monitoring data for key: ${key}`);
                 continue;
+            }
+            
+            // Check if campaign is still running
+            const campaignId = monitoringData.campaignId;
+            const campaignStatus = campaignStatusMap.get(campaignId);
+            
+            if (campaignStatus && campaignStatus !== 'running' && campaignStatus !== 'active') {
+                console.log(`🛑 CALL FLOW: Skipping monitoring for ${monitoringData.leadName} - Campaign ${campaignId} is ${campaignStatus}`);
+                keysToCleanup.push(key);
+                continue;
+            }
+            
+            if (!campaignStatus) {
+                console.log(`⚠️ CALL FLOW: Campaign ${campaignId} not found in active campaigns - monitoring ${monitoringData.leadName} anyway`);
             }
             
             const connectionId = monitoringData.connectionId;
@@ -6988,7 +7028,15 @@ const checkForCallResponses = async () => {
             }
         }
         
-        console.log(`🔍 CALL FLOW: Processing ${uniqueMonitoringEntries.length} unique connections`);
+        // Cleanup monitoring entries for stopped campaigns
+        if (keysToCleanup.length > 0) {
+            console.log(`🧹 CALL FLOW: Cleaning up ${keysToCleanup.length} monitoring entries from stopped campaigns`);
+            for (const key of keysToCleanup) {
+                await chrome.storage.local.remove(key);
+            }
+        }
+        
+        console.log(`🔍 CALL FLOW: Processing ${uniqueMonitoringEntries.length} unique connections from active campaigns`);
         
         // Process each unique monitoring entry using consolidated flow
         for (const { key, monitoringData } of uniqueMonitoringEntries) {
@@ -8049,12 +8097,53 @@ const checkAndSendPendingMessages = async () => {
             throw error;
         }
         
+        // Get LinkedIn ID and fetch active campaigns
+        const linkedinIdResult = await chrome.storage.local.get(['linkedinId']);
+        const linkedinId = linkedinIdResult.linkedinId || 'vicken-concept';
+        
+        // Fetch active campaigns to check status
+        let activeCampaignsData = [];
+        try {
+            const campaignsResponse = await fetch(`${PLATFORM_URL}/api/campaigns`, {
+                headers: { 'lk-id': linkedinId }
+            });
+            if (campaignsResponse.ok) {
+                const result = await campaignsResponse.json();
+                activeCampaignsData = result.data || [];
+                console.log(`📊 PENDING: Fetched ${activeCampaignsData.length} campaigns from API`);
+            }
+        } catch (error) {
+            console.error('❌ PENDING: Failed to fetch campaigns:', error);
+        }
+        
+        // Create a map of campaign statuses for quick lookup
+        const campaignStatusMap = new Map();
+        activeCampaignsData.forEach(campaign => {
+            campaignStatusMap.set(campaign.id, campaign.status);
+        });
+        
         // Get all monitoring data
         const allStorage = await chrome.storage.local.get();
         const responseKeys = Object.keys(allStorage).filter(key => key.startsWith('call_response_monitoring_'));
         
         for (const key of responseKeys) {
             const monitoringData = allStorage[key];
+            
+            // Check if campaign is still running before sending pending messages
+            const campaignId = monitoringData.campaignId;
+            const campaignStatus = campaignStatusMap.get(campaignId);
+            
+            if (campaignStatus && campaignStatus !== 'running' && campaignStatus !== 'active') {
+                console.log(`🛑 PENDING: Skipping pending message for ${monitoringData.leadName} - Campaign ${campaignId} is ${campaignStatus}`);
+                // Clear the pending message since campaign is stopped
+                if (monitoringData.pendingMessage) {
+                    monitoringData.pendingMessage = null;
+                    monitoringData.scheduledSendAt = null;
+                    monitoringData.status = 'campaign_stopped';
+                    await chrome.storage.local.set({ [key]: monitoringData });
+                }
+                continue;
+            }
             
             // Check if this monitoring data has a pending message
             if (monitoringData.status === 'pending_review' && monitoringData.scheduledSendAt) {
