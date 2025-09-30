@@ -2176,7 +2176,8 @@ const setCampaignAlarm = async (campaign) => {
                                             conversation_urn_id: null, // Will be updated when we fetch conversations
                                             campaign_id: campaign.id,
                                             campaign_name: campaign.name || `Campaign ${campaign.id}`,
-                                            original_message: 'Lead accepted connection invitation'
+                                            original_message: 'Lead accepted connection invitation',
+                                            is_acceptance_update: true // Preserve existing conversation data
                                         };
                                         
                                         const callResponse = await fetch(`${PLATFORM_URL}/api/book-call/store`, {
@@ -6733,7 +6734,8 @@ self.setupResponseMonitoringForAcceptedConnections = async () => {
                                         conversation_urn_id: null, // Will be updated when we fetch conversations
                                         campaign_id: campaign.id,
                                         campaign_name: `Campaign ${campaign.id}`,
-                                        original_message: 'Lead accepted connection invitation'
+                                        original_message: 'Lead accepted connection invitation',
+                                        is_acceptance_update: true // Preserve existing conversation data
                                     };
                                     
                                     const callResponse = await fetch(`${PLATFORM_URL}/api/book-call/store`, {
