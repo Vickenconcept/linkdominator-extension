@@ -463,6 +463,9 @@ const keepServiceWorkerAlive = () => {
     keepAliveInterval = setInterval(async () => {
         console.log('💓 Service worker keep-alive ping...');
         
+        // Check for pending reminders every 5 minutes
+        await checkPendingReminders();
+        
         try {
             // Check if service worker is active by testing storage access
             await chrome.storage.local.get(['activeCampaigns']);
@@ -7251,7 +7254,17 @@ const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => 
             text.includes('convenient time') ||
             text.includes('specific information') ||
             text.includes('recent projects') ||
-            text.includes('insights on that')
+            text.includes('insights on that') ||
+            // Additional patterns for "not interested" responses
+            text.includes('I appreciate your honesty') ||
+            text.includes('If your situation changes') ||
+            text.includes('If you ever want to discuss') ||
+            text.includes('Wishing you all the best') ||
+            text.includes('Thank you for your response,') ||
+            text.includes('I appreciate your honesty,') ||
+            text.includes('If you ever want to explore') ||
+            text.includes('feel free to reach out') ||
+            text.includes('Wishing you all the best!')
         );
                                 
                                 // Additional check: if message was sent very recently and matches AI patterns, it's likely from AI
@@ -8092,7 +8105,7 @@ const checkAndSendPendingMessages = async () => {
                     if (messageToSend) {
                         console.log(`📤 Sending pending message: "${messageToSend}"`);
                         
-                        const aiSuccess = await sendAIMessage(monitoringData, messageToSend);
+                        const aiSuccess = await sendAIMessage(monitoringData, messageToSend, true); // Skip storage since message was already stored when created
                         if (aiSuccess) {
                             console.log(`✅ Pending message sent successfully to ${monitoringData.leadName}`);
                             
@@ -8747,7 +8760,17 @@ const detectMessageSender = (msg, text) => {
         text.includes('insights on that') ||
         text.includes('Thanks for your willingness to share more details') ||
         text.includes('I\'m looking for information on your recent projects') ||
-        text.includes('Could you provide some insights on that')
+        text.includes('Could you provide some insights on that') ||
+        // Additional patterns for "not interested" responses
+        text.includes('I appreciate your honesty') ||
+        text.includes('If your situation changes') ||
+        text.includes('If you ever want to discuss') ||
+        text.includes('Wishing you all the best') ||
+        text.includes('Thank you for your response,') ||
+        text.includes('I appreciate your honesty,') ||
+        text.includes('If you ever want to explore') ||
+        text.includes('feel free to reach out') ||
+        text.includes('Wishing you all the best!')
     );
     
     // Check if message was sent very recently (likely from AI)
@@ -9035,38 +9058,42 @@ const setupAIMessageMonitoring = async (monitoringData) => {
 /**
  * Send AI-generated message
  */
-const sendAIMessage = async (monitoringData, message) => {
+const sendAIMessage = async (monitoringData, message, skipStorage = false) => {
     console.log('🤖 Sending AI message to', monitoringData.leadName);
     
     try {
         await sendLinkedInMessage(monitoringData, message);
         console.log('✅ AI message sent successfully to', monitoringData.leadName);
         
-        // Store the AI response in conversation history
-        console.log('🔍 DEBUG: Storing AI response in conversation history');
-        if (monitoringData.callId) {
-        const result = await storeConversationMessage({
-                call_id: String(monitoringData.callId),
-            message: message,
-            sender: 'ai',
-            message_type: 'ai_response',
-            lead_name: monitoringData.leadName,
-            connection_id: monitoringData.connectionId,
-            conversation_urn_id: monitoringData.conversationUrnId
-        });
-        
-        if (!result) {
-            console.error('❌ Failed to store AI response in conversation history');
-        } else {
-            // Update monitoring data with the real call_id from server response
-            if (result.call_id && result.call_id !== monitoringData.callId) {
-                console.log('🔄 Updating monitoring data with real call_id from AI response:', result.call_id);
-                monitoringData.callId = result.call_id;
-                // Note: We can't update storage here as we don't have the key, but the next lead message will update it
+        // Store the AI response in conversation history (unless skipped for pending messages)
+        if (!skipStorage) {
+            console.log('🔍 DEBUG: Storing AI response in conversation history');
+            if (monitoringData.callId) {
+            const result = await storeConversationMessage({
+                    call_id: String(monitoringData.callId),
+                message: message,
+                sender: 'ai',
+                message_type: 'ai_response',
+                lead_name: monitoringData.leadName,
+                connection_id: monitoringData.connectionId,
+                conversation_urn_id: monitoringData.conversationUrnId
+            });
+            
+            if (!result) {
+                console.error('❌ Failed to store AI response in conversation history');
+            } else {
+                // Update monitoring data with the real call_id from server response
+                if (result.call_id && result.call_id !== monitoringData.callId) {
+                    console.log('🔄 Updating monitoring data with real call_id from AI response:', result.call_id);
+                    monitoringData.callId = result.call_id;
+                    // Note: We can't update storage here as we don't have the key, but the next lead message will update it
+                }
+                }
+            } else {
+                console.log('⚠️ No call_id available for AI response, skipping conversation storage');
             }
-            }
         } else {
-            console.log('⚠️ No call_id available for AI response, skipping conversation storage');
+            console.log('⏭️ Skipping conversation storage for pending message (already stored)');
         }
         
         // Set up monitoring for responses to this AI message
@@ -10615,5 +10642,118 @@ globalThis.showStorageInfo = async function() {
     } catch (error) {
         console.error('❌ Error getting storage info:', error);
         return { error: error.message };
+    }
+};
+
+/**
+ * Check for pending reminders and process them
+ */
+const checkPendingReminders = async () => {
+    try {
+        console.log('🔔 Checking for pending reminders...');
+        
+        // Get LinkedIn ID from storage
+        const linkedinIdResult = await chrome.storage.local.get(['linkedinId']);
+        const linkedinId = linkedinIdResult.linkedinId;
+        
+        if (!linkedinId) {
+            console.log('⚠️ No LinkedIn ID found, skipping reminder check');
+            return;
+        }
+        
+        // Fetch pending reminders from backend
+        const response = await fetch(`${PLATFORM_URL}/api/reminders/pending`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                'lk-id': linkedinId
+            }
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            const reminders = data.reminders || [];
+            
+            console.log(`📋 Found ${reminders.length} pending reminders`);
+            
+            // Process each reminder
+            for (const reminder of reminders) {
+                await processReminder(reminder, linkedinId);
+            }
+        } else {
+            console.error('❌ Failed to fetch pending reminders:', response.status);
+        }
+        
+    } catch (error) {
+        console.error('❌ Error checking pending reminders:', error);
+    }
+};
+
+/**
+ * Process a single reminder
+ */
+const processReminder = async (reminder, linkedinId) => {
+    try {
+        console.log(`📤 Processing reminder for ${reminder.recipient}...`);
+        
+        // Mark reminder as processing
+        await updateReminderStatus(reminder.id, 'processing', linkedinId);
+        
+        // Prepare monitoring data for sending
+        const monitoringData = {
+            connectionId: reminder.recipient, // Assuming recipient is the connection ID
+            conversationUrnId: reminder.conversation_urn_id,
+            leadName: reminder.recipient,
+            campaignId: 'reminder', // Special campaign ID for reminders
+            callId: reminder.call_id
+        };
+        
+        // Send the reminder message using existing LinkedIn messaging
+        await sendLinkedInMessage(monitoringData, reminder.message);
+        
+        // Mark reminder as sent
+        await updateReminderStatus(reminder.id, 'sent', linkedinId);
+        
+        console.log(`✅ Reminder sent successfully to ${reminder.recipient}`);
+        
+    } catch (error) {
+        console.error(`❌ Failed to process reminder for ${reminder.recipient}:`, error);
+        
+        // Mark reminder as failed
+        await updateReminderStatus(reminder.id, 'failed', linkedinId, error.message);
+    }
+};
+
+/**
+ * Update reminder status in backend
+ */
+const updateReminderStatus = async (reminderId, status, linkedinId, errorMessage = null) => {
+    try {
+        const payload = {
+            reminder_id: reminderId,
+            status: status
+        };
+        
+        if (errorMessage) {
+            payload.error_message = errorMessage;
+        }
+        
+        const response = await fetch(`${PLATFORM_URL}/api/reminders/update-status`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'lk-id': linkedinId
+            },
+            body: JSON.stringify(payload)
+        });
+        
+        if (response.ok) {
+            console.log(`✅ Reminder ${reminderId} status updated to ${status}`);
+        } else {
+            console.error(`❌ Failed to update reminder status:`, response.status);
+        }
+        
+    } catch (error) {
+        console.error('❌ Error updating reminder status:', error);
     }
 };
