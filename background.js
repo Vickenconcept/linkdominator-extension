@@ -1859,19 +1859,23 @@ chrome.alarms.onAlarm.addListener((alarm) => {
                 console.log('❌ No action data found for alarm:', alarm.name);
             }
         });
-    }else if(alarm.name.startsWith('fallback_')){
-        console.log('🎯 Starting general campaign alarm for:', alarm.name);
+    }else if(alarm.name.startsWith('fallback_') || alarm.name.startsWith('direct_')){
+        const campaignType = alarm.name.startsWith('direct_') ? 'direct-action' : 'fallback';
+        console.log(`🎯 Starting ${campaignType} campaign alarm for: ${alarm.name}`);
+        
         chrome.storage.local.get(["campaign","nodeModel","sequence"]).then(async (result) => {
-            console.log('Campaign', alarm.name, 'sequence is running...')
+            console.log(`Campaign ${alarm.name} sequence is running...`)
             let currentCampaign = result.campaign,
             nodeModel = result.nodeModel;
             console.log('📊 Retrieved campaign data:', currentCampaign);
             console.log('🔗 Retrieved node model:', nodeModel);
             console.log('🎯 Node action type:', nodeModel?.value);
+            console.log(`💡 Campaign type: ${campaignType}`);
+            
             try {
                 // Determine which leads to use based on action type
                 const actionType = nodeModel?.value;
-                console.log(`🔍 Action type for fallback: ${actionType}`);
+                console.log(`🔍 Action type: ${actionType}`);
                 
                 let leadsToProcess = [];
                 
@@ -1949,9 +1953,10 @@ chrome.alarms.onAlarm.addListener((alarm) => {
             } catch (err) {
                 console.error(`❌ Error executing ${alarm.name} sequence:`, err);
             } finally {
-                // Clear the fallback alarm to prevent repeats
+                // Clear the alarm to prevent repeats
                 chrome.alarms.clear(alarm.name);
                 console.log(`🧹 Cleared ${alarm.name} alarm after execution`);
+                console.log(`✅ ${campaignType} campaign execution completed`);
             }
         });
         return;
@@ -2802,25 +2807,24 @@ const setCampaignAlarm = async (campaign) => {
             console.log('⏰ Alarm created:', alarmName, 'with 0.1 minute delay');
         });
     } else {
-        console.log('❌ No node item found or node item is empty, skipping alarm creation');
-        console.log('🔍 Possible reasons:');
-        console.log('   1. No accepted or not-accepted leads found');
-        console.log('   2. Node structure missing acceptedAction/notAcceptedAction properties');
-        console.log('   3. statusLastId not matching expected values in nodes');
+        console.log('💡 No invite-based node setup needed (campaign does not use send-invites workflow)');
+        console.log('🔍 Checking for direct-action campaign (endorse/message/follow/etc. without invites)...');
         
-        // For debugging: let's try a simpler approach - find ANY unrun action node (including first node)
-        console.log('🔄 Attempting fallback: find next unrun action node...');
-        console.log(`🔍 DEBUG: Checking ${nodeModelArr.length} nodes for fallback (starting from index 0)...`);
+        // For non-invite campaigns, find the first unrun action node and execute it directly
+        console.log(`🔍 Scanning ${nodeModelArr.length} nodes for next action to execute...`);
         
         // Start from index 0 to include the first node
         for(let i = 0; i < nodeModelArr.length; i++) {
             let node = nodeModelArr[i];
-            console.log(`🔍 Fallback check ${i}: Key: ${node.key}, Type: ${node.type}, Value: ${node.value}, RunStatus: ${node.runStatus}`);
+            console.log(`🔍 Node ${i}: Key: ${node.key}, Type: ${node.type}, Value: ${node.value}, RunStatus: ${node.runStatus}`);
             
             if(node.type === 'action' && node.runStatus === false && node.value !== 'end' && node.value !== 'add-action') {
-                console.log(`✅ Found unrun action node: ${node.key} - ${node.label} (${node.value})`);
+                console.log(`✅ Found next action to execute: ${node.key} - ${node.label} (${node.value})`);
+                console.log(`📋 Action type: ${node.value}`);
+                console.log(`💡 This is a direct-action campaign (does not require send-invites first)`);
+                
                 nodeItem = node;
-                alarmName = `fallback_${node.value}`;
+                alarmName = `direct_${node.value}`;
                 
                 // Calculate delay if there's a previous delay node
                 if(i > 0 && nodeModelArr[i-1].type === 'delay') {
@@ -2830,34 +2834,43 @@ const setCampaignAlarm = async (campaign) => {
                     console.log(`⏰ Using delay from previous node: ${delayInMinutes} minutes`);
                 } else {
                     delayInMinutes = 0.10;
-                    console.log(`⏰ No previous delay node, using default: 0.1 minutes`);
+                    console.log(`⏰ No previous delay, using immediate execution: 0.1 minutes`);
                 }
                 
                 break;
             } else {
-                console.log(`❌ Skipped: type=${node.type === 'action'}, runStatus=${node.runStatus === false}, value=${node.value !== 'end'}`);
+                console.log(`⏭️ Skipped: type=${node.type === 'action'}, runStatus=${node.runStatus === false}, value=${node.value !== 'end'}`);
             }
         }
         
         if(nodeItem) {
-            console.log('🔄 Creating fallback alarm...');
+            console.log('─'.repeat(80));
+            console.log(`🚀 Setting up direct-action campaign: ${nodeItem.value}`);
+            console.log('─'.repeat(80));
+            console.log(`📋 Action: ${nodeItem.label} (${nodeItem.value})`);
+            console.log(`⏰ Alarm name: ${alarmName}`);
+            console.log(`⏱️ Delay: ${delayInMinutes} minutes`);
+            console.log(`💡 Will use campaign_list leads (no invite tracking needed)`);
+            console.log('─'.repeat(80));
+            
             campaignModel = {
                 campaign: campaign,
                 nodeModel: nodeItem,
                 sequence: nodeModelArr // Save the full sequence array for AI mode access
             }
             chrome.storage.local.set(campaignModel).then(() => {
-                console.log('💾 Fallback campaign model saved to storage:', campaignModel);
-                console.log('🔍 Fallback sequence data saved:', nodeModelArr);
-                console.log('🔍 Fallback first node AI mode:', nodeModelArr[0]?.ai_mode);
-                console.log('🔍 Fallback first node review time:', nodeModelArr[0]?.review_time);
+                console.log('💾 Direct-action campaign model saved to storage');
+                console.log('🔍 Sequence data:', nodeModelArr.length, 'nodes');
+                console.log('🎯 Next action:', nodeItem.label);
                 chrome.alarms.create(
                     alarmName, {
                         delayInMinutes: 0.1
                     }
                 );
-                console.log('⏰ Fallback alarm created:', alarmName);
+                console.log(`⏰ Direct-action alarm created: ${alarmName}`);
             });
+        } else {
+            console.log('❌ No executable action found in campaign sequence');
         }
     }
 }
@@ -3778,11 +3791,41 @@ const _getFeaturedSkill =  (lead, node) => {
     });
 
     chrome.storage.local.get(["csrfToken"]).then((result) => {
-        // Use memberUrn if available, otherwise fall back to connectionId
-        const profileId = lead.memberUrn ? lead.memberUrn.replace('urn:li:member:', '') : lead.connectionId;
+        // FIXED: Use connectionId FIRST (this is what the working endorsement code uses!)
+        // Priority: connectionId > conId > publicIdentifier > extract from memberUrn
+        let profileId;
+        
+        if (lead.connectionId) {
+            profileId = lead.connectionId;
+            console.log(`✅ Using connectionId: ${profileId}`);
+        } else if (lead.conId) {
+            profileId = lead.conId;
+            console.log(`✅ Using conId: ${profileId}`);
+        } else if (lead.publicIdentifier) {
+            profileId = lead.publicIdentifier;
+            console.log(`✅ Using publicIdentifier: ${profileId}`);
+        } else if (lead.memberUrn) {
+            profileId = lead.memberUrn.replace('urn:li:member:', '');
+            console.log(`⚠️ Extracted from memberUrn (last resort): ${profileId}`);
+        } else {
+            console.error(`❌ No valid profile ID found for ${lead.name}`);
+            profileId = null;
+        }
+        
+        if (!profileId) {
+            console.error('❌ ENDORSEMENT FLOW: Cannot proceed without profile ID');
+            return;
+        }
+        
         const apiUrl = `${LINKEDIN_URL}/voyager/api/identity/profiles/${profileId}/featuredSkills?includeHiddenEndorsers=false&count=${node.totalSkills}&_=${dInt}`;
         console.log(`🌐 Fetching skills from: ${apiUrl}`);
-        console.log(`👤 Using profile ID: ${profileId} (memberUrn: ${lead.memberUrn}, connectionId: ${lead.connectionId})`);
+        console.log(`👤 Profile ID used: ${profileId}`);
+        console.log(`📊 Available ID fields:`, {
+            connectionId: lead.connectionId || 'N/A',
+            conId: lead.conId || 'N/A',
+            publicIdentifier: lead.publicIdentifier || 'N/A',
+            memberUrn: lead.memberUrn || 'N/A'
+        });
         
         fetch(apiUrl, {
             method: 'get',
@@ -3852,6 +3895,8 @@ const _getFeaturedSkill =  (lead, node) => {
                         _endorseConnection({
                             connectionId: lead.connectionId,
                             memberUrn: lead.memberUrn,
+                            conId: lead.conId, // Add conId field
+                            publicIdentifier: lead.publicIdentifier, // Add publicIdentifier field
                             entityUrn: item.entityUrn,
                             skillName: item.name,
                             leadName: lead.name
@@ -3903,11 +3948,41 @@ const _endorseConnection = (data, result) => {
     console.log(`🔗 Entity URN: ${data.entityUrn}`);
     console.log(`🆔 Member URN: ${data.memberUrn || 'Not set'}`);
     
-    // Use the same profile ID logic as in _getFeaturedSkill
-    const profileId = data.memberUrn ? data.memberUrn.replace('urn:li:member:', '') : data.connectionId;
+    // FIXED: Use connectionId FIRST (this is what the working endorsement code uses!)
+    // Priority: connectionId > conId > publicIdentifier > extract from memberUrn
+    let profileId;
+    
+    if (data.connectionId) {
+        profileId = data.connectionId;
+        console.log(`✅ Using connectionId: ${profileId}`);
+    } else if (data.conId) {
+        profileId = data.conId;
+        console.log(`✅ Using conId: ${profileId}`);
+    } else if (data.publicIdentifier) {
+        profileId = data.publicIdentifier;
+        console.log(`✅ Using publicIdentifier: ${profileId}`);
+    } else if (data.memberUrn) {
+        profileId = data.memberUrn.replace('urn:li:member:', '');
+        console.log(`⚠️ Extracted from memberUrn (last resort): ${profileId}`);
+    } else {
+        console.error(`❌ No valid profile ID found for ${data.leadName}`);
+        profileId = null;
+    }
+    
+    if (!profileId) {
+        console.error('❌ ENDORSEMENT FLOW: Cannot proceed without profile ID');
+        return;
+    }
+    
     const endorseUrl = `${VOYAGER_API}/identity/profiles/${profileId}/normEndorsements`;
     console.log(`🌐 API URL: ${endorseUrl}`);
-    console.log(`👤 Profile ID: ${profileId}`);
+    console.log(`👤 Profile ID used: ${profileId}`);
+    console.log(`📊 Available ID fields:`, {
+        connectionId: data.connectionId || 'N/A',
+        conId: data.conId || 'N/A',
+        publicIdentifier: data.publicIdentifier || 'N/A',
+        memberUrn: data.memberUrn || 'N/A'
+    });
     console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
     console.log('─'.repeat(80));
     console.log(`📤 Sending endorsement request...`);
