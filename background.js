@@ -4544,17 +4544,17 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
                         // Check if already connected
                         const connectedElements = document.querySelectorAll('[aria-label*="Connected"], [aria-label*="connected"]');
                         if (connectedElements.length > 0) {
-                            console.log('ℹ️ Already connected to this profile');
-                            window.linkdominatorAutomationResult = { success: false, skipped: true, reason: 'Already connected' };
-                            return { success: false, skipped: true, reason: 'Already connected' };
+                            console.log('✅ Already connected to this profile - SUCCESSFUL SKIP');
+                            window.linkdominatorAutomationResult = { success: true, skipped: true, reason: 'Already connected' };
+                            return { success: true, skipped: true, reason: 'Already connected' };
                         }
                         
                         // Check if invite already sent
                         const inviteSentElements = document.querySelectorAll('[aria-label*="Invitation sent"], [aria-label*="invitation sent"]');
                         if (inviteSentElements.length > 0) {
-                            console.log('ℹ️ Invite already sent to this profile');
-                            window.linkdominatorAutomationResult = { success: false, skipped: true, reason: 'Invite already sent' };
-                            return { success: false, skipped: true, reason: 'Invite already sent' };
+                            console.log('✅ Invite already sent to this profile - SUCCESSFUL SKIP');
+                            window.linkdominatorAutomationResult = { success: true, skipped: true, reason: 'Invite already sent' };
+                            return { success: true, skipped: true, reason: 'Invite already sent' };
                         }
                         
                         console.log('🔍 Step 5: Looking for Connect button...');
@@ -4896,12 +4896,18 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
             await chrome.tabs.remove(tab.id);
             console.log('✅ Tab closed');
             
-            // Only log success if automation actually succeeded
+            // Check if automation succeeded or was successfully skipped
             if (automationResult && automationResult.success) {
-                console.log(`✅ INVITATION SUCCESSFULLY SENT to ${lead.name} (${lead.connectionId})`);
-                console.log(`🎯 Browser automation - Invitation sent successfully`);
-                console.log(`📝 Message: ${newMessage || 'Default connection message'}`);
-                console.log(`💡 Verify in LinkedIn: My Network → Manage my network → Sent invitations`);
+                if (automationResult.skipped) {
+                    console.log(`✅ INVITATION SKIPPED for ${lead.name} (${lead.connectionId})`);
+                    console.log(`📝 Reason: ${automationResult.reason}`);
+                    console.log(`💡 This is normal - invite already sent or already connected`);
+                } else {
+                    console.log(`✅ INVITATION SUCCESSFULLY SENT to ${lead.name} (${lead.connectionId})`);
+                    console.log(`🎯 Browser automation - Invitation sent successfully`);
+                    console.log(`📝 Message: ${newMessage || 'Default connection message'}`);
+                    console.log(`💡 Verify in LinkedIn: My Network → Manage my network → Sent invitations`);
+                }
             } else {
                 console.log(`❌ INVITATION FAILED for ${lead.name} (${lead.connectionId})`);
                 console.log(`🚨 Browser automation failed: ${automationResult?.error || 'Unknown error'}`);
