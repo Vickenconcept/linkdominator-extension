@@ -3305,50 +3305,24 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
         return;
     }
     
-    // If current node is call, check if campaign should be completed
+    // If current node is call, campaign should continue running to monitor for responses
     if (nodeModel.value === 'call') {
-        console.log('🔧 DEBUG: Call action completed, checking if campaign should be marked as completed...');
+        console.log('🔧 DEBUG: Call action completed - campaign will continue running to monitor for responses...');
         
+        // For call campaigns, we should NOT mark as completed after sending call messages
+        // The campaign should remain active to monitor for user responses
+        console.log('📞 Call message sent - campaign will continue running to monitor responses');
+        console.log('🔄 Campaign remains active for response monitoring');
+        console.log('💡 User can respond to the call message, and the system will detect it');
+        
+        // Update UI status to show call sent and waiting for response
         try {
-            // Check if there are any more unrun actions in the sequence
-            await getCampaignSequence(currentCampaign.id);
-            console.log(`📋 Campaign sequence loaded with ${campaignSequence.nodeModel.length} nodes`);
-            
-            // Find any remaining unrun action nodes (excluding send-invites and call)
-            const remainingActions = campaignSequence.nodeModel.filter(node => 
-                node.type === 'action' && 
-                node.runStatus === false && 
-                node.value !== 'send-invites' && 
-                node.value !== 'call' &&
-                node.value !== 'end'
-            );
-            
-            if (remainingActions.length === 0) {
-                console.log('🎉 No more actions available - marking campaign as completed');
-                
-                await updateCampaign({
-                    campaignId: currentCampaign.id,
-                    status: 'completed'
-                });
-                console.log('✅ Campaign marked as completed in backend');
-                
-                // Clear any pending alarms for this campaign
-                chrome.alarms.clear('lead_generation');
-                chrome.alarms.clear('accepted_leads');
-                console.log('🧹 Cleared pending campaign alarms');
-                
-                console.log('🎊 CAMPAIGN COMPLETED SUCCESSFULLY!');
-                console.log('📞 All call actions have been completed');
-                console.log('🛑 Campaign will no longer run automatically');
-            } else {
-                console.log(`📋 Found ${remainingActions.length} remaining actions, campaign will continue`);
-                console.log('Remaining actions:', remainingActions.map(a => `${a.label} (${a.value})`));
-            }
+            updateCampaignStatus('running', 'Call message sent - waiting for response');
         } catch (error) {
-            console.error('❌ Failed to check campaign completion status:', error);
+            console.log('⚠️ Could not update UI status:', error.message);
         }
         
-        console.log('🔧 DEBUG: Returning early after call node handling to preserve completion state');
+        console.log('🔧 DEBUG: Call node completed, campaign continues running for response monitoring');
         return;
     }
 
@@ -3669,8 +3643,9 @@ const messageConnection = scheduleInfo => {
             console.log('📄 Response data:', res);
             
             // Extract conversation URN ID from response if available
+            let conversationUrnId = null;
             if (res && res.value && res.value.entityUrn) {
-                const conversationUrnId = res.value.entityUrn.replace('urn:li:fsd_conversation:', '');
+                conversationUrnId = res.value.entityUrn.replace('urn:li:fsd_conversation:', '');
                 arConnectionModel.conversationUrnId = conversationUrnId;
                 console.log('─'.repeat(80));
                 console.log('🔗 MESSAGE FLOW: CONVERSATION ESTABLISHED');
@@ -3679,6 +3654,33 @@ const messageConnection = scheduleInfo => {
                 console.log(`👤 Lead: ${arConnectionModel.name || 'Unknown'}`);
                 console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
                 console.log('─'.repeat(80));
+                
+                // DEBUG: Log the full response to see what we got
+                console.log('🔍 DEBUG: Full API response for conversation URN extraction:', JSON.stringify(res, null, 2));
+            } else {
+                // Try alternative conversation URN extraction methods
+                console.log('⚠️ No conversation URN found in standard location, trying alternatives...');
+                
+                // Try different possible locations for conversation URN
+                if (res && res.value && res.value.conversationUrn) {
+                    conversationUrnId = res.value.conversationUrn.replace('urn:li:fsd_conversation:', '').replace('urn:li:fs_conversation:', '');
+                    arConnectionModel.conversationUrnId = conversationUrnId;
+                    console.log('✅ Found conversation URN in alternative location:', conversationUrnId);
+                
+                // Update monitoring data with the conversation URN
+                updateMonitoringDataWithConversationUrn(arConnectionModel.connectionId, conversationUrnId);
+                } else if (res && res.conversationUrn) {
+                    conversationUrnId = res.conversationUrn.replace('urn:li:fsd_conversation:', '').replace('urn:li:fs_conversation:', '');
+                    arConnectionModel.conversationUrnId = conversationUrnId;
+                    console.log('✅ Found conversation URN in root location:', conversationUrnId);
+                
+                // Update monitoring data with the conversation URN
+                updateMonitoringDataWithConversationUrn(arConnectionModel.connectionId, conversationUrnId);
+                } else {
+                    console.log('❌ No conversation URN found in any expected location');
+                    console.log('🔍 Available response keys:', Object.keys(res || {}));
+                }
+            }
                 
                 // Set up response monitoring if this is a call message
                 if (arConnectionModel.message && arConnectionModel.message.toLowerCase().includes('call')) {
@@ -3703,7 +3705,7 @@ const messageConnection = scheduleInfo => {
                                             leadName: arConnectionModel.name,
                                             connectionId: arConnectionModel.connectionId,
                                             campaignId: campaignId,
-                                            conversationUrnId: conversationUrnId,
+                                            conversationUrnId: arConnectionModel.conversationUrnId,
                                             sentAt: Date.now(),
                                             status: 'waiting_for_response',
                                             lastCheckedMessageId: null,
@@ -3713,15 +3715,22 @@ const messageConnection = scheduleInfo => {
                                         }
                                     });
                                     console.log('📊 Response monitoring set up for call message:', responseMonitoringKey);
-                                    console.log('🔗 Conversation URN ID stored:', conversationUrnId);
+                                    console.log('🔗 Conversation URN ID stored:', arConnectionModel.conversationUrnId);
+                                    console.log('🔍 DEBUG: Full monitoring data stored:', {
+                                        callId: null,
+                                        leadName: arConnectionModel.name,
+                                        connectionId: arConnectionModel.connectionId,
+                                        campaignId: campaignId,
+                                        conversationUrnId: arConnectionModel.conversationUrnId,
+                                        sentAt: Date.now(),
+                                        status: 'waiting_for_response'
+                                    });
                                     break;
                                 }
                             }
                         }
                     }, 1000);
                 }
-            }
-            
             console.log('─'.repeat(80));
             console.log('🎉 MESSAGE FLOW: COMPLETED');
             console.log('='.repeat(80));
@@ -7851,11 +7860,24 @@ const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => 
         if (conversations.length === 0) {
             console.log('🔍 No conversations via API, trying direct conversation access...');
             
-            // Known conversation ID for Eleazar (from the URL you provided)
-            const knownConversationIds = [
-                '2-MmJlMWU1MzMtMGUzYi00ODI2LThjNWEtYjQyZTAwZWEyNjM4XzEwMA==',
-                connectionId // Also try the connection ID itself
-            ];
+            // Try to get the actual conversation URN from monitoring data first
+            const monitoringKey = `call_response_monitoring_${connectionId}`;
+            const allStorage = await chrome.storage.local.get();
+            const monitoringEntries = Object.keys(allStorage).filter(key => key.startsWith('call_response_monitoring_'));
+            
+            let knownConversationIds = [connectionId]; // Start with connection ID as fallback
+            
+            // Look for monitoring data that might have the conversation URN
+            for (const key of monitoringEntries) {
+                const monitoringData = allStorage[key];
+                console.log(`🔍 Checking monitoring entry: ${key}`, monitoringData);
+                if (monitoringData.connectionId === connectionId && monitoringData.conversationUrnId) {
+                    console.log(`✅ Found conversation URN in monitoring data: ${monitoringData.conversationUrnId}`);
+                    knownConversationIds.unshift(monitoringData.conversationUrnId); // Put it first
+                }
+            }
+            
+            console.log(`📋 Will try these conversation IDs in order:`, knownConversationIds);
             
             for (const conversationId of knownConversationIds) {
                 try {
@@ -9865,6 +9887,37 @@ const trySendQueuedDraft = async (monitoringData) => {
  };
 
 /**
+ * Update monitoring data with conversation URN after message is sent
+ */
+const updateMonitoringDataWithConversationUrn = async (connectionId, conversationUrnId) => {
+    try {
+        console.log(`🔄 Updating monitoring data for ${connectionId} with conversation URN: ${conversationUrnId}`);
+        
+        // Find all monitoring entries for this connection
+        const allStorage = await chrome.storage.local.get();
+        const monitoringKeys = Object.keys(allStorage).filter(key => 
+            key.startsWith('call_response_monitoring_') && key.includes(connectionId)
+        );
+        
+        for (const key of monitoringKeys) {
+            const monitoringData = allStorage[key];
+            if (monitoringData && !monitoringData.conversationUrnId) {
+                console.log(`✅ Updating ${key} with conversation URN`);
+                await chrome.storage.local.set({ 
+                    [key]: {
+                        ...monitoringData,
+                        conversationUrnId: conversationUrnId
+                    }
+                });
+                console.log(`✅ Successfully updated monitoring data with conversation URN`);
+            }
+        }
+    } catch (error) {
+        console.error('❌ Error updating monitoring data with conversation URN:', error);
+    }
+};
+
+/**
  * Set up monitoring for AI message responses
  */
 const setupAIMessageMonitoring = async (monitoringData) => {
@@ -9878,6 +9931,18 @@ const setupAIMessageMonitoring = async (monitoringData) => {
         const existingMonitoring = await chrome.storage.local.get([responseMonitoringKey]);
         if (existingMonitoring[responseMonitoringKey]) {
             console.log(`✅ Monitoring already exists for ${monitoringData.leadName}`);
+            
+            // Update existing monitoring with new conversation URN if available
+            if (monitoringData.conversationUrnId && !existingMonitoring[responseMonitoringKey].conversationUrnId) {
+                console.log(`🔄 Updating existing monitoring with conversation URN: ${monitoringData.conversationUrnId}`);
+                await chrome.storage.local.set({ 
+                    [responseMonitoringKey]: {
+                        ...existingMonitoring[responseMonitoringKey],
+                        conversationUrnId: monitoringData.conversationUrnId
+                    }
+                });
+                console.log(`✅ Updated monitoring data with conversation URN`);
+            }
             return;
         }
         
