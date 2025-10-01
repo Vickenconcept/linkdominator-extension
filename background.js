@@ -4352,6 +4352,85 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
                     const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
                     
                     try {
+                        // Create overlay to block user interactions
+                        const createOverlay = () => {
+                            // Remove any existing overlay first
+                            const existingOverlay = document.getElementById('linkdominator-automation-overlay');
+                            if (existingOverlay) {
+                                existingOverlay.remove();
+                            }
+                            
+                            const overlay = document.createElement('div');
+                            overlay.id = 'linkdominator-automation-overlay';
+                            overlay.style.cssText = `
+                                position: fixed !important;
+                                top: 0 !important;
+                                left: 0 !important;
+                                width: 100vw !important;
+                                height: 100vh !important;
+                                background: rgba(0, 0, 0, 0.2) !important;
+                                z-index: 2147483647 !important;
+                                pointer-events: all !important;
+                                display: flex !important;
+                                align-items: center !important;
+                                justify-content: center !important;
+                                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+                                backdrop-filter: blur(2px) !important;
+                            `;
+                            
+                            const overlayContent = document.createElement('div');
+                            overlayContent.style.cssText = `
+                                background: rgba(255, 255, 255, 0.98) !important;
+                                padding: 25px 35px !important;
+                                border-radius: 12px !important;
+                                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2) !important;
+                                text-align: center !important;
+                                color: #333 !important;
+                                font-size: 15px !important;
+                                font-weight: 600 !important;
+                                border: 2px solid #0077b5 !important;
+                                min-width: 280px !important;
+                            `;
+                            overlayContent.innerHTML = `
+                                <div style="margin-bottom: 12px; font-size: 18px;">🤖 LinkDominator</div>
+                                <div style="color: #666; font-size: 13px; margin-bottom: 8px;">Processing connection invite...</div>
+                                <div style="color: #999; font-size: 11px;">Please wait, do not interact with this page</div>
+                            `;
+                            
+                            overlay.appendChild(overlayContent);
+                            
+                            // Add to document immediately
+                            document.documentElement.appendChild(overlay);
+                            
+                            // Disable page interactions
+                            document.body.style.pointerEvents = 'none';
+                            document.body.style.overflow = 'hidden';
+                            document.documentElement.style.overflow = 'hidden';
+                            
+                            // Force visibility
+                            overlay.style.display = 'flex';
+                            overlay.style.visibility = 'visible';
+                            overlay.style.opacity = '1';
+                            
+                            console.log('🛡️ Overlay created - user interactions blocked');
+                            return overlay;
+                        };
+                        
+                        const removeOverlay = () => {
+                            const overlay = document.getElementById('linkdominator-automation-overlay');
+                            if (overlay) {
+                                overlay.remove();
+                            }
+                            // Restore page interactions
+                            document.body.style.pointerEvents = '';
+                            document.body.style.overflow = '';
+                            document.documentElement.style.overflow = '';
+                            console.log('🛡️ Overlay removed - user interactions restored');
+                        };
+                        
+                        // Create overlay immediately
+                        createOverlay();
+                        
                         console.log('🔍 Step 4: Checking connection status...');
                         console.log('🚨 TEST: Script is executing the try block!');
                         
@@ -4359,6 +4438,7 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
                         const connectedElements = document.querySelectorAll('[aria-label*="Connected"], [aria-label*="connected"]');
                         if (connectedElements.length > 0) {
                             console.log('ℹ️ Already connected to this profile');
+                            window.linkdominatorAutomationResult = { success: false, skipped: true, reason: 'Already connected' };
                             return { success: false, skipped: true, reason: 'Already connected' };
                         }
                         
@@ -4366,6 +4446,7 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
                         const inviteSentElements = document.querySelectorAll('[aria-label*="Invitation sent"], [aria-label*="invitation sent"]');
                         if (inviteSentElements.length > 0) {
                             console.log('ℹ️ Invite already sent to this profile');
+                            window.linkdominatorAutomationResult = { success: false, skipped: true, reason: 'Invite already sent' };
                             return { success: false, skipped: true, reason: 'Invite already sent' };
                         }
                         
@@ -4376,24 +4457,41 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
                         console.log('🚨 DEBUG: About to check for direct Connect buttons...');
                         
                         // Find Connect button - ONLY within the main profile div
-                        const mainProfileDiv = document.querySelector('.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk');
+                        const mainProfileDiv = document.querySelector('.ph5.pb5');
                         console.log('🔍 Main profile div found:', mainProfileDiv);
                         
                         if (!mainProfileDiv) {
                             console.log('❌ Main profile div not found - cannot proceed safely');
+                            console.log('🔍 Available divs with classes containing "ph5":');
+                            const ph5Divs = document.querySelectorAll('[class*="ph5"]');
+                            ph5Divs.forEach((div, index) => {
+                                console.log(`   ${index + 1}. Class: "${div.className}"`);
+                            });
+                            console.log('🔍 Available divs with classes containing "pb5":');
+                            const pb5Divs = document.querySelectorAll('[class*="pb5"]');
+                            pb5Divs.forEach((div, index) => {
+                                console.log(`   ${index + 1}. Class: "${div.className}"`);
+                            });
+                            window.linkdominatorAutomationResult = { success: false, error: 'Main profile container not found' };
                             return { success: false, error: 'Main profile container not found' };
                         }
                         
                         const connectSelectors = [
-                            '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk button[aria-label*="Connect"]',
-                            '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk button[aria-label*="connect"]',
-                            '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk button[aria-label*="Invite"]',
-                            '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk button[aria-label*="invite"]',
-                            '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .artdeco-button[aria-label*="Connect"]',
-                            '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .artdeco-button[aria-label*="Invite"]',
-                            '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk [data-control-name="connect"]',
-                            '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .pv-s-profile-actions--connect',
-                            '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .pv-s-profile-actions button'
+                            '.ph5.pb5 button[aria-label*="Connect"]',
+                            '.ph5.pb5 button[aria-label*="connect"]',
+                            '.ph5.pb5 button[aria-label*="Invite"]',
+                            '.ph5.pb5 button[aria-label*="invite"]',
+                            '.ph5.pb5 .artdeco-button[aria-label*="Connect"]',
+                            '.ph5.pb5 .artdeco-button[aria-label*="Invite"]',
+                            '.ph5.pb5 [data-control-name="connect"]',
+                            '.ph5.pb5 .pv-s-profile-actions--connect',
+                            '.ph5.pb5 .pv-s-profile-actions button',
+                            '.ph5.pb5 * button[aria-label*="Connect"]',
+                            '.ph5.pb5 * button[aria-label*="connect"]',
+                            '.ph5.pb5 * button[aria-label*="Invite"]',
+                            '.ph5.pb5 * button[aria-label*="invite"]',
+                            '.ph5.pb5 * .artdeco-button[aria-label*="Connect"]',
+                            '.ph5.pb5 * .artdeco-button[aria-label*="Invite"]'
                         ];
                         
                         console.log('🔍 Checking for direct Connect buttons within main profile div...');
@@ -4439,7 +4537,7 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
                         if (!connectButton) {
                             console.log('🚨 DEBUG: No Connect button found by text, checking More dropdown within main profile div...');
                             console.log('🔍 Checking "More" dropdown for Connect button...');
-                            const moreButton = mainProfileDiv.querySelector('button[aria-label*="More actions"], button[aria-label*="More"], .artdeco-dropdown__trigger');
+                            const moreButton = mainProfileDiv.querySelector('button[aria-label*="More actions"], button[aria-label*="More"], .artdeco-dropdown__trigger, button[aria-label*="more"], button[aria-label*="Additional actions"]');
                             console.log('🔍 More button search result:', moreButton);
                             if (moreButton) {
                                 console.log('✅ Found "More" button, details:', {
@@ -4457,21 +4555,29 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
                                 // Look for Connect button in dropdown within main profile div
                                 console.log('🔍 Searching for Connect button in dropdown within main profile div...');
                                 const dropdownConnectSelectors = [
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk button[aria-label*="Connect"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk button[aria-label*="connect"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk button[aria-label*="Invite"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk button[aria-label*="invite"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .artdeco-dropdown__content button[aria-label*="Connect"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .artdeco-dropdown__content button[aria-label*="connect"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .artdeco-dropdown__content button[aria-label*="Invite"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .artdeco-dropdown__content button[aria-label*="invite"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .artdeco-dropdown__item[aria-label*="Connect"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .artdeco-dropdown__item[aria-label*="connect"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .artdeco-dropdown__item[aria-label*="Invite"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .artdeco-dropdown__item[aria-label*="invite"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk [aria-label*="Invite"][aria-label*="connect"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk [role="button"][aria-label*="Connect"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk [role="button"][aria-label*="Invite"]'
+                                    '.ph5.pb5 button[aria-label*="Connect"]',
+                                    '.ph5.pb5 button[aria-label*="connect"]',
+                                    '.ph5.pb5 button[aria-label*="Invite"]',
+                                    '.ph5.pb5 button[aria-label*="invite"]',
+                                    '.ph5.pb5 .artdeco-dropdown__content button[aria-label*="Connect"]',
+                                    '.ph5.pb5 .artdeco-dropdown__content button[aria-label*="connect"]',
+                                    '.ph5.pb5 .artdeco-dropdown__content button[aria-label*="Invite"]',
+                                    '.ph5.pb5 .artdeco-dropdown__content button[aria-label*="invite"]',
+                                    '.ph5.pb5 .artdeco-dropdown__item[aria-label*="Connect"]',
+                                    '.ph5.pb5 .artdeco-dropdown__item[aria-label*="connect"]',
+                                    '.ph5.pb5 .artdeco-dropdown__item[aria-label*="Invite"]',
+                                    '.ph5.pb5 .artdeco-dropdown__item[aria-label*="invite"]',
+                                    '.ph5.pb5 [aria-label*="Invite"][aria-label*="connect"]',
+                                    '.ph5.pb5 [role="button"][aria-label*="Connect"]',
+                                    '.ph5.pb5 [role="button"][aria-label*="Invite"]',
+                                    '.ph5.pb5 * button[aria-label*="Connect"]',
+                                    '.ph5.pb5 * button[aria-label*="connect"]',
+                                    '.ph5.pb5 * button[aria-label*="Invite"]',
+                                    '.ph5.pb5 * button[aria-label*="invite"]',
+                                    '.ph5.pb5 * .artdeco-dropdown__content button[aria-label*="Connect"]',
+                                    '.ph5.pb5 * .artdeco-dropdown__content button[aria-label*="connect"]',
+                                    '.ph5.pb5 * .artdeco-dropdown__content button[aria-label*="Invite"]',
+                                    '.ph5.pb5 * .artdeco-dropdown__content button[aria-label*="invite"]'
                                 ];
                                 
                                 for (const selector of dropdownConnectSelectors) {
@@ -4521,6 +4627,7 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
                         
                         if (!connectButton) {
                             console.log('❌ Connect button not found');
+                            window.linkdominatorAutomationResult = { success: false, error: 'User not found or connection not available' };
                             return { success: false, error: 'User not found or connection not available' };
                         }
                         
@@ -4569,6 +4676,7 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
                         
                         if (!sendButton) {
                             console.log('❌ Send button not found');
+                            window.linkdominatorAutomationResult = { success: false, error: 'Connection not successfully sent' };
                             return { success: false, error: 'Connection not successfully sent' };
                         }
                         
@@ -4590,17 +4698,21 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
                             const element = document.querySelector(selector);
                             if (element) {
                                 console.log('✅ Invite sent successfully confirmed');
+                                window.linkdominatorAutomationResult = { success: true };
                                 return { success: true };
                             }
                         }
                         
                         console.log('✅ Invite sent (no explicit confirmation found)');
                         console.log('🚨 TEST: Script completed successfully!');
+                        window.linkdominatorAutomationResult = { success: true };
                         return { success: true };
                         
                     } catch (error) {
                         console.log('🚨 TEST: Script caught an error!');
                         console.error('❌ Error in automation:', error.message);
+                        removeOverlay();
+                        window.linkdominatorAutomationResult = { success: false, error: error.message };
                         return { success: false, error: error.message };
                     }
                 },
@@ -4611,15 +4723,74 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
             console.log('🔄 Step 4: Waiting for automation to complete...');
             await delay(5000); // Give time for automation to complete
             
+            // Check automation result from the injected script
+            let automationResult = null;
+            try {
+                // Try to get the result from the injected script
+                const results = await chrome.scripting.executeScript({
+                    target: { tabId: tab.id },
+                    func: () => {
+                        return window.linkdominatorAutomationResult || { success: false, error: 'No result available' };
+                    }
+                });
+                automationResult = results[0]?.result;
+                console.log('🔍 Automation result:', automationResult);
+                
+                // Remove overlay after getting result
+                await chrome.scripting.executeScript({
+                    target: { tabId: tab.id },
+                    func: () => {
+                        const overlay = document.getElementById('linkdominator-automation-overlay');
+                        if (overlay) {
+                            overlay.remove();
+                        }
+                        // Restore page interactions
+                        document.body.style.pointerEvents = '';
+                        document.body.style.overflow = '';
+                        document.documentElement.style.overflow = '';
+                        console.log('🛡️ Overlay removed - user interactions restored');
+                    }
+                });
+            } catch (error) {
+                console.log('⚠️ Could not get automation result:', error.message);
+                automationResult = { success: false, error: 'Could not get result' };
+                
+                // Still try to remove overlay even if we couldn't get result
+                try {
+                    await chrome.scripting.executeScript({
+                        target: { tabId: tab.id },
+                        func: () => {
+                            const overlay = document.getElementById('linkdominator-automation-overlay');
+                            if (overlay) {
+                                overlay.remove();
+                            }
+                            document.body.style.pointerEvents = '';
+                            document.body.style.overflow = '';
+                            document.documentElement.style.overflow = '';
+                            console.log('🛡️ Overlay removed - user interactions restored');
+                        }
+                    });
+                } catch (overlayError) {
+                    console.log('⚠️ Could not remove overlay:', overlayError.message);
+                }
+            }
+            
             // Step 5: Close the tab
             console.log('🔄 Step 5: Closing tab...');
             await chrome.tabs.remove(tab.id);
             console.log('✅ Tab closed');
             
-            console.log(`✅ INVITATION SUCCESSFULLY SENT to ${lead.name} (${lead.connectionId})`);
-            console.log(`🎯 Browser automation - Invitation sent successfully`);
-            console.log(`📝 Message: ${newMessage || 'Default connection message'}`);
-            console.log(`💡 Verify in LinkedIn: My Network → Manage my network → Sent invitations`);
+            // Only log success if automation actually succeeded
+            if (automationResult && automationResult.success) {
+                console.log(`✅ INVITATION SUCCESSFULLY SENT to ${lead.name} (${lead.connectionId})`);
+                console.log(`🎯 Browser automation - Invitation sent successfully`);
+                console.log(`📝 Message: ${newMessage || 'Default connection message'}`);
+                console.log(`💡 Verify in LinkedIn: My Network → Manage my network → Sent invitations`);
+            } else {
+                console.log(`❌ INVITATION FAILED for ${lead.name} (${lead.connectionId})`);
+                console.log(`🚨 Browser automation failed: ${automationResult?.error || 'Unknown error'}`);
+                throw new Error(`Automation failed: ${automationResult?.error || 'Unknown error'}`);
+            }
             
             // Update lead status
             try {
