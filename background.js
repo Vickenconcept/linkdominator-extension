@@ -107,6 +107,98 @@ const handleConnectionInviteRequest = async (data) => {
             throw new Error('Failed to create tab');
         }
         
+        // Step 1.5: Create overlay immediately to prevent any user interaction during loading
+        console.log('🛡️ Creating overlay immediately to block interactions...');
+        try {
+            await chrome.scripting.executeScript({
+                target: { tabId: tab.id },
+                func: () => {
+                    // Create overlay immediately
+                    const createOverlay = () => {
+                        // Remove any existing overlay first
+                        const existingOverlay = document.getElementById('linkdominator-automation-overlay');
+                        if (existingOverlay) {
+                            existingOverlay.remove();
+                        }
+                        
+                        const overlay = document.createElement('div');
+                        overlay.id = 'linkdominator-automation-overlay';
+                        overlay.style.cssText = `
+                            position: fixed !important;
+                            top: 0 !important;
+                            left: 0 !important;
+                            width: 100vw !important;
+                            height: 100vh !important;
+                            background: rgba(0, 0, 0, 0.2) !important;
+                            z-index: 2147483647 !important;
+                            pointer-events: all !important;
+                            display: flex !important;
+                            align-items: center !important;
+                            justify-content: center !important;
+                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+                            backdrop-filter: blur(2px) !important;
+                        `;
+                        
+                        const overlayContent = document.createElement('div');
+                        overlayContent.style.cssText = `
+                            background: rgba(255, 255, 255, 0.98) !important;
+                            padding: 25px 35px !important;
+                            border-radius: 12px !important;
+                            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2) !important;
+                            text-align: center !important;
+                            color: #333 !important;
+                            font-size: 15px !important;
+                            font-weight: 600 !important;
+                            border: 2px solid #0077b5 !important;
+                            min-width: 280px !important;
+                        `;
+                        overlayContent.innerHTML = `
+                            <div style="margin-bottom: 12px; font-size: 18px;">🤖 LinkDominator</div>
+                            <div style="color: #666; font-size: 13px; margin-bottom: 8px;">Loading profile...</div>
+                            <div style="color: #999; font-size: 11px;">Please wait, do not interact with this page</div>
+                        `;
+                        
+                        overlay.appendChild(overlayContent);
+                        
+                        // Add to document immediately
+                        document.documentElement.appendChild(overlay);
+                        
+                        // Disable page interactions
+                        document.body.style.pointerEvents = 'none';
+                        document.body.style.overflow = 'hidden';
+                        document.documentElement.style.overflow = 'hidden';
+                        
+                        // Force visibility
+                        overlay.style.display = 'flex';
+                        overlay.style.visibility = 'visible';
+                        overlay.style.opacity = '1';
+                        
+                        console.log('🛡️ Early overlay created - user interactions blocked');
+                        return overlay;
+                    };
+                    
+                    // Create overlay immediately
+                    createOverlay();
+                    
+                    // Store the remove function globally for later use
+                    window.linkdominatorRemoveOverlay = () => {
+                        const overlay = document.getElementById('linkdominator-automation-overlay');
+                        if (overlay) {
+                            overlay.remove();
+                        }
+                        // Restore page interactions
+                        document.body.style.pointerEvents = '';
+                        document.body.style.overflow = '';
+                        document.documentElement.style.overflow = '';
+                        console.log('🛡️ Overlay removed - user interactions restored');
+                    };
+                }
+            });
+            console.log('✅ Early overlay created successfully');
+        } catch (error) {
+            console.log('⚠️ Could not create early overlay (page might not be ready):', error.message);
+        }
+        
         // Step 2: Wait for page to load
         console.log('🔄 Step 2: Waiting for page to load...');
         await new Promise((resolve) => {
@@ -4428,8 +4520,23 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
                             console.log('🛡️ Overlay removed - user interactions restored');
                         };
                         
-                        // Create overlay immediately
-                        createOverlay();
+                        // Update overlay text to show automation is starting
+                        const updateOverlayText = (text) => {
+                            const overlay = document.getElementById('linkdominator-automation-overlay');
+                            if (overlay) {
+                                const contentDiv = overlay.querySelector('div');
+                                if (contentDiv) {
+                                    contentDiv.innerHTML = `
+                                        <div style="margin-bottom: 12px; font-size: 18px;">🤖 LinkDominator</div>
+                                        <div style="color: #666; font-size: 13px; margin-bottom: 8px;">${text}</div>
+                                        <div style="color: #999; font-size: 11px;">Please wait, do not interact with this page</div>
+                                    `;
+                                }
+                            }
+                        };
+                        
+                        // Update overlay text to show automation is starting
+                        updateOverlayText('Processing connection invite...');
                         
                         console.log('🔍 Step 4: Checking connection status...');
                         console.log('🚨 TEST: Script is executing the try block!');
@@ -4740,15 +4847,19 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
                 await chrome.scripting.executeScript({
                     target: { tabId: tab.id },
                     func: () => {
-                        const overlay = document.getElementById('linkdominator-automation-overlay');
-                        if (overlay) {
-                            overlay.remove();
+                        if (window.linkdominatorRemoveOverlay) {
+                            window.linkdominatorRemoveOverlay();
+                        } else {
+                            // Fallback if stored function not available
+                            const overlay = document.getElementById('linkdominator-automation-overlay');
+                            if (overlay) {
+                                overlay.remove();
+                            }
+                            document.body.style.pointerEvents = '';
+                            document.body.style.overflow = '';
+                            document.documentElement.style.overflow = '';
+                            console.log('🛡️ Overlay removed - user interactions restored');
                         }
-                        // Restore page interactions
-                        document.body.style.pointerEvents = '';
-                        document.body.style.overflow = '';
-                        document.documentElement.style.overflow = '';
-                        console.log('🛡️ Overlay removed - user interactions restored');
                     }
                 });
             } catch (error) {
@@ -4760,14 +4871,19 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
                     await chrome.scripting.executeScript({
                         target: { tabId: tab.id },
                         func: () => {
-                            const overlay = document.getElementById('linkdominator-automation-overlay');
-                            if (overlay) {
-                                overlay.remove();
+                            if (window.linkdominatorRemoveOverlay) {
+                                window.linkdominatorRemoveOverlay();
+                            } else {
+                                // Fallback if stored function not available
+                                const overlay = document.getElementById('linkdominator-automation-overlay');
+                                if (overlay) {
+                                    overlay.remove();
+                                }
+                                document.body.style.pointerEvents = '';
+                                document.body.style.overflow = '';
+                                document.documentElement.style.overflow = '';
+                                console.log('🛡️ Overlay removed - user interactions restored');
                             }
-                            document.body.style.pointerEvents = '';
-                            document.body.style.overflow = '';
-                            document.documentElement.style.overflow = '';
-                            console.log('🛡️ Overlay removed - user interactions restored');
                         }
                     });
                 } catch (overlayError) {
