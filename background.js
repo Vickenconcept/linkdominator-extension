@@ -1836,6 +1836,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
         // console.log('⏰ Checking all active campaigns for invite acceptances...');
         // console.log('🕐 Alarm fired at:', new Date().toLocaleTimeString());
         checkAllCampaignsForAcceptances();
+    }else if(alarm.name.startsWith('next_step_')){
+        console.log(`🔔 Alarm triggered: ${alarm.name}`);
+        handleNextStepExecution(alarm.name);
     }else if(alarm.name == 'custom_like_post'){
         console.log('👍 LIKE POST: Custom like post alarm triggered');
         chrome.storage.local.get(["campaignCustomLikePost","nodeModelCustomLikePost"]).then((result) => {
@@ -2102,6 +2105,152 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 })
 
 /**
+ * Handle execution of next step after send-invites
+ * @param {string} alarmName 
+ */
+const handleNextStepExecution = async (alarmName) => {
+    console.log(`🎯 HANDLING NEXT STEP EXECUTION: ${alarmName}`);
+    
+    try {
+        // Extract campaign ID from alarm name (format: next_step_255_1)
+        const parts = alarmName.split('_');
+        const campaignId = parseInt(parts[2]);
+        
+        console.log(`🔍 Campaign ID: ${campaignId}`);
+        
+        // Get the stored next node info
+        const storageKey = `next_node_${campaignId}`;
+        const result = await chrome.storage.local.get([storageKey]);
+        
+        if (!result[storageKey]) {
+            console.error(`❌ No next node info found for campaign ${campaignId}`);
+            return;
+        }
+        
+        const { campaign, node } = result[storageKey];
+        console.log(`📋 Campaign: ${campaign.name} (ID: ${campaign.id})`);
+        console.log(`🎯 Next node: ${node.label} (${node.value})`);
+        
+        // Get leads for this campaign using callback pattern
+        getCampaignLeads(campaign.id, (leadsData) => {
+            console.log(`👥 Found ${leadsData.length} leads for next step execution`);
+            
+            if (leadsData.length > 0) {
+                // Execute the next node
+                runSequence(campaign, leadsData, node).then(() => {
+                    console.log(`✅ Next step executed successfully: ${node.label}`);
+                }).catch((error) => {
+                    console.error(`❌ Error executing next step: ${error}`);
+                });
+            } else {
+                console.log(`⚠️ No leads found for next step execution`);
+            }
+        });
+        
+        // Clean up the stored next node info
+        chrome.storage.local.remove([storageKey]);
+        
+    } catch (error) {
+        console.error('❌ Error in handleNextStepExecution:', error);
+    }
+};
+
+/**
+ * Check for next steps after send-invites is completed
+ * @param {object} campaign 
+ */
+const checkForNextStepsAfterInvites = async (campaign) => {
+    console.log(`🔍 CHECKING NEXT STEPS for campaign ${campaign.id} (${campaign.name})`);
+    
+    try {
+        // Get the campaign sequence
+        await getCampaignSequence(campaign.id);
+        console.log(`📋 Campaign sequence loaded with ${campaignSequence.nodeModel.length} nodes`);
+        
+        // Find the next node after send-invites
+        const nextNode = campaignSequence.nodeModel.find(node => 
+            node.value !== 'send-invites' && !node.runStatus && node.type === 'action'
+        );
+        
+        if (nextNode) {
+            console.log(`🔄 Found next node: ${nextNode.label} (${nextNode.value})`);
+            console.log(`⏰ Setting up next node execution...`);
+            
+            // Check if there's a timing node before this action node
+            let delayInMinutes = 0.1; // Default immediate execution
+            const nodeIndex = campaignSequence.nodeModel.findIndex(n => n.key === nextNode.key);
+            
+            // Look for a timing node before this action node
+            if (nodeIndex > 0) {
+                const previousNode = campaignSequence.nodeModel[nodeIndex - 1];
+                if (previousNode.type === 'timing' && previousNode.time && previousNode.value) {
+                    // Calculate delay based on timing node
+                    delayInMinutes = previousNode.time === 'days' 
+                        ? previousNode.value * 24 * 60
+                        : previousNode.value * 60;
+                    
+                    console.log(`⏰ Found timing node: ${previousNode.value} ${previousNode.time}`);
+                    console.log(`⏰ Calculated delay: ${delayInMinutes} minutes`);
+                    
+                    // Mark the timing node as completed
+                    await updateSequenceNodeModel(campaign, { ...previousNode, runStatus: true });
+                }
+            }
+            
+            const alarmName = `next_step_${campaign.id}_${nextNode.key}`;
+            
+            chrome.alarms.create(alarmName, {
+                delayInMinutes: delayInMinutes
+            });
+            
+            console.log(`⏰ Alarm created: ${alarmName} with ${delayInMinutes} minute delay`);
+            console.log(`🎯 Next step will execute: ${nextNode.label}`);
+            
+            // Store the next node info for execution
+            chrome.storage.local.set({
+                [`next_node_${campaign.id}`]: {
+                    campaign: campaign,
+                    node: nextNode,
+                    alarmName: alarmName
+                }
+            });
+            
+        } else {
+            console.log('❌ No next action node found');
+            
+            // Check if there's an "end" node
+            const endNode = campaignSequence.nodeModel.find(node => 
+                node.type === 'end' || node.value === 'end'
+            );
+            
+            if (endNode) {
+                console.log('🏁 END node detected - marking campaign as completed');
+                
+                try {
+                    // Mark the end node as complete
+                    await updateSequenceNodeModel(campaign, { ...endNode, runStatus: true });
+                    
+                    // Mark the campaign as completed
+                    await updateCampaign({
+                        campaignId: campaign.id,
+                        status: 'completed'
+                    });
+                    
+                    console.log('✅ Campaign marked as COMPLETED');
+                } catch (error) {
+                    console.error('❌ Failed to mark campaign as completed:', error);
+                }
+            } else {
+                console.log('⚠️ No "end" node found - campaign will remain active');
+            }
+        }
+        
+    } catch (error) {
+        console.error('❌ Error in checkForNextStepsAfterInvites:', error);
+    }
+};
+
+/**
  * Set new campaign schedule
  * @param {object} campaign 
  */
@@ -2222,10 +2371,16 @@ const setCampaignAlarm = async (campaign) => {
             }else{
                 console.log('✅ Send-invites ALREADY COMPLETED - invites were sent!');
                 console.log(`📊 Node 0 (send-invites) runStatus: ${nodeModelArr[0].runStatus}`);
-                console.log('⏸️ Skipping alarm creation - waiting for acceptance check to handle next steps');
-                console.log('💡 The continuous_invite_monitoring will detect acceptances and trigger next actions');
+                console.log('🔄 Checking for next steps in sequence...');
                 
-                // Don't create any alarm - let the acceptance monitoring handle it
+                // Check for next steps immediately instead of waiting for acceptances
+                try {
+                    await checkForNextStepsAfterInvites(campaign);
+                    console.log('✅ Next steps check completed');
+                } catch (error) {
+                    console.error('❌ Error checking for next steps:', error);
+                }
+                
                 return;
             }
         }else if(nodeModelArr[0].value == 'like-post'){
@@ -3240,9 +3395,14 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
             // Check if this is a direct-action campaign (first node is NOT send-invites)
             const firstNode = sequenceNodes[0];
             const isDirectActionCampaign = firstNode && firstNode.value !== 'send-invites';
+            const isSendInvitesCompleted = firstNode && firstNode.value === 'send-invites' && firstNode.runStatus === true;
             
-            if (isDirectActionCampaign) {
-                console.log('💡 This is a direct-action campaign - executing next node immediately');
+            if (isDirectActionCampaign || isSendInvitesCompleted) {
+                if (isDirectActionCampaign) {
+                    console.log('💡 This is a direct-action campaign - executing next node immediately');
+                } else {
+                    console.log('💡 Send-invites completed - executing next node immediately');
+                }
                 
                 // Filter out audience objects - only keep actual lead objects with connectionId
                 const validLeads = leads.filter(lead => lead.connectionId && lead.firstName);
@@ -9061,23 +9221,23 @@ const debugCampaignStorage = async () => {
         const campaignSpecificKeys = Object.keys(allStorage).filter(key => key.startsWith('campaign_') && !campaignKeys.includes(key));
         campaignKeys.push(...campaignSpecificKeys);
         
-        console.log('📊 All storage keys:', Object.keys(allStorage));
-        console.log('📊 Campaign-specific keys found:', campaignSpecificKeys);
+        // console.log('📊 All storage keys:', Object.keys(allStorage));
+        // console.log('📊 Campaign-specific keys found:', campaignSpecificKeys);
         
-        for (const key of campaignKeys) {
-            if (allStorage[key]) {
-                console.log(`🔍 Found data in key '${key}':`, allStorage[key]);
-                if (allStorage[key].campaign) {
-                    console.log(`   - Campaign ID: ${allStorage[key].campaign.id}`);
-                    console.log(`   - Campaign Name: ${allStorage[key].campaign.name}`);
-                    console.log(`   - Has sequence: ${!!allStorage[key].sequence}`);
-                    if (allStorage[key].sequence && allStorage[key].sequence[0]) {
-                        console.log(`   - First node AI mode: ${allStorage[key].sequence[0].ai_mode}`);
-                        console.log(`   - First node review time: ${allStorage[key].sequence[0].review_time}`);
-                    }
-                }
-            }
-        }
+        // for (const key of campaignKeys) {
+        //     if (allStorage[key]) {
+        //         console.log(`🔍 Found data in key '${key}':`, allStorage[key]);
+        //         if (allStorage[key].campaign) {
+        //             console.log(`   - Campaign ID: ${allStorage[key].campaign.id}`);
+        //             console.log(`   - Campaign Name: ${allStorage[key].campaign.name}`);
+        //             console.log(`   - Has sequence: ${!!allStorage[key].sequence}`);
+        //             if (allStorage[key].sequence && allStorage[key].sequence[0]) {
+        //                 console.log(`   - First node AI mode: ${allStorage[key].sequence[0].ai_mode}`);
+        //                 console.log(`   - First node review time: ${allStorage[key].sequence[0].review_time}`);
+        //             }
+        //         }
+        //     }
+        // }
         
         // Check monitoring data
         const monitoringKeys = Object.keys(allStorage).filter(key => key.startsWith('call_response_monitoring_'));
