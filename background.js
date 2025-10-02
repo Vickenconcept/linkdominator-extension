@@ -109,11 +109,10 @@ const publishLinkedInPost = async (post) => {
 // Function to create LinkedIn post (injected into LinkedIn page)
 const createLinkedInPost = (post) => {
     return new Promise((resolve) => {
-        try {
-            console.log('📝 Creating LinkedIn post:', post);
-            
-            // Wait for LinkedIn to load
-            setTimeout(() => {
+        console.log('📝 Creating LinkedIn post:', post);
+        
+        // Wait for LinkedIn to load
+        setTimeout(() => {
             // Step 1: Find and click the post creation input to open the modal
             console.log('🔍 Looking for post input elements...');
             
@@ -251,29 +250,136 @@ const createLinkedInPost = (post) => {
                         modalTextArea.dispatchEvent(new Event('input', { bubbles: true }));
                         modalTextArea.dispatchEvent(new Event('change', { bubbles: true }));
                         
-                        // Step 3: Find and click the post button in the modal
-                        setTimeout(() => {
-                            const postButton = document.querySelector('[data-test-id="post-composer-submit-button"]') ||
-                                             document.querySelector('button[type="submit"]') ||
-                                             document.querySelector('.share-box__submit-button') ||
-                                             document.querySelector('.share-actions__primary-action') ||
-                                             document.querySelector('button[aria-label*="Post"]') ||
-                                             document.querySelector('button[aria-label*="Share"]');
+                        console.log('✅ Content filled, checking for image...');
+                        
+                        // Step 3: Handle image upload if present
+                        if (post.image_url) {
+                            console.log('🖼️ Post has image, looking for image upload button...');
+                            handleImageUpload(post.image_url);
+                        } else if (post.carousel_images && post.carousel_images.length > 0) {
+                            console.log('🖼️ Post has carousel images, looking for image upload button...');
+                            handleCarouselUpload(post.carousel_images);
+                        } else {
+                            console.log('📝 Text-only post, proceeding to post button...');
+                            findAndClickPostButton();
+                        }
+                        
+                        // Define helper functions within the injected script context
+                        function handleImageUpload(imageUrl) {
+                            console.log('🖼️ Handling single image upload:', imageUrl);
                             
-                            if (postButton) {
-                                console.log('✅ Found post button, clicking...');
-                                postButton.click();
-                                
-                                // Wait a bit and return success
-                                setTimeout(() => {
-                                    console.log('✅ Post submitted successfully');
-                                    resolve({ success: true, linkedinPostId: 'linkedin-' + Date.now() });
-                                }, 2000);
-                            } else {
-                                console.log('❌ Post button not found in modal');
-                                resolve({ success: false, error: 'Post button not found in modal' });
+                            // Look for image upload button
+                            const imageSelectors = [
+                                'button[aria-label*="Add an image"]',
+                                'button[aria-label*="Add image"]',
+                                'button[aria-label*="Photo"]',
+                                'button[data-test-id="image-upload-button"]',
+                                'button[class*="image"]',
+                                'button[class*="photo"]',
+                                'input[type="file"][accept*="image"]',
+                                'button:has(svg[class*="image"])',
+                                'button:has(svg[class*="photo"])'
+                            ];
+                            
+                            let imageButton = null;
+                            for (const selector of imageSelectors) {
+                                imageButton = document.querySelector(selector);
+                                if (imageButton) {
+                                    console.log('✅ Found image upload button with selector:', selector);
+                                    break;
+                                }
                             }
-                        }, 2000);
+                            
+                            if (imageButton) {
+                                console.log('🖼️ Clicking image upload button...');
+                                imageButton.click();
+                                
+                                // Wait for file input to appear
+                                setTimeout(() => {
+                                    const fileInput = document.querySelector('input[type="file"][accept*="image"]');
+                                    if (fileInput) {
+                                        console.log('📁 Found file input, uploading image...');
+                                        uploadImageFile(fileInput, imageUrl);
+                                    } else {
+                                        console.log('❌ File input not found, proceeding without image');
+                                        findAndClickPostButton();
+                                    }
+                                }, 1000);
+                            } else {
+                                console.log('❌ Image upload button not found, proceeding without image');
+                                findAndClickPostButton();
+                            }
+                        }
+                        
+                        function handleCarouselUpload(carouselImages) {
+                            console.log('🖼️ Handling carousel upload with', carouselImages.length, 'images');
+                            
+                            // For carousel, we'll upload the first image for now
+                            // LinkedIn's carousel upload is more complex
+                            if (carouselImages.length > 0) {
+                                handleImageUpload(carouselImages[0]);
+                            } else {
+                                findAndClickPostButton();
+                            }
+                        }
+                        
+                        function uploadImageFile(fileInput, imageUrl) {
+                            console.log('📤 Uploading image from URL:', imageUrl);
+                            
+                            // Fetch the image and convert to file
+                            fetch(imageUrl)
+                                .then(response => response.blob())
+                                .then(blob => {
+                                    const file = new File([blob], 'image.jpg', { type: 'image/jpeg' });
+                                    
+                                    // Create a new FileList
+                                    const dataTransfer = new DataTransfer();
+                                    dataTransfer.items.add(file);
+                                    fileInput.files = dataTransfer.files;
+                                    
+                                    // Trigger change event
+                                    fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+                                    
+                                    console.log('✅ Image file uploaded, waiting for processing...');
+                                    
+                                    // Wait for image to process, then find post button
+                                    setTimeout(() => {
+                                        findAndClickPostButton();
+                                    }, 3000);
+                                })
+                                .catch(error => {
+                                    console.log('❌ Error uploading image:', error);
+                                    findAndClickPostButton();
+                                });
+                        }
+                        
+                        function findAndClickPostButton() {
+                            console.log('🔍 Looking for post button...');
+                            
+                            // Step 3: Find and click the post button in the modal
+                            setTimeout(() => {
+                                const postButton = document.querySelector('[data-test-id="post-composer-submit-button"]') ||
+                                                 document.querySelector('button[type="submit"]') ||
+                                                 document.querySelector('.share-box__submit-button') ||
+                                                 document.querySelector('.share-actions__primary-action') ||
+                                                 document.querySelector('button[aria-label*="Post"]') ||
+                                                 document.querySelector('button[aria-label*="Share"]');
+                                
+                                if (postButton) {
+                                    console.log('✅ Found post button, clicking...');
+                                    postButton.click();
+                                    
+                                    // Wait a bit and return success
+                                    setTimeout(() => {
+                                        console.log('✅ Post submitted successfully');
+                                        resolve({ success: true, linkedinPostId: 'linkedin-' + Date.now() });
+                                    }, 2000);
+                                } else {
+                                    console.log('❌ Post button not found in modal');
+                                    resolve({ success: false, error: 'Post button not found in modal' });
+                                }
+                            }, 2000);
+                        }
                     } else {
                         console.log('❌ Modal text area not found');
                         resolve({ success: false, error: 'Modal text area not found' });
@@ -287,21 +393,9 @@ const createLinkedInPost = (post) => {
                 console.log('All contenteditable:', document.querySelectorAll('[contenteditable]').length);
                 console.log('All inputs:', document.querySelectorAll('input').length);
                 console.log('All textareas:', document.querySelectorAll('textarea').length);
-                
-                // Log some sample elements
-                const sampleDivs = Array.from(document.querySelectorAll('div')).slice(0, 10);
-                sampleDivs.forEach((div, index) => {
-                    console.log(`Div ${index}:`, div.className, div.getAttribute('data-test-id'), div.getAttribute('role'));
-                });
-                
                 resolve({ success: false, error: 'Post input not found' });
             }
-        }, 3000);
-        
-    } catch (error) {
-        console.error('❌ Error creating LinkedIn post:', error);
-        resolve({ success: false, error: error.message });
-    }
+        }, 3000); // Wait 3 seconds for LinkedIn to load
     });
 };
 
