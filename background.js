@@ -4,6 +4,348 @@
 // importScripts('./js/actions/campaignAction.js');
 importScripts('./env.js');
 
+// Content Creator functionality
+const handleContentCreatorPosts = async () => {
+    try {
+        console.log('🚀 Checking for scheduled posts...');
+        
+        // Get user's LinkedIn ID from the main extension storage
+        const profileResult = await chrome.storage.local.get(['linkedinId', 'linkedinProfile']);
+        console.log('🔍 Profile result:', profileResult);
+        
+        let linkedinId = profileResult.linkedinId;
+        
+        // Fallback to linkedinProfile if linkedinId is not available
+        if (!linkedinId && profileResult.linkedinProfile) {
+            linkedinId = profileResult.linkedinProfile.publicIdentifier;
+        }
+        
+        if (!linkedinId) {
+            console.log('⚠️ No LinkedIn ID found, using test ID');
+            linkedinId = 'test-user-123';
+        }
+        
+        console.log('🔑 LinkedIn ID:', linkedinId);
+        
+        // Fetch scheduled posts from API
+        const response = await fetch(`${PLATFORM_URL}/api/content-creator/scheduled-posts`, {
+            method: 'GET',
+            headers: {
+                'lk-id': linkedinId,
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (!response.ok) {
+            console.log('❌ Failed to fetch scheduled posts:', response.status);
+            return;
+        }
+        
+        const data = await response.json();
+        const posts = data.data || [];
+        
+        console.log('📡 API Response:', data);
+        console.log(`📝 Found ${posts.length} scheduled posts`);
+        
+        // Process each post
+        for (const post of posts) {
+            try {
+                await publishLinkedInPost(post);
+            } catch (error) {
+                console.error('❌ Error publishing post:', post.id, error);
+                await updatePostStatus(post.id, 'failed');
+            }
+        }
+        
+    } catch (error) {
+        console.error('❌ Error in handleContentCreatorPosts:', error);
+    }
+};
+
+const publishLinkedInPost = async (post) => {
+    try {
+        console.log('📤 Publishing post:', post.id);
+        
+        // Navigate to LinkedIn post creation
+        const newTab = await chrome.tabs.create({
+            url: 'https://www.linkedin.com/feed/',
+            active: true
+        });
+        
+        // Wait for tab to load
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        
+        // Use the newly created tab
+        const tab = newTab;
+        
+        if (!tab) {
+            throw new Error('No active tab found');
+        }
+        
+        // Execute post creation script
+        console.log('🔧 Executing script in tab:', tab.id);
+        const result = await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            function: createLinkedInPost,
+            args: [post]
+        });
+        
+        console.log('📊 Script execution result:', result);
+        
+        if (result[0].result && result[0].result.success) {
+            console.log('✅ Post published successfully:', post.id);
+            await updatePostStatus(post.id, 'published', result[0].result.linkedinPostId);
+        } else {
+            console.log('❌ Failed to publish post:', post.id, result[0].result);
+            await updatePostStatus(post.id, 'failed');
+        }
+        
+    } catch (error) {
+        console.error('❌ Error publishing post:', post.id, error);
+        await updatePostStatus(post.id, 'failed');
+    }
+};
+
+// Function to create LinkedIn post (injected into LinkedIn page)
+const createLinkedInPost = (post) => {
+    return new Promise((resolve) => {
+        try {
+            console.log('📝 Creating LinkedIn post:', post);
+            
+            // Wait for LinkedIn to load
+            setTimeout(() => {
+            // Step 1: Find and click the post creation input to open the modal
+            console.log('🔍 Looking for post input elements...');
+            
+            // Try multiple selectors for LinkedIn's post button/input
+            const selectors = [
+                // Button selectors (primary)
+                'button[class*="artdeco-button"][class*="tertiary"]',
+                'button:has(strong:contains("Start a post"))',
+                'button .artdeco-button__text:contains("Start a post")',
+                'button[class*="XAGftPalfcetddQsMAoTQRRogBmAGTNTsvI"]',
+                'button[id^="ember"]',
+                
+                // Input selectors (fallback)
+                '[data-test-id="post-composer-text-input"]',
+                '.ql-editor',
+                '[contenteditable="true"]',
+                '.share-box__text-input',
+                '.feed-shared-text-input',
+                '[placeholder*="What do you want to talk about"]',
+                '[placeholder*="Start a post"]',
+                '[placeholder*="What\'s on your mind"]',
+                '[placeholder*="Share an article"]',
+                '.ql-editor.ql-blank',
+                '.ql-editor[data-placeholder]',
+                'div[contenteditable="true"]',
+                'div[role="textbox"]',
+                '.share-box__text-input__input',
+                '.feed-shared-text-input__input'
+            ];
+            
+            let postInput = null;
+            
+            // First try the specific button selectors
+            const buttonSelectors = [
+                'button[class*="artdeco-button"][class*="tertiary"]',
+                'button[id^="ember"]',
+                'button[class*="XAGftPalfcetddQsMAoTQRRogBmAGTNTsvI"]'
+            ];
+            
+            for (const selector of buttonSelectors) {
+                const buttons = document.querySelectorAll(selector);
+                for (const button of buttons) {
+                    if (button.textContent.includes('Start a post')) {
+                        postInput = button;
+                        console.log('✅ Found "Start a post" button with selector:', selector);
+                        break;
+                    }
+                }
+                if (postInput) break;
+            }
+            
+            // If not found, try other selectors
+            if (!postInput) {
+                for (const selector of selectors) {
+                    postInput = document.querySelector(selector);
+                    if (postInput) {
+                        console.log('✅ Found post input with selector:', selector);
+                        break;
+                    }
+                }
+            }
+            
+            // If still not found, try to find any clickable element that might open the composer
+            if (!postInput) {
+                console.log('🔍 Trying to find composer trigger elements...');
+                const composerTriggers = [
+                    'button[data-test-id="post-composer-button"]',
+                    'button[aria-label*="Start a post"]',
+                    'button[aria-label*="Share"]',
+                    '.share-box__button',
+                    '.feed-shared-text-input__button',
+                    'button[data-control-name="composer_share"]'
+                ];
+                
+                for (const selector of composerTriggers) {
+                    const trigger = document.querySelector(selector);
+                    if (trigger) {
+                        console.log('✅ Found composer trigger with selector:', selector);
+                        trigger.click();
+                        // Wait a bit for the composer to open
+                        setTimeout(() => {
+                            // Now try to find the input again
+                            for (const inputSelector of selectors) {
+                                postInput = document.querySelector(inputSelector);
+                                if (postInput) {
+                                    console.log('✅ Found post input after clicking trigger:', inputSelector);
+                                    break;
+                                }
+                            }
+                        }, 2000);
+                        break;
+                    }
+                }
+            }
+            
+            if (postInput) {
+                console.log('✅ Found post button, clicking to open modal...');
+                postInput.click();
+                
+                // Step 2: Wait for modal to open and find the text area
+                setTimeout(() => {
+                    console.log('🔍 Looking for modal text area after button click...');
+                    
+                    const modalSelectors = [
+                        '[data-test-id="post-composer-text-input"]',
+                        '.ql-editor',
+                        '[contenteditable="true"]',
+                        '.share-box__text-input',
+                        '.feed-shared-text-input',
+                        'div[contenteditable="true"]',
+                        'div[role="textbox"]',
+                        'textarea',
+                        'input[type="text"]'
+                    ];
+                    
+                    let modalTextArea = null;
+                    for (const selector of modalSelectors) {
+                        modalTextArea = document.querySelector(selector);
+                        if (modalTextArea) {
+                            console.log('✅ Found modal text area with selector:', selector);
+                            break;
+                        }
+                    }
+                    
+                    if (modalTextArea) {
+                        console.log('✅ Found modal text area, filling content...');
+                        
+                        // Clear any existing content
+                        modalTextArea.innerHTML = '';
+                        
+                        // Set the post content
+                        modalTextArea.textContent = post.content;
+                        
+                        // Trigger input event
+                        modalTextArea.dispatchEvent(new Event('input', { bubbles: true }));
+                        modalTextArea.dispatchEvent(new Event('change', { bubbles: true }));
+                        
+                        // Step 3: Find and click the post button in the modal
+                        setTimeout(() => {
+                            const postButton = document.querySelector('[data-test-id="post-composer-submit-button"]') ||
+                                             document.querySelector('button[type="submit"]') ||
+                                             document.querySelector('.share-box__submit-button') ||
+                                             document.querySelector('.share-actions__primary-action') ||
+                                             document.querySelector('button[aria-label*="Post"]') ||
+                                             document.querySelector('button[aria-label*="Share"]');
+                            
+                            if (postButton) {
+                                console.log('✅ Found post button, clicking...');
+                                postButton.click();
+                                
+                                // Wait a bit and return success
+                                setTimeout(() => {
+                                    console.log('✅ Post submitted successfully');
+                                    resolve({ success: true, linkedinPostId: 'linkedin-' + Date.now() });
+                                }, 2000);
+                            } else {
+                                console.log('❌ Post button not found in modal');
+                                resolve({ success: false, error: 'Post button not found in modal' });
+                            }
+                        }, 2000);
+                    } else {
+                        console.log('❌ Modal text area not found');
+                        resolve({ success: false, error: 'Modal text area not found' });
+                    }
+                }, 2000);
+            } else {
+                console.log('❌ Post input not found');
+                console.log('🔍 Available elements on page:');
+                console.log('All divs:', document.querySelectorAll('div').length);
+                console.log('All buttons:', document.querySelectorAll('button').length);
+                console.log('All contenteditable:', document.querySelectorAll('[contenteditable]').length);
+                console.log('All inputs:', document.querySelectorAll('input').length);
+                console.log('All textareas:', document.querySelectorAll('textarea').length);
+                
+                // Log some sample elements
+                const sampleDivs = Array.from(document.querySelectorAll('div')).slice(0, 10);
+                sampleDivs.forEach((div, index) => {
+                    console.log(`Div ${index}:`, div.className, div.getAttribute('data-test-id'), div.getAttribute('role'));
+                });
+                
+                resolve({ success: false, error: 'Post input not found' });
+            }
+        }, 3000);
+        
+    } catch (error) {
+        console.error('❌ Error creating LinkedIn post:', error);
+        resolve({ success: false, error: error.message });
+    }
+    });
+};
+
+const updatePostStatus = async (postId, status, linkedinPostId = null) => {
+    try {
+        const profileResult = await chrome.storage.local.get(['linkedinId', 'linkedinProfile']);
+        let linkedinId = profileResult.linkedinId;
+        
+        // Fallback to linkedinProfile if linkedinId is not available
+        if (!linkedinId && profileResult.linkedinProfile) {
+            linkedinId = profileResult.linkedinProfile.publicIdentifier;
+        }
+        
+        if (!linkedinId) {
+            linkedinId = 'test-user-123';
+        }
+        
+        console.log('🔑 Using LinkedIn ID for status update:', linkedinId);
+        
+        const updateData = {
+            status: status,
+            linkedin_post_id: linkedinPostId
+        };
+        
+        const response = await fetch(`${PLATFORM_URL}/api/content-creator/posts/${postId}/update-status`, {
+            method: 'POST',
+            headers: {
+                'lk-id': linkedinId,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(updateData)
+        });
+        
+        if (response.ok) {
+            console.log('✅ Post status updated:', postId, status);
+        } else {
+            console.log('❌ Failed to update post status:', response.status);
+        }
+        
+    } catch (error) {
+        console.error('❌ Error updating post status:', error);
+    }
+};
+
 // Function to store our LinkedIn profile information for reliable sender detection
 const storeLinkedInProfile = async () => {
     try {
@@ -2065,6 +2407,10 @@ chrome.alarms.onAlarm.addListener((alarm) => {
                 console.log(`✅ ${campaignType} campaign execution completed`);
             }
         });
+        return;
+    }else if(alarm.name === 'content_creator_check'){
+        // Skip content creator alarm - it's handled by the dedicated listener
+        console.log('⏰ Content Creator alarm - skipping general campaign processing');
         return;
     }else{
         console.log('🎯 Starting general campaign alarm for:', alarm.name);
@@ -11677,3 +12023,28 @@ const updateReminderStatus = async (reminderId, status, linkedinId, errorMessage
         console.error('❌ Error updating reminder status:', error);
     }
 };
+
+// Add periodic check for scheduled posts
+chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name === 'content_creator_check') {
+        console.log('⏰ Content Creator alarm triggered');
+        handleContentCreatorPosts();
+    }
+});
+
+// Create alarm for content creator posts (check every 30 seconds for immediate posts)
+chrome.alarms.create('content_creator_check', { 
+    delayInMinutes: 0.5, 
+    periodInMinutes: 0.5 
+});
+
+// Listen for immediate content creator checks
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.action === 'checkContentCreatorPosts') {
+        console.log('🚀 Immediate content creator check requested');
+        handleContentCreatorPosts();
+        sendResponse({success: true});
+    }
+});
+
+console.log('✅ Content Creator extension integration initialized');
