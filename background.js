@@ -3262,7 +3262,13 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                 
                 // Get accepted leads for the next node
                 await getLeadGenRunning(currentCampaign.id);
-                const acceptedLeads = campaignLeadgenRunning.filter(lead => lead.acceptedStatus === true);
+                console.log(`🔍 DEBUG: Total leads in campaignLeadgenRunning: ${campaignLeadgenRunning.length}`);
+                console.log(`🔍 DEBUG: Sample lead data:`, campaignLeadgenRunning[0]);
+                
+                const acceptedLeads = campaignLeadgenRunning.filter(lead => 
+                    lead.accept_status === true || lead.accept_status === 1 || lead.acceptedStatus === true
+                );
+                console.log(`🔍 DEBUG: Found ${acceptedLeads.length} accepted leads after filtering`);
                 
                 if (acceptedLeads.length > 0) {
                     console.log(`👥 Found ${acceptedLeads.length} accepted leads for next node execution`);
