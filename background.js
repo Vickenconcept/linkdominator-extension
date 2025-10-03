@@ -252,28 +252,292 @@ const createLinkedInPost = (post) => {
                         
                         console.log('✅ Content filled, checking for image...');
                         
-                        // Step 3: Handle image upload if present
-                        if (post.image_url) {
-                            console.log('🖼️ Post has image, looking for image upload button...');
-                            handleImageUpload(post.image_url);
-                        } else if (post.carousel_images && post.carousel_images.length > 0) {
-                            console.log('🖼️ Post has carousel images, looking for image upload button...');
-                            handleCarouselUpload(post.carousel_images);
+                        // Step 3: Handle media upload if present
+                        if (post.carousel_images && post.carousel_images.length > 0) {
+                            console.log('🖼️ Post has carousel images, using clipboard paste method...');
+                            handleCarouselPaste(post.carousel_images, modalTextArea);
+                        } else if (post.image_url) {
+                            console.log('🖼️ Post has image, using clipboard paste method...');
+                            handleImagePaste(post.image_url, modalTextArea);
+                        } else if (post.video_url) {
+                            console.log('🎥 Post has video, using clipboard paste method...');
+                            handleVideoPaste(post.video_url, modalTextArea);
                         } else {
                             console.log('📝 Text-only post, proceeding to post button...');
                             findAndClickPostButton();
                         }
                         
                         // Define helper functions within the injected script context
+                        function handleImagePaste(imageUrl, textArea) {
+                            console.log('🖼️ Handling image paste for:', imageUrl);
+                            
+                            // Fetch the image and convert to blob
+                            fetch(imageUrl)
+                                .then(response => response.blob())
+                                .then(blob => {
+                                    console.log('📤 Image blob created, preparing clipboard data...');
+                                    
+                                    // Method 1: Try using DataTransfer and ClipboardEvent
+                                    try {
+                                        const clipboardData = new DataTransfer();
+                                        const file = new File([blob], 'image.jpg', { type: 'image/jpeg' });
+                                        clipboardData.items.add(file);
+                                        
+                                        // Focus on the text area
+                                        textArea.focus();
+                                        
+                                        // Create a paste event with the image data
+                                        const pasteEvent = new ClipboardEvent('paste', {
+                                            clipboardData: clipboardData,
+                                            bubbles: true,
+                                            cancelable: true
+                                        });
+                                        
+                                        console.log('📋 Dispatching paste event with image...');
+                                        textArea.dispatchEvent(pasteEvent);
+                                        
+                                        // Wait for image to process
+                                        setTimeout(() => {
+                                            console.log('✅ Image paste completed, waiting for processing...');
+                                            waitForImageToProcess();
+                                        }, 2000);
+                                        
+                                    } catch (error) {
+                                        console.log('⚠️ DataTransfer method failed, trying alternative approach:', error);
+                                        
+                                        // Method 2: Try using modern Clipboard API
+                                        if (navigator.clipboard && navigator.clipboard.write) {
+                                            const clipboardItem = new ClipboardItem({
+                                                'image/jpeg': blob
+                                            });
+                                            
+                                            navigator.clipboard.write([clipboardItem])
+                                                .then(() => {
+                                                    console.log('📋 Image copied to clipboard, focusing text area...');
+                                                    textArea.focus();
+                                                    
+                                                    // Simulate Ctrl+V
+                                                    const pasteEvent = new KeyboardEvent('keydown', {
+                                                        key: 'v',
+                                                        code: 'KeyV',
+                                                        ctrlKey: true,
+                                                        bubbles: true,
+                                                        cancelable: true
+                                                    });
+                                                    
+                                                    textArea.dispatchEvent(pasteEvent);
+                                                    
+                                                    setTimeout(() => {
+                                                        console.log('✅ Image paste completed, waiting for processing...');
+                                                        waitForImageToProcess();
+                                                    }, 2000);
+                                                })
+                                                .catch(err => {
+                                                    console.log('❌ Clipboard API failed:', err);
+                                                    findAndClickPostButton();
+                                                });
+                                        } else {
+                                            console.log('❌ Clipboard API not available, falling back to post button');
+                                            findAndClickPostButton();
+                                        }
+                                    }
+                                })
+                                .catch(error => {
+                                    console.log('❌ Error fetching image for paste:', error);
+                                    findAndClickPostButton();
+                                });
+                        }
+                        
+                        function handleCarouselPaste(carouselImages, textArea) {
+                            console.log('🖼️ Handling carousel paste for', carouselImages.length, 'images');
+                            
+                            if (carouselImages.length === 0) {
+                                findAndClickPostButton();
+                                return;
+                            }
+                            
+                            // For carousel, we'll paste images one by one
+                            // LinkedIn's carousel paste requires multiple paste operations
+                            let currentImageIndex = 0;
+                            
+                            function pasteNextImage() {
+                                if (currentImageIndex >= carouselImages.length) {
+                                    console.log('✅ All carousel images pasted, waiting for processing...');
+                                    waitForImageToProcess();
+                                    return;
+                                }
+                                
+                                const imageUrl = carouselImages[currentImageIndex];
+                                console.log(`🖼️ Pasting carousel image ${currentImageIndex + 1}/${carouselImages.length}:`, imageUrl);
+                                
+                                // Fetch and paste the current image
+                                fetch(imageUrl)
+                                    .then(response => response.blob())
+                                    .then(blob => {
+                                        console.log(`📤 Carousel image ${currentImageIndex + 1} blob created, preparing clipboard data...`);
+                                        
+                                        try {
+                                            const clipboardData = new DataTransfer();
+                                            const file = new File([blob], `carousel-${currentImageIndex + 1}.jpg`, { type: 'image/jpeg' });
+                                            clipboardData.items.add(file);
+                                            
+                                            // Focus on the text area
+                                            textArea.focus();
+                                            
+                                            // Create a paste event with the image data
+                                            const pasteEvent = new ClipboardEvent('paste', {
+                                                clipboardData: clipboardData,
+                                                bubbles: true,
+                                                cancelable: true
+                                            });
+                                            
+                                            console.log(`📋 Dispatching paste event for carousel image ${currentImageIndex + 1}...`);
+                                            textArea.dispatchEvent(pasteEvent);
+                                            
+                                            // Move to next image after a delay
+                                            currentImageIndex++;
+                                            setTimeout(pasteNextImage, 3000); // 3 second delay between images
+                                            
+                                        } catch (error) {
+                                            console.log('⚠️ DataTransfer method failed for carousel, trying alternative approach:', error);
+                                            
+                                            // Method 2: Try using modern Clipboard API
+                                            if (navigator.clipboard && navigator.clipboard.write) {
+                                                const clipboardItem = new ClipboardItem({
+                                                    'image/jpeg': blob
+                                                });
+                                                
+                                                navigator.clipboard.write([clipboardItem])
+                                                    .then(() => {
+                                                        console.log(`📋 Carousel image ${currentImageIndex + 1} copied to clipboard, focusing text area...`);
+                                                        textArea.focus();
+                                                        
+                                                        // Simulate Ctrl+V
+                                                        const pasteEvent = new KeyboardEvent('keydown', {
+                                                            key: 'v',
+                                                            code: 'KeyV',
+                                                            ctrlKey: true,
+                                                            bubbles: true,
+                                                            cancelable: true
+                                                        });
+                                                        
+                                                        textArea.dispatchEvent(pasteEvent);
+                                                        
+                                                        // Move to next image after a delay
+                                                        currentImageIndex++;
+                                                        setTimeout(pasteNextImage, 3000);
+                                                    })
+                                                    .catch(err => {
+                                                        console.log('❌ Clipboard API failed for carousel:', err);
+                                                        findAndClickPostButton();
+                                                    });
+                                            } else {
+                                                console.log('❌ Clipboard API not available for carousel, falling back to post button');
+                                                findAndClickPostButton();
+                                            }
+                                        }
+                                    })
+                                    .catch(error => {
+                                        console.log(`❌ Error fetching carousel image ${currentImageIndex + 1}:`, error);
+                                        findAndClickPostButton();
+                                    });
+                            }
+                            
+                            // Start pasting images
+                            pasteNextImage();
+                        }
+                        
+                        function handleVideoPaste(videoUrl, textArea) {
+                            console.log('🎥 Handling video paste for:', videoUrl);
+                            
+                            // Fetch the video and convert to blob
+                            fetch(videoUrl)
+                                .then(response => response.blob())
+                                .then(blob => {
+                                    console.log('📤 Video blob created, preparing clipboard data...');
+                                    
+                                    // Method 1: Try using DataTransfer and ClipboardEvent
+                                    try {
+                                        const clipboardData = new DataTransfer();
+                                        const file = new File([blob], 'video.mp4', { type: 'video/mp4' });
+                                        clipboardData.items.add(file);
+                                        
+                                        // Focus on the text area
+                                        textArea.focus();
+                                        
+                                        // Create a paste event with the video data
+                                        const pasteEvent = new ClipboardEvent('paste', {
+                                            clipboardData: clipboardData,
+                                            bubbles: true,
+                                            cancelable: true
+                                        });
+                                        
+                                        console.log('📋 Dispatching paste event with video...');
+                                        textArea.dispatchEvent(pasteEvent);
+                                        
+                                        // Wait for video to process
+                                        setTimeout(() => {
+                                            console.log('✅ Video paste completed, waiting for processing...');
+                                            waitForVideoToProcess();
+                                        }, 3000); // Videos take longer to process
+                                        
+                                    } catch (error) {
+                                        console.log('⚠️ DataTransfer method failed, trying alternative approach:', error);
+                                        
+                                        // Method 2: Try using modern Clipboard API
+                                        if (navigator.clipboard && navigator.clipboard.write) {
+                                            const clipboardItem = new ClipboardItem({
+                                                'video/mp4': blob
+                                            });
+                                            
+                                            navigator.clipboard.write([clipboardItem])
+                                                .then(() => {
+                                                    console.log('📋 Video copied to clipboard, focusing text area...');
+                                                    textArea.focus();
+                                                    
+                                                    // Simulate Ctrl+V
+                                                    const pasteEvent = new KeyboardEvent('keydown', {
+                                                        key: 'v',
+                                                        code: 'KeyV',
+                                                        ctrlKey: true,
+                                                        bubbles: true,
+                                                        cancelable: true
+                                                    });
+                                                    
+                                                    textArea.dispatchEvent(pasteEvent);
+                                                    
+                                                    setTimeout(() => {
+                                                        console.log('✅ Video paste completed, waiting for processing...');
+                                                        waitForVideoToProcess();
+                                                    }, 3000);
+                                                })
+                                                .catch(err => {
+                                                    console.log('❌ Clipboard API failed:', err);
+                                                    findAndClickPostButton();
+                                                });
+                                        } else {
+                                            console.log('❌ Clipboard API not available, falling back to post button');
+                                            findAndClickPostButton();
+                                        }
+                                    }
+                                })
+                                .catch(error => {
+                                    console.log('❌ Error fetching video for paste:', error);
+                                    findAndClickPostButton();
+                                });
+                        }
+                        
                         function handleImageUpload(imageUrl) {
                             console.log('🖼️ Handling single image upload:', imageUrl);
                             
                             // Look for image upload button
                             const imageSelectors = [
+                                'button[aria-label="Add media"]',
                                 'button[aria-label*="Add an image"]',
                                 'button[aria-label*="Add image"]',
                                 'button[aria-label*="Photo"]',
                                 'button[data-test-id="image-upload-button"]',
+                                'button.share-promoted-detour-button',
                                 'button[class*="image"]',
                                 'button[class*="photo"]',
                                 'input[type="file"][accept*="image"]',
@@ -286,6 +550,12 @@ const createLinkedInPost = (post) => {
                                 imageButton = document.querySelector(selector);
                                 if (imageButton) {
                                     console.log('✅ Found image upload button with selector:', selector);
+                                    console.log('🔍 Button details:', {
+                                        ariaLabel: imageButton.getAttribute('aria-label'),
+                                        className: imageButton.className,
+                                        type: imageButton.type,
+                                        dataViewName: imageButton.getAttribute('data-view-name')
+                                    });
                                     break;
                                 }
                             }
@@ -296,12 +566,20 @@ const createLinkedInPost = (post) => {
                                 
                                 // Wait for file input to appear
                                 setTimeout(() => {
+                                    console.log('🔍 Looking for file input after button click...');
                                     const fileInput = document.querySelector('input[type="file"][accept*="image"]');
                                     if (fileInput) {
                                         console.log('📁 Found file input, uploading image...');
+                                        console.log('📁 File input details:', {
+                                            type: fileInput.type,
+                                            accept: fileInput.accept,
+                                            name: fileInput.name,
+                                            multiple: fileInput.multiple
+                                        });
                                         uploadImageFile(fileInput, imageUrl);
                                     } else {
                                         console.log('❌ File input not found, proceeding without image');
+                                        console.log('🔍 Available file inputs:', document.querySelectorAll('input[type="file"]').length);
                                         findAndClickPostButton();
                                     }
                                 }, 1000);
@@ -341,11 +619,14 @@ const createLinkedInPost = (post) => {
                                     fileInput.dispatchEvent(new Event('change', { bubbles: true }));
                                     
                                     console.log('✅ Image file uploaded, waiting for processing...');
+                                    console.log('📁 File input details:', {
+                                        files: fileInput.files.length,
+                                        accept: fileInput.accept,
+                                        name: fileInput.name
+                                    });
                                     
-                                    // Wait for image to process, then find post button
-                                    setTimeout(() => {
-                                        findAndClickPostButton();
-                                    }, 3000);
+                                    // Wait for image to appear in the post composer
+                                    waitForImageToProcess();
                                 })
                                 .catch(error => {
                                     console.log('❌ Error uploading image:', error);
@@ -353,30 +634,357 @@ const createLinkedInPost = (post) => {
                                 });
                         }
                         
+                        function waitForImageToProcess() {
+                            console.log('🖼️ Waiting for image to process and appear in post composer...');
+                            
+                            let attempts = 0;
+                            const maxAttempts = 30; // 30 seconds max wait for carousel images
+                            
+                            const checkForImage = () => {
+                                attempts++;
+                                
+                                // Look for image preview elements in the post composer
+                                const imageSelectors = [
+                                    '[data-test-id="post-composer-image-preview"]',
+                                    '.post-composer-image-preview',
+                                    '.share-box__image-preview',
+                                    '.feed-shared-image-preview',
+                                    'img[src*="cloudinary"]',
+                                    '.image-preview img',
+                                    '.post-image img',
+                                    '[class*="image"][class*="preview"] img',
+                                    '.ql-editor img',
+                                    // Additional selectors for LinkedIn's current UI
+                                    '[data-test-id="post-composer"] img',
+                                    '.share-box img',
+                                    '.feed-shared-text-input img',
+                                    '[role="textbox"] img',
+                                    'div[contenteditable="true"] img'
+                                ];
+                                
+                                let imageFound = false;
+                                for (const selector of imageSelectors) {
+                                    const imageElement = document.querySelector(selector);
+                                    if (imageElement) {
+                                        // Validate that this is actually an uploaded image, not a tracking pixel
+                                        const isValidImage = imageElement.src && 
+                                                           !imageElement.src.includes('px.ads.linkedin.com') &&
+                                                           !imageElement.src.includes('tracking') &&
+                                                           !imageElement.src.includes('pixel') &&
+                                                           !imageElement.className.includes('hidden') &&
+                                                           !imageElement.className.includes('tracking') &&
+                                                           imageElement.offsetWidth > 0 &&
+                                                           imageElement.offsetHeight > 0;
+                                        
+                                        if (isValidImage) {
+                                            console.log('✅ Image preview found with selector:', selector);
+                                            console.log('🖼️ Image element details:', {
+                                                src: imageElement.src,
+                                                alt: imageElement.alt,
+                                                className: imageElement.className,
+                                                parentElement: imageElement.parentElement?.className,
+                                                width: imageElement.offsetWidth,
+                                                height: imageElement.offsetHeight
+                                            });
+                                            imageFound = true;
+                                            break;
+                                        } else {
+                                            console.log('⚠️ Found image element but it appears to be a tracking pixel or invalid:', {
+                                                src: imageElement.src,
+                                                className: imageElement.className,
+                                                width: imageElement.offsetWidth,
+                                                height: imageElement.offsetHeight
+                                            });
+                                        }
+                                    }
+                                }
+                                
+                                // Also check for any loading indicators that might be present
+                                const loadingSelectors = [
+                                    '[data-test-id="post-composer-image-loading"]',
+                                    '.image-loading',
+                                    '.loading-spinner',
+                                    '[class*="loading"]'
+                                ];
+                                
+                                let isLoading = false;
+                                for (const selector of loadingSelectors) {
+                                    if (document.querySelector(selector)) {
+                                        console.log('⏳ Image still loading, found loading indicator:', selector);
+                                        isLoading = true;
+                                        break;
+                                    }
+                                }
+                                
+                                if (imageFound) {
+                                    console.log('✅ Image successfully processed and visible in post composer');
+                                    // Wait a bit more for image to fully load
+                                    setTimeout(() => {
+                                        findAndClickPostButton();
+                                    }, 2000);
+                                } else if (isLoading && attempts < maxAttempts) {
+                                    console.log(`⏳ Image still loading, attempt ${attempts}/${maxAttempts}...`);
+                                    setTimeout(checkForImage, 1000);
+                                } else if (attempts < maxAttempts) {
+                                    console.log(`⏳ Image not ready yet, attempt ${attempts}/${maxAttempts}...`);
+                                    // Log all available elements for debugging
+                                    if (attempts % 5 === 0) {
+                                        console.log('🔍 Available elements in post composer:', {
+                                            allImages: document.querySelectorAll('img').length,
+                                            allButtons: document.querySelectorAll('button').length,
+                                            postComposer: document.querySelector('[data-test-id="post-composer"]')?.innerHTML?.substring(0, 200),
+                                            shareBox: document.querySelector('.share-box')?.innerHTML?.substring(0, 200)
+                                        });
+                                        
+                                        // Log all image elements for debugging
+                                        const allImages = document.querySelectorAll('img');
+                                        console.log('🖼️ All image elements found:', Array.from(allImages).map(img => ({
+                                            src: img.src,
+                                            className: img.className,
+                                            width: img.offsetWidth,
+                                            height: img.offsetHeight,
+                                            hidden: img.hidden || img.style.display === 'none'
+                                        })));
+                                    }
+                                    setTimeout(checkForImage, 1000);
+                                } else {
+                                    console.log('⚠️ Image processing timeout, proceeding with post anyway');
+                                    console.log('💡 Note: Sometimes LinkedIn processes images in the background and they appear after posting');
+                                    findAndClickPostButton();
+                                }
+                            };
+                            
+                            // Start checking after a short delay
+                            setTimeout(checkForImage, 2000);
+                        }
+                        
+                        function waitForVideoToProcess() {
+                            console.log('🎥 Waiting for video to process and appear in post composer...');
+                            
+                            let attempts = 0;
+                            const maxAttempts = 60; // 60 seconds max wait for videos (they take longer)
+                            
+                            const checkForVideo = () => {
+                                attempts++;
+                                
+                                // Look for video preview elements in the post composer
+                                const videoSelectors = [
+                                    '[data-test-id="post-composer-video-preview"]',
+                                    '.post-composer-video-preview',
+                                    '.share-box__video-preview',
+                                    '.feed-shared-video-preview',
+                                    'video[src*="cloudinary"]',
+                                    'video[src*="linkedin"]',
+                                    '.video-preview video',
+                                    '.post-video video',
+                                    '[class*="video"][class*="preview"] video',
+                                    '.ql-editor video',
+                                    // Additional selectors for LinkedIn's current UI
+                                    '[data-test-id="post-composer"] video',
+                                    '.share-box video',
+                                    '.feed-shared-text-input video',
+                                    '[role="textbox"] video',
+                                    'div[contenteditable="true"] video'
+                                ];
+                                
+                                let videoFound = false;
+                                for (const selector of videoSelectors) {
+                                    const videoElement = document.querySelector(selector);
+                                    if (videoElement) {
+                                        // Validate that this is actually an uploaded video, not a tracking element
+                                        const isValidVideo = videoElement.src && 
+                                                           !videoElement.src.includes('px.ads.linkedin.com') &&
+                                                           !videoElement.src.includes('tracking') &&
+                                                           !videoElement.src.includes('pixel') &&
+                                                           !videoElement.className.includes('hidden') &&
+                                                           !videoElement.className.includes('tracking') &&
+                                                           videoElement.offsetWidth > 0 &&
+                                                           videoElement.offsetHeight > 0;
+                                        
+                                        if (isValidVideo) {
+                                            console.log('✅ Video preview found with selector:', selector);
+                                            console.log('🎥 Video element details:', {
+                                                src: videoElement.src,
+                                                className: videoElement.className,
+                                                parentElement: videoElement.parentElement?.className,
+                                                width: videoElement.offsetWidth,
+                                                height: videoElement.offsetHeight
+                                            });
+                                            videoFound = true;
+                                            break;
+                                        } else {
+                                            console.log('⚠️ Found video element but it appears to be invalid:', {
+                                                src: videoElement.src,
+                                                className: videoElement.className,
+                                                width: videoElement.offsetWidth,
+                                                height: videoElement.offsetHeight
+                                            });
+                                        }
+                                    }
+                                }
+                                
+                                // Also check for any loading indicators that might be present
+                                const loadingSelectors = [
+                                    '[data-test-id="post-composer-video-loading"]',
+                                    '.video-loading',
+                                    '.loading-spinner',
+                                    '[class*="loading"]'
+                                ];
+                                
+                                let isLoading = false;
+                                for (const selector of loadingSelectors) {
+                                    if (document.querySelector(selector)) {
+                                        console.log('⏳ Video still loading, found loading indicator:', selector);
+                                        isLoading = true;
+                                        break;
+                                    }
+                                }
+                                
+                                if (videoFound) {
+                                    console.log('✅ Video successfully processed and visible in post composer');
+                                    // Wait a bit more for video to fully load
+                                    setTimeout(() => {
+                                        findAndClickPostButton();
+                                    }, 3000);
+                                } else if (isLoading && attempts < maxAttempts) {
+                                    console.log(`⏳ Video still loading, attempt ${attempts}/${maxAttempts}...`);
+                                    setTimeout(checkForVideo, 1000);
+                                } else if (attempts < maxAttempts) {
+                                    console.log(`⏳ Video not ready yet, attempt ${attempts}/${maxAttempts}...`);
+                                    // Log all available elements for debugging
+                                    if (attempts % 5 === 0) {
+                                        console.log('🔍 Available elements in post composer:', {
+                                            allVideos: document.querySelectorAll('video').length,
+                                            allButtons: document.querySelectorAll('button').length,
+                                            postComposer: document.querySelector('[data-test-id="post-composer"]')?.innerHTML?.substring(0, 200),
+                                            shareBox: document.querySelector('.share-box')?.innerHTML?.substring(0, 200)
+                                        });
+                                        
+                                        // Log all video elements for debugging
+                                        const allVideos = document.querySelectorAll('video');
+                                        console.log('🎥 All video elements found:', Array.from(allVideos).map(video => ({
+                                            src: video.src,
+                                            className: video.className,
+                                            width: video.offsetWidth,
+                                            height: video.offsetHeight,
+                                            hidden: video.hidden || video.style.display === 'none'
+                                        })));
+                                    }
+                                    setTimeout(checkForVideo, 1000);
+                                } else {
+                                    console.log('⚠️ Video processing timeout, proceeding with post anyway');
+                                    console.log('💡 Note: Sometimes LinkedIn processes videos in the background and they appear after posting');
+                                    findAndClickPostButton();
+                                }
+                            };
+                            
+                            // Start checking after a short delay
+                            setTimeout(checkForVideo, 3000);
+                        }
+                        
                         function findAndClickPostButton() {
                             console.log('🔍 Looking for post button...');
                             
                             // Step 3: Find and click the post button in the modal
                             setTimeout(() => {
-                                const postButton = document.querySelector('[data-test-id="post-composer-submit-button"]') ||
-                                                 document.querySelector('button[type="submit"]') ||
-                                                 document.querySelector('.share-box__submit-button') ||
-                                                 document.querySelector('.share-actions__primary-action') ||
-                                                 document.querySelector('button[aria-label*="Post"]') ||
-                                                 document.querySelector('button[aria-label*="Share"]');
+                                const postButtonSelectors = [
+                                    '[data-test-id="post-composer-submit-button"]',
+                                    'button[type="submit"]',
+                                    '.share-box__submit-button',
+                                    '.share-actions__primary-action',
+                                    'button[aria-label*="Post"]',
+                                    'button[aria-label*="Share"]',
+                                    'button[aria-label="Post"]',
+                                    'button[aria-label="Share"]',
+                                    'button[class*="submit"]',
+                                    'button[class*="post"]',
+                                    'button[class*="share"]',
+                                    '.artdeco-button--primary',
+                                    'button[data-control-name="share.post"]',
+                                    'button[data-control-name="composer.share"]'
+                                ];
+                                
+                                let postButton = null;
+                                for (const selector of postButtonSelectors) {
+                                    postButton = document.querySelector(selector);
+                                    if (postButton) {
+                                        console.log('✅ Found post button with selector:', selector);
+                                        console.log('🔍 Button details:', {
+                                            text: postButton.textContent?.trim(),
+                                            ariaLabel: postButton.getAttribute('aria-label'),
+                                            className: postButton.className,
+                                            type: postButton.type,
+                                            disabled: postButton.disabled
+                                        });
+                                        break;
+                                    }
+                                }
                                 
                                 if (postButton) {
-                                    console.log('✅ Found post button, clicking...');
-                                    postButton.click();
+                                    console.log('🖱️ Clicking post button...');
                                     
-                                    // Wait a bit and return success
-                                    setTimeout(() => {
-                                        console.log('✅ Post submitted successfully');
-                                        resolve({ success: true, linkedinPostId: 'linkedin-' + Date.now() });
-                                    }, 2000);
+                                    // Check if button is disabled
+                                    if (postButton.disabled) {
+                                        console.log('⚠️ Post button is disabled, waiting...');
+                                        setTimeout(() => {
+                                            if (!postButton.disabled) {
+                                                console.log('✅ Button enabled, clicking now...');
+                                                postButton.click();
+                                                checkPostSuccess();
+                                            } else {
+                                                console.log('❌ Button still disabled after wait');
+                                                resolve({ success: false, error: 'Post button disabled' });
+                                            }
+                                        }, 3000);
+                                    } else {
+                                        postButton.click();
+                                        checkPostSuccess();
+                                    }
                                 } else {
                                     console.log('❌ Post button not found in modal');
+                                    console.log('🔍 Available buttons:', Array.from(document.querySelectorAll('button')).map(btn => ({
+                                        text: btn.textContent?.trim(),
+                                        ariaLabel: btn.getAttribute('aria-label'),
+                                        className: btn.className,
+                                        type: btn.type
+                                    })));
                                     resolve({ success: false, error: 'Post button not found in modal' });
+                                }
+                                
+                                function checkPostSuccess() {
+                                    // Wait a bit and check if modal closed or post appeared
+                                    setTimeout(() => {
+                                        console.log('🔍 Checking if post was successful...');
+                                        
+                                        // Check if modal is still open
+                                        const modal = document.querySelector('[data-test-id="post-composer"]') || 
+                                                     document.querySelector('.share-box') ||
+                                                     document.querySelector('.feed-shared-text-input');
+                                        
+                                        if (!modal || modal.style.display === 'none') {
+                                            console.log('✅ Modal closed, post likely successful');
+                                            resolve({ success: true, linkedinPostId: 'linkedin-' + Date.now() });
+                                        } else {
+                                            console.log('⚠️ Modal still open, post may have failed');
+                                            // Try clicking again after a short delay
+                                            setTimeout(() => {
+                                                const retryButton = document.querySelector('[data-test-id="post-composer-submit-button"]') ||
+                                                                   document.querySelector('button[type="submit"]') ||
+                                                                   document.querySelector('.share-box__submit-button');
+                                                if (retryButton && !retryButton.disabled) {
+                                                    console.log('🔄 Retrying post button click...');
+                                                    retryButton.click();
+                                                    setTimeout(() => {
+                                                        console.log('✅ Post submitted successfully (retry)');
+                                                        resolve({ success: true, linkedinPostId: 'linkedin-' + Date.now() });
+                                                    }, 2000);
+                                                } else {
+                                                    console.log('❌ Post submission failed');
+                                                    resolve({ success: false, error: 'Post submission failed' });
+                                                }
+                                            }, 2000);
+                                        }
+                                    }, 3000);
                                 }
                             }, 2000);
                         }
