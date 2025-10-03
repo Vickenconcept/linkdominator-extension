@@ -145,8 +145,17 @@ const createLinkedInPost = (post) => {
             
             let postInput = null;
             
-            // First try the specific button selectors
+            // First try the specific button selectors with better filtering
             const buttonSelectors = [
+                // Most specific selectors first based on actual LinkedIn structure
+                'button[id^="ember"].artdeco-button--tertiary.artdeco-button--muted',
+                'button.artdeco-button--tertiary.artdeco-button--muted.ember-view',
+                'button[id^="ember"].artdeco-button--tertiary',
+                'button.artdeco-button--tertiary.artdeco-button--muted',
+                'button[data-test-id="post-composer-button"]',
+                'button[aria-label*="Start a post"]',
+                'button[aria-label*="Share"]',
+                'button[data-control-name="composer_share"]',
                 'button[class*="artdeco-button"][class*="tertiary"]',
                 'button[id^="ember"]',
                 'button[class*="XAGftPalfcetddQsMAoTQRRogBmAGTNTsvI"]'
@@ -155,23 +164,65 @@ const createLinkedInPost = (post) => {
             for (const selector of buttonSelectors) {
                 const buttons = document.querySelectorAll(selector);
                 for (const button of buttons) {
-                    if (button.textContent.includes('Start a post')) {
+                    const buttonText = button.textContent?.trim().toLowerCase() || '';
+                    const ariaLabel = button.getAttribute('aria-label')?.toLowerCase() || '';
+                    
+                    // Check for positive indicators (Start a post, Share, etc.)
+                    const isPostButton = buttonText.includes('start a post') || 
+                                       buttonText.includes('share') ||
+                                       ariaLabel.includes('start a post') ||
+                                       ariaLabel.includes('share') ||
+                                       // Also check for the specific ember button structure
+                                       (button.id && button.id.startsWith('ember') && 
+                                        button.classList.contains('artdeco-button--tertiary') &&
+                                        buttonText.includes('start'));
+                    
+                    // Check for negative indicators (Dismiss, Hide, etc.)
+                    const isNotPostButton = buttonText.includes('dismiss') ||
+                                          buttonText.includes('hide') ||
+                                          buttonText.includes('close') ||
+                                          ariaLabel.includes('dismiss') ||
+                                          ariaLabel.includes('hide') ||
+                                          ariaLabel.includes('close');
+                    
+                    if (isPostButton && !isNotPostButton) {
                         postInput = button;
                         console.log('✅ Found "Start a post" button with selector:', selector);
+                        console.log('🔍 Button text:', buttonText);
+                        console.log('🔍 Button aria-label:', ariaLabel);
+                        console.log('🔍 Button id:', button.id);
+                        console.log('🔍 Button classes:', button.className);
                         break;
                     }
                 }
                 if (postInput) break;
             }
             
-            // If not found, try other selectors
+            // If not found, try other selectors with better filtering
             if (!postInput) {
                 for (const selector of selectors) {
-                    postInput = document.querySelector(selector);
-                    if (postInput) {
+                    const elements = document.querySelectorAll(selector);
+                    for (const element of elements) {
+                        // Skip if it's a button with dismiss/hide text
+                        if (element.tagName === 'BUTTON') {
+                            const buttonText = element.textContent?.trim().toLowerCase() || '';
+                            const ariaLabel = element.getAttribute('aria-label')?.toLowerCase() || '';
+                            
+                            if (buttonText.includes('dismiss') || 
+                                buttonText.includes('hide') || 
+                                buttonText.includes('close') ||
+                                ariaLabel.includes('dismiss') ||
+                                ariaLabel.includes('hide') ||
+                                ariaLabel.includes('close')) {
+                                continue;
+                            }
+                        }
+                        
+                        postInput = element;
                         console.log('✅ Found post input with selector:', selector);
                         break;
                     }
+                    if (postInput) break;
                 }
             }
             
@@ -240,8 +291,11 @@ const createLinkedInPost = (post) => {
                     if (modalTextArea) {
                         console.log('✅ Found modal text area, filling content...');
                         
-                        // Clear any existing content
+                        // For carousel posts, don't clear content as it might interfere with image pasting
+                        if (!(post.carousel_images && post.carousel_images.length > 0)) {
+                            // Clear any existing content only for non-carousel posts
                         modalTextArea.innerHTML = '';
+                        }
                         
                         // Set the post content
                         modalTextArea.textContent = post.content;
@@ -254,7 +308,7 @@ const createLinkedInPost = (post) => {
                         
                         // Step 3: Handle media upload if present
                         if (post.carousel_images && post.carousel_images.length > 0) {
-                            console.log('🖼️ Post has carousel images, using clipboard paste method...');
+                            console.log('🖼️ Post has carousel images, using same method as video...');
                             handleCarouselPaste(post.carousel_images, modalTextArea);
                         } else if (post.image_url) {
                             console.log('🖼️ Post has image, using clipboard paste method...');
@@ -268,6 +322,35 @@ const createLinkedInPost = (post) => {
                         }
                         
                         // Define helper functions within the injected script context
+                        function ensureCaretAtEnd(editableEl) {
+                            try {
+                                if (!editableEl) return;
+                                editableEl.focus();
+                                const selection = window.getSelection();
+                                if (!selection) return;
+                                const range = document.createRange();
+                                // If the editor is empty, append an empty text node to place caret
+                                if (editableEl.childNodes.length === 0) {
+                                    editableEl.appendChild(document.createTextNode(''));
+                                }
+                                // Find the last text-capable node
+                                let node = editableEl;
+                                while (node.lastChild && node.lastChild.nodeType === Node.ELEMENT_NODE) {
+                                    node = node.lastChild;
+                                }
+                                const targetNode = node.lastChild || node;
+                                const length = targetNode.nodeType === Node.TEXT_NODE ? targetNode.textContent.length : (targetNode.childNodes?.length || 0);
+                                range.setStart(targetNode, Math.max(0, length));
+                                range.collapse(true);
+                                selection.removeAllRanges();
+                                selection.addRange(range);
+                                // Nudge Quill to register selection
+                                editableEl.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
+                                editableEl.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, cancelable: true, key: 'End' }));
+                            } catch (e) {
+                                console.log('⚠️ Failed to ensure caret at end:', e);
+                            }
+                        }
                         function handleImagePaste(imageUrl, textArea) {
                             console.log('🖼️ Handling image paste for:', imageUrl);
                             
@@ -356,95 +439,194 @@ const createLinkedInPost = (post) => {
                                 return;
                             }
                             
-                            // For carousel, we'll paste images one by one
-                            // LinkedIn's carousel paste requires multiple paste operations
-                            let currentImageIndex = 0;
+                            // Fetch all images first, then paste them all at once (same as video method)
+                            console.log('📥 Fetching all carousel images...');
                             
-                            function pasteNextImage() {
-                                if (currentImageIndex >= carouselImages.length) {
-                                    console.log('✅ All carousel images pasted, waiting for processing...');
-                                    waitForImageToProcess();
-                                    return;
-                                }
-                                
-                                const imageUrl = carouselImages[currentImageIndex];
-                                console.log(`🖼️ Pasting carousel image ${currentImageIndex + 1}/${carouselImages.length}:`, imageUrl);
-                                
-                                // Fetch and paste the current image
+                            Promise.all(carouselImages.map((imageUrl, index) => 
                                 fetch(imageUrl)
                                     .then(response => response.blob())
                                     .then(blob => {
-                                        console.log(`📤 Carousel image ${currentImageIndex + 1} blob created, preparing clipboard data...`);
-                                        
-                                        try {
-                                            const clipboardData = new DataTransfer();
-                                            const file = new File([blob], `carousel-${currentImageIndex + 1}.jpg`, { type: 'image/jpeg' });
-                                            clipboardData.items.add(file);
-                                            
-                                            // Focus on the text area
-                                            textArea.focus();
-                                            
-                                            // Create a paste event with the image data
-                                            const pasteEvent = new ClipboardEvent('paste', {
-                                                clipboardData: clipboardData,
-                                                bubbles: true,
-                                                cancelable: true
-                                            });
-                                            
-                                            console.log(`📋 Dispatching paste event for carousel image ${currentImageIndex + 1}...`);
-                                            textArea.dispatchEvent(pasteEvent);
-                                            
-                                            // Move to next image after a delay
-                                            currentImageIndex++;
-                                            setTimeout(pasteNextImage, 3000); // 3 second delay between images
-                                            
-                                        } catch (error) {
-                                            console.log('⚠️ DataTransfer method failed for carousel, trying alternative approach:', error);
-                                            
-                                            // Method 2: Try using modern Clipboard API
-                                            if (navigator.clipboard && navigator.clipboard.write) {
-                                                const clipboardItem = new ClipboardItem({
-                                                    'image/jpeg': blob
-                                                });
-                                                
-                                                navigator.clipboard.write([clipboardItem])
-                                                    .then(() => {
-                                                        console.log(`📋 Carousel image ${currentImageIndex + 1} copied to clipboard, focusing text area...`);
-                                                        textArea.focus();
-                                                        
-                                                        // Simulate Ctrl+V
-                                                        const pasteEvent = new KeyboardEvent('keydown', {
-                                                            key: 'v',
-                                                            code: 'KeyV',
-                                                            ctrlKey: true,
-                                                            bubbles: true,
-                                                            cancelable: true
-                                                        });
-                                                        
-                                                        textArea.dispatchEvent(pasteEvent);
-                                                        
-                                                        // Move to next image after a delay
-                                                        currentImageIndex++;
-                                                        setTimeout(pasteNextImage, 3000);
-                                                    })
-                                                    .catch(err => {
-                                                        console.log('❌ Clipboard API failed for carousel:', err);
-                                                        findAndClickPostButton();
-                                                    });
-                                            } else {
-                                                console.log('❌ Clipboard API not available for carousel, falling back to post button');
-                                                findAndClickPostButton();
-                                            }
-                                        }
+                                        console.log(`📤 Carousel image ${index + 1}/${carouselImages.length} blob created`);
+                                        return new File([blob], `carousel-${index + 1}.jpg`, { type: 'image/jpeg' });
                                     })
                                     .catch(error => {
-                                        console.log(`❌ Error fetching carousel image ${currentImageIndex + 1}:`, error);
-                                        findAndClickPostButton();
+                                        console.log(`❌ Failed to fetch carousel image ${index + 1}:`, error);
+                                        return null;
+                                    })
+                            ))
+                            .then(files => {
+                                // Filter out any failed fetches
+                                const validFiles = files.filter(file => file !== null);
+                                console.log(`✅ Successfully fetched ${validFiles.length}/${carouselImages.length} carousel images`);
+                                
+                                if (validFiles.length === 0) {
+                                    console.log('❌ No valid images to paste');
+                                    findAndClickPostButton();
+                                    return;
+                                }
+                                
+                                // Create clipboard data with all images (same approach as video)
+                                try {
+                                    const clipboardData = new DataTransfer();
+                                    validFiles.forEach(file => {
+                                        clipboardData.items.add(file);
                                     });
+                                    
+                                    // Focus on the text area
+                                    textArea.focus();
+                                    
+                                    // Create a paste event with all image data (same as video)
+                                    const pasteEvent = new ClipboardEvent('paste', {
+                                        clipboardData: clipboardData,
+                                        bubbles: true,
+                                        cancelable: true
+                                    });
+                                    
+                                    console.log('📋 Dispatching paste event with all carousel images...');
+                                    textArea.dispatchEvent(pasteEvent);
+                                    
+                                    // Wait for images to process
+                                    setTimeout(() => {
+                                        console.log('✅ All carousel images pasted, waiting for processing...');
+                                        waitForImageToProcess();
+                                    }, 2000);
+                                    
+                                } catch (error) {
+                                    console.log('⚠️ DataTransfer method failed for carousel, trying alternative approach:', error);
+                                    
+                                    // Method 2: Try using modern Clipboard API with multiple items
+                                    if (navigator.clipboard && navigator.clipboard.write) {
+                                        const clipboardItems = validFiles.map(file => 
+                                            new ClipboardItem({ 'image/jpeg': file })
+                                        );
+                                        
+                                        navigator.clipboard.write(clipboardItems)
+                                            .then(() => {
+                                                console.log('📋 All carousel images copied to clipboard, focusing text area...');
+                                                textArea.focus();
+                                                
+                                                // Simulate Ctrl+V
+                                                const pasteEvent = new KeyboardEvent('keydown', {
+                                                    key: 'v',
+                                                    code: 'KeyV',
+                                                    ctrlKey: true,
+                                                    bubbles: true,
+                                                    cancelable: true
+                                                });
+                                                
+                                                textArea.dispatchEvent(pasteEvent);
+                                                
+                                                setTimeout(() => {
+                                                    console.log('✅ All carousel images pasted, waiting for processing...');
+                                                    waitForImageToProcess();
+                                                }, 2000);
+                                            })
+                                            .catch(err => {
+                                                console.log('❌ Clipboard API failed for carousel:', err);
+                                                findAndClickPostButton();
+                                            });
+                                    } else {
+                                        console.log('❌ No clipboard method available for carousel');
+                                        findAndClickPostButton();
+                                    }
+                                }
+                            })
+                            .catch(error => {
+                                console.log('❌ Failed to fetch carousel images:', error);
+                                findAndClickPostButton();
+                            });
+                        }
+                        
+                        function handleCarouselDrop(carouselImages, textArea) {
+                            console.log('🖱️ Handling carousel drag-and-drop for', carouselImages.length, 'images');
+                            if (!carouselImages || carouselImages.length === 0) {
+                                findAndClickPostButton();
+                                return;
                             }
                             
-                            // Start pasting images
-                            pasteNextImage();
+                            // Find a likely drop target area (prefer media drop zones, then editor container)
+                            const dropTargets = [
+                                '[data-test-id="composer-media-drop-target"]',
+                                '[class*="share-box"] [class*="drop"]',
+                                '.share-box__container',
+                                '.share-creation-state__content',
+                                '.composer-editor',
+                                '.ql-editor',
+                                '.ember-view[role="dialog"] .artdeco-modal__content'
+                            ];
+                            let dropArea = null;
+                            for (const sel of dropTargets) {
+                                const el = document.querySelector(sel);
+                                if (el) { dropArea = el; break; }
+                            }
+                            if (!dropArea) {
+                                console.log('⚠️ Drop area not found, falling back to paste method');
+                                handleCarouselPaste(carouselImages, textArea);
+                                return;
+                            }
+                            
+                            // Fetch all images and build a single DataTransfer containing all files
+                            console.log('📥 Fetching all carousel images for drag-and-drop...');
+                            Promise.all(carouselImages.map((imageUrl, index) =>
+                                fetch(imageUrl)
+                                    .then(r => r.blob())
+                                    .then(blob => new File([blob], `carousel-${index + 1}.jpg`, { type: 'image/jpeg' }))
+                                    .catch(err => { console.log('❌ Fetch failed for', imageUrl, err); return null; })
+                            )).then(files => {
+                                const validFiles = files.filter(Boolean);
+                                if (validFiles.length === 0) {
+                                    console.log('❌ No valid files fetched, falling back to paste');
+                                    handleCarouselPaste(carouselImages, textArea);
+                                    return;
+                                }
+                                
+                                // Attempt 1: Single clipboard paste with all files (preferred)
+                                try {
+                                    ensureCaretAtEnd(textArea);
+                                    const dt = new DataTransfer();
+                                    validFiles.forEach(f => dt.items.add(f));
+                                    const pasteEvt = new ClipboardEvent('paste', { bubbles: true, cancelable: true });
+                                    Object.defineProperty(pasteEvt, 'clipboardData', { value: dt });
+                                    console.log('📋 Dispatching single paste with all files...');
+                                    textArea.dispatchEvent(pasteEvt);
+                                    setTimeout(() => {
+                                        console.log('✅ Paste dispatched, waiting for processing...');
+                                        waitForImageToProcess();
+                                    }, 500);
+                                    return;
+                                } catch (e1) {
+                                    console.log('⚠️ Multi-file paste failed, trying drag-and-drop next', e1);
+                                }
+
+                                // Attempt 2: Drag-and-drop with all files
+                                try {
+                                    const dataTransfer = new DataTransfer();
+                                    validFiles.forEach(file => dataTransfer.items.add(file));
+                                    ensureCaretAtEnd(textArea);
+                                    if (dropArea && dropArea.scrollIntoView) {
+                                        try { dropArea.scrollIntoView({ block: 'center', behavior: 'instant' }); } catch (_) {}
+                                    }
+                                    const fireDragEvent = (type, target) => {
+                                        const evt = new DragEvent(type, { bubbles: true, cancelable: true });
+                                        Object.defineProperty(evt, 'dataTransfer', { value: dataTransfer });
+                                        target.dispatchEvent(evt);
+                                    };
+                                    console.log('📦 Dispatching dragenter/dragover/drop with all files...');
+                                    fireDragEvent('dragenter', dropArea);
+                                    fireDragEvent('dragover', dropArea);
+                                    fireDragEvent('drop', dropArea);
+                                    setTimeout(() => {
+                                        console.log('✅ Drag-and-drop dispatched, waiting for images to process...');
+                                        waitForImageToProcess();
+                                    }, 500);
+                                } catch (e2) {
+                                    console.log('⚠️ Drag-and-drop method failed, falling back to sequential paste', e2);
+                                    handleCarouselPaste(carouselImages, textArea);
+                                }
+                            }).catch(err => {
+                                console.log('❌ Failed preparing files for drag-and-drop', err);
+                                handleCarouselPaste(carouselImages, textArea);
+                            });
                         }
                         
                         function handleVideoPaste(videoUrl, textArea) {
@@ -589,16 +771,127 @@ const createLinkedInPost = (post) => {
                             }
                         }
                         
-                        function handleCarouselUpload(carouselImages) {
+                        function handleCarouselUpload(carouselImages, textArea) {
                             console.log('🖼️ Handling carousel upload with', carouselImages.length, 'images');
                             
-                            // For carousel, we'll upload the first image for now
-                            // LinkedIn's carousel upload is more complex
-                            if (carouselImages.length > 0) {
-                                handleImageUpload(carouselImages[0]);
-                            } else {
+                            if (carouselImages.length === 0) {
                                 findAndClickPostButton();
+                                return;
                             }
+                            
+                            // Look for image upload button or area
+                            console.log('🔍 Looking for image upload button...');
+                            
+                            const uploadSelectors = [
+                                'button[aria-label*="Add photo"]',
+                                'button[aria-label*="Photo"]',
+                                'button[aria-label*="Image"]',
+                                'button[data-test-id*="photo"]',
+                                'button[data-test-id*="image"]',
+                                'button[class*="photo"]',
+                                'button[class*="image"]',
+                                '.share-box__button--photo',
+                                '.feed-shared-text-input__button--photo',
+                                'button[data-control-name="composer_photo"]',
+                                'input[type="file"][accept*="image"]'
+                            ];
+                            
+                            let uploadButton = null;
+                            let fileInput = null;
+                            
+                            // First try to find file input
+                            for (const selector of uploadSelectors) {
+                                const element = document.querySelector(selector);
+                                if (element) {
+                                    if (element.tagName === 'INPUT' && element.type === 'file') {
+                                        fileInput = element;
+                                        console.log('✅ Found file input with selector:', selector);
+                                        break;
+                                    } else if (element.tagName === 'BUTTON') {
+                                        uploadButton = element;
+                                        console.log('✅ Found upload button with selector:', selector);
+                                        break;
+                                    }
+                                }
+                            }
+                            
+                            if (fileInput) {
+                                // Direct file input found, use it
+                                console.log('📁 Using direct file input for carousel upload');
+                                uploadCarouselFiles(fileInput, carouselImages);
+                            } else if (uploadButton) {
+                                // Upload button found, click it to open file dialog
+                                console.log('🖱️ Clicking upload button to open file dialog');
+                                uploadButton.click();
+                                
+                                // Wait for file input to appear
+                                setTimeout(() => {
+                                    const fileInputs = document.querySelectorAll('input[type="file"][accept*="image"]');
+                                    if (fileInputs.length > 0) {
+                                        console.log('✅ File input appeared after button click');
+                                        uploadCarouselFiles(fileInputs[0], carouselImages);
+                            } else {
+                                        console.log('❌ No file input found after button click, trying clipboard method');
+                                        handleCarouselPaste(carouselImages, textArea);
+                                    }
+                                }, 1000);
+                            } else {
+                                console.log('❌ No upload area found, falling back to clipboard method');
+                                handleCarouselPaste(carouselImages, textArea);
+                            }
+                        }
+                        
+                        function uploadCarouselFiles(fileInput, carouselImages) {
+                            console.log('📤 Uploading carousel files:', carouselImages.length);
+                            
+                            // Create a DataTransfer object with all files
+                            const dataTransfer = new DataTransfer();
+                            
+                            // Fetch all images and add them to the DataTransfer
+                            Promise.all(carouselImages.map((imageUrl, index) => 
+                                fetch(imageUrl)
+                                    .then(response => response.blob())
+                                    .then(blob => {
+                                        console.log(`📤 Carousel image ${index + 1}/${carouselImages.length} blob created`);
+                                        return new File([blob], `carousel-${index + 1}.jpg`, { type: 'image/jpeg' });
+                                    })
+                                    .catch(error => {
+                                        console.log(`❌ Failed to fetch carousel image ${index + 1}:`, error);
+                                        return null;
+                                    })
+                            ))
+                            .then(files => {
+                                const validFiles = files.filter(file => file !== null);
+                                console.log(`✅ Successfully fetched ${validFiles.length}/${carouselImages.length} carousel images`);
+                                
+                                if (validFiles.length === 0) {
+                                    console.log('❌ No valid images to upload');
+                                findAndClickPostButton();
+                                    return;
+                                }
+                                
+                                // Add all files to DataTransfer
+                                validFiles.forEach(file => {
+                                    dataTransfer.items.add(file);
+                                });
+                                
+                                // Set the files on the input
+                                fileInput.files = dataTransfer.files;
+                                
+                                // Trigger change event
+                                fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+                                
+                                console.log('✅ Carousel files uploaded, waiting for processing...');
+                                
+                                // Wait for images to process
+                                setTimeout(() => {
+                                    waitForImageToProcess();
+                                }, 2000);
+                            })
+                            .catch(error => {
+                                console.log('❌ Failed to upload carousel files:', error);
+                                findAndClickPostButton();
+                            });
                         }
                         
                         function uploadImageFile(fileInput, imageUrl) {
