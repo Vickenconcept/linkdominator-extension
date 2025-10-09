@@ -280,6 +280,7 @@ const createLinkedInPost = (post) => {
                     ];
                     
                     let modalTextArea = null;
+                    let savedPostContent = null;
                     for (const selector of modalSelectors) {
                         modalTextArea = document.querySelector(selector);
                         if (modalTextArea) {
@@ -298,13 +299,18 @@ const createLinkedInPost = (post) => {
                         }
                         
                         // Set the post content
-                        modalTextArea.textContent = post.content;
+                        if (post.carousel_images && post.carousel_images.length > 0) {
+                            // Defer setting text until after images are processed to prevent Quill paste from wiping it
+                            savedPostContent = post.content || '';
+                        } else {
+                            modalTextArea.textContent = post.content || '';
+                        }
                         
                         // Trigger input event
                         modalTextArea.dispatchEvent(new Event('input', { bubbles: true }));
                         modalTextArea.dispatchEvent(new Event('change', { bubbles: true }));
                         
-                        console.log('✅ Content filled, checking for image...');
+                        console.log('✅ Content prepared, checking for media...');
                         
                         // Step 3: Handle media upload if present
                         if (post.carousel_images && post.carousel_images.length > 0) {
@@ -322,6 +328,64 @@ const createLinkedInPost = (post) => {
                         }
                         
                         // Define helper functions within the injected script context
+                        function applyPostText(textArea, content) {
+                            try {
+                                if (!textArea) return;
+                                const current = (textArea.innerText || '').trim();
+                                const desired = (content || '').trim();
+                                if (!desired) return;
+                                if (current === desired) return;
+                                // Append a newline before text to avoid sticking to image embed, if needed
+                                const prefix = current.length > 0 ? '\n' : '';
+                                textArea.focus();
+                                ensureCaretAtEnd(textArea);
+                                // Prefer inserting textContent to avoid HTML
+                                textArea.textContent = (current ? current + prefix : '') + desired;
+                                textArea.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, data: desired, inputType: 'insertText' }));
+                                textArea.dispatchEvent(new Event('change', { bubbles: true }));
+                                textArea.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, cancelable: true, key: 'End' }));
+                                console.log('✍️ Restored/Applied post text after media processing');
+                            } catch (e) {
+                                console.log('⚠️ Failed to apply post text:', e);
+                            }
+                        }
+
+                        function waitForPostButtonAndClick() {
+                            const selectors = [
+                                '.share-actions__primary-action',
+                                'form[role="dialog"] .share-actions__primary-action',
+                                'button[type="submit"].artdeco-button--primary',
+                                'button[aria-label*="Post"]'
+                            ];
+                            let attempts = 0;
+                            const maxAttempts = 30;
+                            const tick = () => {
+                                attempts++;
+                                let btn = null;
+                                for (const sel of selectors) {
+                                    const candidate = document.querySelector(sel);
+                                    if (candidate) { btn = candidate; break; }
+                                }
+                                if (btn && !btn.disabled) {
+                                    try {
+                                        btn.scrollIntoView({ block: 'center', behavior: 'instant' });
+                                    } catch(_) {}
+                                    const fire = (type) => btn.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+                                    fire('pointerdown');
+                                    fire('mousedown');
+                                    fire('mouseup');
+                                    fire('click');
+                                    console.log('🖱️ Clicked enabled post button');
+                                    return;
+                                }
+                                if (attempts < maxAttempts) {
+                                    setTimeout(tick, 300);
+                                } else {
+                                    console.log('⚠️ Post button not enabled in time');
+                                }
+                            };
+                            tick();
+                        }
                         function ensureCaretAtEnd(editableEl) {
                             try {
                                 if (!editableEl) return;
@@ -487,8 +551,13 @@ const createLinkedInPost = (post) => {
                                     
                                     // Wait for images to process
                                     setTimeout(() => {
-                                        console.log('✅ All carousel images pasted, waiting for processing...');
-                                        waitForImageToProcess();
+                                    console.log('✅ All carousel images pasted, waiting for processing...');
+                                    waitForImageToProcess(() => {
+                                        // After images show up, restore text if it was deferred
+                                        if (savedPostContent) {
+                                            applyPostText(textArea, savedPostContent);
+                                        }
+                                    });
                                     }, 2000);
                                     
                                 } catch (error) {
@@ -518,7 +587,11 @@ const createLinkedInPost = (post) => {
                                                 
                                                 setTimeout(() => {
                                                     console.log('✅ All carousel images pasted, waiting for processing...');
-                                                    waitForImageToProcess();
+                                                    waitForImageToProcess(() => {
+                                                        if (savedPostContent) {
+                                                            applyPostText(textArea, savedPostContent);
+                                                        }
+                                                    });
                                                 }, 2000);
                                             })
                                             .catch(err => {
@@ -927,7 +1000,7 @@ const createLinkedInPost = (post) => {
                                 });
                         }
                         
-                        function waitForImageToProcess() {
+                        function waitForImageToProcess(onDone) {
                             console.log('🖼️ Waiting for image to process and appear in post composer...');
                             
                             let attempts = 0;
@@ -1011,9 +1084,17 @@ const createLinkedInPost = (post) => {
                                 
                                 if (imageFound) {
                                     console.log('✅ Image successfully processed and visible in post composer');
-                                    // Wait a bit more for image to fully load
+                                    // Allow caller to restore text, then proceed
+                                    try { if (typeof onDone === 'function') onDone(); } catch (_) {}
+                                    // Wait a bit more for image to fully load, then continue
                                     setTimeout(() => {
-                                        findAndClickPostButton();
+                                        if (savedPostContent) {
+                                            applyPostText(modalTextArea, savedPostContent);
+                                        }
+                                        // Wait a moment for button to enable after text restoration
+                                        setTimeout(() => {
+                                            waitForPostButtonAndClick();
+                                        }, 500);
                                     }, 2000);
                                 } else if (isLoading && attempts < maxAttempts) {
                                     console.log(`⏳ Image still loading, attempt ${attempts}/${maxAttempts}...`);
