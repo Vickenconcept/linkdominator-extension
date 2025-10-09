@@ -42,7 +42,7 @@ var xRestliProtocolVersion = '2.0.0';
 
 
 const getUserProfile = async () => {
-  await $.ajax({
+  await ajaxPromise({
     method: 'get',
     beforeSend: function(request) {
       request.setRequestHeader('csrf-token', jsession);
@@ -93,7 +93,7 @@ const getUserProfile = async () => {
     
     },
     error: function(err,statusText,responseText){
-      if(err.hasOwnProperty('responseJSON'))
+      if(err.hasOwnProperty('responseJSON') && err.responseJSON && err.responseJSON.data && err.responseJSON.data.message)
         console.log(err.responseJSON.data.message);
       else console.log(responseText);
     }
@@ -120,12 +120,12 @@ const remainedTime = (delayTime, totalConnect) => {
 
 // based on module action
 const sendStats = async (totalFollow, module) => {
-  await $.ajax({
+  await ajaxPromise({
       method: 'post',
       url: `${filterApi}/activites?module=${module}&stat=${totalFollow}&identifier=${$('#me-publicIdentifier').val()}`,
       success: function(data){},
       error: function(err, textStatus){
-        if(err.hasOwnProperty('responseJSON'))
+        if(err.hasOwnProperty('responseJSON') && err.responseJSON && err.responseJSON.data && err.responseJSON.data.message)
           console.log(err.responseJSON.data.message);
         else console.log(textStatus);
       }
@@ -133,7 +133,7 @@ const sendStats = async (totalFollow, module) => {
 }
 
 const connectionStat = async () => {
-  await $.ajax({
+  await ajaxPromise({
     method: 'get',
     beforeSend: function(request) {
       request.setRequestHeader('csrf-token', jsession);
@@ -152,7 +152,7 @@ const connectionStat = async () => {
       pendingInviteStat(totalConnection, publicId)
     },
     error: function(err, textStatus){
-      if(err.hasOwnProperty('responseJSON'))
+      if(err.hasOwnProperty('responseJSON') && err.responseJSON && err.responseJSON.data && err.responseJSON.data.message)
         console.log(err.responseJSON.data.message);
       else console.log(textStatus);
     }
@@ -160,7 +160,7 @@ const connectionStat = async () => {
 }
 
 const pendingInviteStat = async (totalConnection, publicId) => {
-  await $.ajax({
+  await ajaxPromise({
     method: 'get',
     beforeSend: function(request) {
       request.setRequestHeader('csrf-token', jsession);
@@ -177,7 +177,7 @@ const pendingInviteStat = async (totalConnection, publicId) => {
       profileViewStat(totalConnection, numTotalSentInvitations, publicId)
     },
     error: function(err, textStatus){
-      if(err.hasOwnProperty('responseJSON'))
+      if(err.hasOwnProperty('responseJSON') && err.responseJSON && err.responseJSON.data && err.responseJSON.data.message)
         console.log(err.responseJSON.data.message);
       else console.log(textStatus);
     }
@@ -185,7 +185,7 @@ const pendingInviteStat = async (totalConnection, publicId) => {
 }
 
 const profileViewStat = async (totalConnection, numTotalSentInvitations, publicId) => {
-  await $.ajax({
+  await ajaxPromise({
     method: 'get',
     beforeSend: function(request) {
       request.setRequestHeader('csrf-token', jsession);
@@ -214,7 +214,7 @@ const profileViewStat = async (totalConnection, numTotalSentInvitations, publicI
       searchAppearanceStat(totalConnection, numTotalSentInvitations, profileView, publicId)
     },
     error: function(err, textStatus){
-      if(err.hasOwnProperty('responseJSON'))
+      if(err.hasOwnProperty('responseJSON') && err.responseJSON && err.responseJSON.data && err.responseJSON.data.message)
         console.log(err.responseJSON.data.message);
       else console.log(textStatus);
     }
@@ -222,7 +222,7 @@ const profileViewStat = async (totalConnection, numTotalSentInvitations, publicI
 }
 
 const searchAppearanceStat = async (totalConnection, numTotalSentInvitations, profileView, publicId) => {
-  await $.ajax({
+  await ajaxPromise({
     method: 'get',
     beforeSend: function(request) {
       request.setRequestHeader('csrf-token', jsession);
@@ -238,7 +238,7 @@ const searchAppearanceStat = async (totalConnection, numTotalSentInvitations, pr
       sendMiniStats(totalConnection, numTotalSentInvitations, profileView, searchAppearance)
     },
     error: function(err, textStatus){
-      if(err.hasOwnProperty('responseJSON'))
+      if(err.hasOwnProperty('responseJSON') && err.responseJSON && err.responseJSON.data && err.responseJSON.data.message)
         console.log(err.responseJSON.data.message);
       else console.log(textStatus);
     }
@@ -246,12 +246,12 @@ const searchAppearanceStat = async (totalConnection, numTotalSentInvitations, pr
 }
 
 const sendMiniStats = async (totalConnection, numTotalSentInvitations, profileView, searchAppearance) => {
-  await $.ajax({
+  await ajaxPromise({
     method: 'post',
     url: `${filterApi}/conf?connection=${totalConnection}&sentInvite=${numTotalSentInvitations}&profileView=${profileView}&searchAppear=${searchAppearance}&profileId=${$('#me-publicIdentifier').val()}`,
     success: function(data){},
     error: function(err, textStatus){
-      if(err.hasOwnProperty('responseJSON'))
+      if(err.hasOwnProperty('responseJSON') && err.responseJSON && err.responseJSON.data && err.responseJSON.data.message)
         console.log(err.responseJSON.data.message);
       else console.log(textStatus);
     }
@@ -500,6 +500,43 @@ const NotificationSystem = {
     }
 };
 
+// Utility function to wrap jQuery AJAX in a proper Promise
+function ajaxPromise(options) {
+    return new Promise((resolve, reject) => {
+        $.ajax({
+            ...options,
+            success: function(data, textStatus, jqXHR) {
+                if (options.success) {
+                    try {
+                        options.success(data, textStatus, jqXHR);
+                    } catch (error) {
+                        console.error('Error in success callback:', error);
+                    }
+                }
+                resolve(data);
+            },
+            error: function(jqXHR, textStatus, errorThrown) {
+                if (options.error) {
+                    try {
+                        options.error(jqXHR, textStatus, errorThrown);
+                    } catch (error) {
+                        console.error('Error in error callback:', error);
+                    }
+                }
+                
+                // Handle 410 errors gracefully - don't reject the promise
+                if (jqXHR.status === 410) {
+                    console.log('LinkedIn API endpoint no longer available (410 Gone) - resolving gracefully');
+                    resolve(null); // Resolve with null instead of rejecting
+                    return;
+                }
+                
+                reject(jqXHR);
+            }
+        });
+    });
+}
+
 // Global error handler for unhandled promise rejections
 window.addEventListener('unhandledrejection', function(event) {
     console.error('Unhandled promise rejection:', event.reason);
@@ -547,11 +584,16 @@ window.addEventListener('unhandledrejection', function(event) {
         }
     }
     
-    // Show notification
-    if (typeof NotificationSystem !== 'undefined') {
-        NotificationSystem.show('error', errorMessage);
+    // Only show notification for non-410 errors
+    if (event.reason && event.reason.status === 410) {
+        console.log('LinkedIn API endpoint no longer available (410 Gone) - this is normal, not showing error notification');
     } else {
-        console.error('Error:', errorMessage);
+        // Show notification for other errors
+        if (typeof NotificationSystem !== 'undefined') {
+            NotificationSystem.show('error', errorMessage);
+        } else {
+            console.error('Error:', errorMessage);
+        }
     }
     
     // Log the full error for debugging

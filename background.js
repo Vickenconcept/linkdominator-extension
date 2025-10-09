@@ -4,6 +4,1424 @@
 // importScripts('./js/actions/campaignAction.js');
 importScripts('./env.js');
 
+// Content Creator functionality
+const handleContentCreatorPosts = async () => {
+    try {
+        console.log('🚀 Checking for scheduled posts...');
+        
+        // Get user's LinkedIn ID from the main extension storage
+        const profileResult = await chrome.storage.local.get(['linkedinId', 'linkedinProfile']);
+        console.log('🔍 Profile result:', profileResult);
+        
+        let linkedinId = profileResult.linkedinId;
+        
+        // Fallback to linkedinProfile if linkedinId is not available
+        if (!linkedinId && profileResult.linkedinProfile) {
+            linkedinId = profileResult.linkedinProfile.publicIdentifier;
+        }
+        
+        if (!linkedinId) {
+            console.log('⚠️ No LinkedIn ID found, using test ID');
+            linkedinId = 'test-user-123';
+        }
+        
+        console.log('🔑 LinkedIn ID:', linkedinId);
+        
+        // Fetch scheduled posts from API
+        const response = await fetch(`${PLATFORM_URL}/api/content-creator/scheduled-posts`, {
+            method: 'GET',
+            headers: {
+                'lk-id': linkedinId,
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (!response.ok) {
+            console.log('❌ Failed to fetch scheduled posts:', response.status);
+            return;
+        }
+        
+        const data = await response.json();
+        const posts = data.data || [];
+        
+        console.log('📡 API Response:', data);
+        console.log(`📝 Found ${posts.length} scheduled posts`);
+        
+        // Process each post
+        for (const post of posts) {
+            try {
+                await publishLinkedInPost(post);
+            } catch (error) {
+                console.error('❌ Error publishing post:', post.id, error);
+                await updatePostStatus(post.id, 'failed');
+            }
+        }
+        
+    } catch (error) {
+        console.error('❌ Error in handleContentCreatorPosts:', error);
+    }
+};
+
+const publishLinkedInPost = async (post) => {
+    try {
+        console.log('📤 Publishing post:', post.id);
+        
+        // Navigate to LinkedIn post creation
+        const newTab = await chrome.tabs.create({
+            url: 'https://www.linkedin.com/feed/',
+            active: true
+        });
+        
+        // Wait for tab to load
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        
+        // Use the newly created tab
+        const tab = newTab;
+        
+        if (!tab) {
+            throw new Error('No active tab found');
+        }
+        
+        // Execute post creation script
+        console.log('🔧 Executing script in tab:', tab.id);
+        const result = await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            function: createLinkedInPost,
+            args: [post]
+        });
+        
+        console.log('📊 Script execution result:', result);
+        
+        if (result[0].result && result[0].result.success) {
+            console.log('✅ Post published successfully:', post.id);
+            await updatePostStatus(post.id, 'published', result[0].result.linkedinPostId);
+        } else {
+            console.log('❌ Failed to publish post:', post.id, result[0].result);
+            await updatePostStatus(post.id, 'failed');
+        }
+        
+    } catch (error) {
+        console.error('❌ Error publishing post:', post.id, error);
+        await updatePostStatus(post.id, 'failed');
+    }
+};
+
+// Function to create LinkedIn post (injected into LinkedIn page)
+const createLinkedInPost = (post) => {
+    return new Promise((resolve) => {
+        console.log('📝 Creating LinkedIn post:', post);
+        
+        // Wait for LinkedIn to load
+        setTimeout(() => {
+            // Step 1: Find and click the post creation input to open the modal
+            console.log('🔍 Looking for post input elements...');
+            
+            // Try multiple selectors for LinkedIn's post button/input
+            const selectors = [
+                // Button selectors (primary)
+                'button[class*="artdeco-button"][class*="tertiary"]',
+                'button:has(strong:contains("Start a post"))',
+                'button .artdeco-button__text:contains("Start a post")',
+                'button[class*="XAGftPalfcetddQsMAoTQRRogBmAGTNTsvI"]',
+                'button[id^="ember"]',
+                
+                // Input selectors (fallback)
+                '[data-test-id="post-composer-text-input"]',
+                '.ql-editor',
+                '[contenteditable="true"]',
+                '.share-box__text-input',
+                '.feed-shared-text-input',
+                '[placeholder*="What do you want to talk about"]',
+                '[placeholder*="Start a post"]',
+                '[placeholder*="What\'s on your mind"]',
+                '[placeholder*="Share an article"]',
+                '.ql-editor.ql-blank',
+                '.ql-editor[data-placeholder]',
+                'div[contenteditable="true"]',
+                'div[role="textbox"]',
+                '.share-box__text-input__input',
+                '.feed-shared-text-input__input'
+            ];
+            
+            let postInput = null;
+            
+            // First try the specific button selectors with better filtering
+            const buttonSelectors = [
+                // Most specific selectors first based on actual LinkedIn structure
+                'button[id^="ember"].artdeco-button--tertiary.artdeco-button--muted',
+                'button.artdeco-button--tertiary.artdeco-button--muted.ember-view',
+                'button[id^="ember"].artdeco-button--tertiary',
+                'button.artdeco-button--tertiary.artdeco-button--muted',
+                'button[data-test-id="post-composer-button"]',
+                'button[aria-label*="Start a post"]',
+                'button[aria-label*="Share"]',
+                'button[data-control-name="composer_share"]',
+                'button[class*="artdeco-button"][class*="tertiary"]',
+                'button[id^="ember"]',
+                'button[class*="XAGftPalfcetddQsMAoTQRRogBmAGTNTsvI"]'
+            ];
+            
+            for (const selector of buttonSelectors) {
+                const buttons = document.querySelectorAll(selector);
+                for (const button of buttons) {
+                    const buttonText = button.textContent?.trim().toLowerCase() || '';
+                    const ariaLabel = button.getAttribute('aria-label')?.toLowerCase() || '';
+                    
+                    // Check for positive indicators (Start a post, Share, etc.)
+                    const isPostButton = buttonText.includes('start a post') || 
+                                       buttonText.includes('share') ||
+                                       ariaLabel.includes('start a post') ||
+                                       ariaLabel.includes('share') ||
+                                       // Also check for the specific ember button structure
+                                       (button.id && button.id.startsWith('ember') && 
+                                        button.classList.contains('artdeco-button--tertiary') &&
+                                        buttonText.includes('start'));
+                    
+                    // Check for negative indicators (Dismiss, Hide, etc.)
+                    const isNotPostButton = buttonText.includes('dismiss') ||
+                                          buttonText.includes('hide') ||
+                                          buttonText.includes('close') ||
+                                          ariaLabel.includes('dismiss') ||
+                                          ariaLabel.includes('hide') ||
+                                          ariaLabel.includes('close');
+                    
+                    if (isPostButton && !isNotPostButton) {
+                        postInput = button;
+                        console.log('✅ Found "Start a post" button with selector:', selector);
+                        console.log('🔍 Button text:', buttonText);
+                        console.log('🔍 Button aria-label:', ariaLabel);
+                        console.log('🔍 Button id:', button.id);
+                        console.log('🔍 Button classes:', button.className);
+                        break;
+                    }
+                }
+                if (postInput) break;
+            }
+            
+            // If not found, try other selectors with better filtering
+            if (!postInput) {
+                for (const selector of selectors) {
+                    const elements = document.querySelectorAll(selector);
+                    for (const element of elements) {
+                        // Skip if it's a button with dismiss/hide text
+                        if (element.tagName === 'BUTTON') {
+                            const buttonText = element.textContent?.trim().toLowerCase() || '';
+                            const ariaLabel = element.getAttribute('aria-label')?.toLowerCase() || '';
+                            
+                            if (buttonText.includes('dismiss') || 
+                                buttonText.includes('hide') || 
+                                buttonText.includes('close') ||
+                                ariaLabel.includes('dismiss') ||
+                                ariaLabel.includes('hide') ||
+                                ariaLabel.includes('close')) {
+                                continue;
+                            }
+                        }
+                        
+                        postInput = element;
+                        console.log('✅ Found post input with selector:', selector);
+                        break;
+                    }
+                    if (postInput) break;
+                }
+            }
+            
+            // If still not found, try to find any clickable element that might open the composer
+            if (!postInput) {
+                console.log('🔍 Trying to find composer trigger elements...');
+                const composerTriggers = [
+                    'button[data-test-id="post-composer-button"]',
+                    'button[aria-label*="Start a post"]',
+                    'button[aria-label*="Share"]',
+                    '.share-box__button',
+                    '.feed-shared-text-input__button',
+                    'button[data-control-name="composer_share"]'
+                ];
+                
+                for (const selector of composerTriggers) {
+                    const trigger = document.querySelector(selector);
+                    if (trigger) {
+                        console.log('✅ Found composer trigger with selector:', selector);
+                        trigger.click();
+                        // Wait a bit for the composer to open
+                        setTimeout(() => {
+                            // Now try to find the input again
+                            for (const inputSelector of selectors) {
+                                postInput = document.querySelector(inputSelector);
+                                if (postInput) {
+                                    console.log('✅ Found post input after clicking trigger:', inputSelector);
+                                    break;
+                                }
+                            }
+                        }, 2000);
+                        break;
+                    }
+                }
+            }
+            
+            if (postInput) {
+                console.log('✅ Found post button, clicking to open modal...');
+                postInput.click();
+                
+                // Step 2: Wait for modal to open and find the text area
+                setTimeout(() => {
+                    console.log('🔍 Looking for modal text area after button click...');
+                    
+                    const modalSelectors = [
+                        '[data-test-id="post-composer-text-input"]',
+                        '.ql-editor',
+                        '[contenteditable="true"]',
+                        '.share-box__text-input',
+                        '.feed-shared-text-input',
+                        'div[contenteditable="true"]',
+                        'div[role="textbox"]',
+                        'textarea',
+                        'input[type="text"]'
+                    ];
+                    
+                    let modalTextArea = null;
+                    let savedPostContent = null;
+                    for (const selector of modalSelectors) {
+                        modalTextArea = document.querySelector(selector);
+                        if (modalTextArea) {
+                            console.log('✅ Found modal text area with selector:', selector);
+                            break;
+                        }
+                    }
+                    
+                    if (modalTextArea) {
+                        console.log('✅ Found modal text area, filling content...');
+                        
+                        // For carousel posts, don't clear content as it might interfere with image pasting
+                        if (!(post.carousel_images && post.carousel_images.length > 0)) {
+                            // Clear any existing content only for non-carousel posts
+                        modalTextArea.innerHTML = '';
+                        }
+                        
+                        // Set the post content
+                        if (post.carousel_images && post.carousel_images.length > 0) {
+                            // Defer setting text until after images are processed to prevent Quill paste from wiping it
+                            savedPostContent = post.content || '';
+                        } else {
+                            modalTextArea.textContent = post.content || '';
+                        }
+                        
+                        // Trigger input event
+                        modalTextArea.dispatchEvent(new Event('input', { bubbles: true }));
+                        modalTextArea.dispatchEvent(new Event('change', { bubbles: true }));
+                        
+                        console.log('✅ Content prepared, checking for media...');
+                        
+                        // Step 3: Handle media upload if present
+                        if (post.carousel_images && post.carousel_images.length > 0) {
+                            console.log('🖼️ Post has carousel images, using same method as video...');
+                            handleCarouselPaste(post.carousel_images, modalTextArea);
+                        } else if (post.image_url) {
+                            console.log('🖼️ Post has image, using clipboard paste method...');
+                            handleImagePaste(post.image_url, modalTextArea);
+                        } else if (post.video_url) {
+                            console.log('🎥 Post has video, using clipboard paste method...');
+                            handleVideoPaste(post.video_url, modalTextArea);
+                        } else {
+                            console.log('📝 Text-only post, proceeding to post button...');
+                            findAndClickPostButton();
+                        }
+                        
+                        // Define helper functions within the injected script context
+                        function applyPostText(textArea, content) {
+                            try {
+                                if (!textArea) return;
+                                const current = (textArea.innerText || '').trim();
+                                const desired = (content || '').trim();
+                                if (!desired) return;
+                                if (current === desired) return;
+                                // Append a newline before text to avoid sticking to image embed, if needed
+                                const prefix = current.length > 0 ? '\n' : '';
+                                textArea.focus();
+                                ensureCaretAtEnd(textArea);
+                                // Prefer inserting textContent to avoid HTML
+                                textArea.textContent = (current ? current + prefix : '') + desired;
+                                textArea.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, data: desired, inputType: 'insertText' }));
+                                textArea.dispatchEvent(new Event('change', { bubbles: true }));
+                                textArea.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, cancelable: true, key: 'End' }));
+                                console.log('✍️ Restored/Applied post text after media processing');
+                            } catch (e) {
+                                console.log('⚠️ Failed to apply post text:', e);
+                            }
+                        }
+
+                        function waitForPostButtonAndClick() {
+                            const selectors = [
+                                '.share-actions__primary-action',
+                                'form[role="dialog"] .share-actions__primary-action',
+                                'button[type="submit"].artdeco-button--primary',
+                                'button[aria-label*="Post"]'
+                            ];
+                            let attempts = 0;
+                            const maxAttempts = 30;
+                            const tick = () => {
+                                attempts++;
+                                let btn = null;
+                                for (const sel of selectors) {
+                                    const candidate = document.querySelector(sel);
+                                    if (candidate) { btn = candidate; break; }
+                                }
+                                if (btn && !btn.disabled) {
+                                    try {
+                                        btn.scrollIntoView({ block: 'center', behavior: 'instant' });
+                                    } catch(_) {}
+                                    const fire = (type) => btn.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+                                    fire('pointerdown');
+                                    fire('mousedown');
+                                    fire('mouseup');
+                                    fire('click');
+                                    console.log('🖱️ Clicked enabled post button');
+                                    return;
+                                }
+                                if (attempts < maxAttempts) {
+                                    setTimeout(tick, 300);
+                                } else {
+                                    console.log('⚠️ Post button not enabled in time');
+                                }
+                            };
+                            tick();
+                        }
+                        function ensureCaretAtEnd(editableEl) {
+                            try {
+                                if (!editableEl) return;
+                                editableEl.focus();
+                                const selection = window.getSelection();
+                                if (!selection) return;
+                                const range = document.createRange();
+                                // If the editor is empty, append an empty text node to place caret
+                                if (editableEl.childNodes.length === 0) {
+                                    editableEl.appendChild(document.createTextNode(''));
+                                }
+                                // Find the last text-capable node
+                                let node = editableEl;
+                                while (node.lastChild && node.lastChild.nodeType === Node.ELEMENT_NODE) {
+                                    node = node.lastChild;
+                                }
+                                const targetNode = node.lastChild || node;
+                                const length = targetNode.nodeType === Node.TEXT_NODE ? targetNode.textContent.length : (targetNode.childNodes?.length || 0);
+                                range.setStart(targetNode, Math.max(0, length));
+                                range.collapse(true);
+                                selection.removeAllRanges();
+                                selection.addRange(range);
+                                // Nudge Quill to register selection
+                                editableEl.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
+                                editableEl.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, cancelable: true, key: 'End' }));
+                            } catch (e) {
+                                console.log('⚠️ Failed to ensure caret at end:', e);
+                            }
+                        }
+                        function handleImagePaste(imageUrl, textArea) {
+                            console.log('🖼️ Handling image paste for:', imageUrl);
+                            
+                            // Fetch the image and convert to blob
+                            fetch(imageUrl)
+                                .then(response => response.blob())
+                                .then(blob => {
+                                    console.log('📤 Image blob created, preparing clipboard data...');
+                                    
+                                    // Method 1: Try using DataTransfer and ClipboardEvent
+                                    try {
+                                        const clipboardData = new DataTransfer();
+                                        const file = new File([blob], 'image.jpg', { type: 'image/jpeg' });
+                                        clipboardData.items.add(file);
+                                        
+                                        // Focus on the text area
+                                        textArea.focus();
+                                        
+                                        // Create a paste event with the image data
+                                        const pasteEvent = new ClipboardEvent('paste', {
+                                            clipboardData: clipboardData,
+                                            bubbles: true,
+                                            cancelable: true
+                                        });
+                                        
+                                        console.log('📋 Dispatching paste event with image...');
+                                        textArea.dispatchEvent(pasteEvent);
+                                        
+                                        // Wait for image to process
+                                        setTimeout(() => {
+                                            console.log('✅ Image paste completed, waiting for processing...');
+                                            waitForImageToProcess();
+                                        }, 2000);
+                                        
+                                    } catch (error) {
+                                        console.log('⚠️ DataTransfer method failed, trying alternative approach:', error);
+                                        
+                                        // Method 2: Try using modern Clipboard API
+                                        if (navigator.clipboard && navigator.clipboard.write) {
+                                            const clipboardItem = new ClipboardItem({
+                                                'image/jpeg': blob
+                                            });
+                                            
+                                            navigator.clipboard.write([clipboardItem])
+                                                .then(() => {
+                                                    console.log('📋 Image copied to clipboard, focusing text area...');
+                                                    textArea.focus();
+                                                    
+                                                    // Simulate Ctrl+V
+                                                    const pasteEvent = new KeyboardEvent('keydown', {
+                                                        key: 'v',
+                                                        code: 'KeyV',
+                                                        ctrlKey: true,
+                                                        bubbles: true,
+                                                        cancelable: true
+                                                    });
+                                                    
+                                                    textArea.dispatchEvent(pasteEvent);
+                                                    
+                                                    setTimeout(() => {
+                                                        console.log('✅ Image paste completed, waiting for processing...');
+                                                        waitForImageToProcess();
+                                                    }, 2000);
+                                                })
+                                                .catch(err => {
+                                                    console.log('❌ Clipboard API failed:', err);
+                                                    findAndClickPostButton();
+                                                });
+                                        } else {
+                                            console.log('❌ Clipboard API not available, falling back to post button');
+                                            findAndClickPostButton();
+                                        }
+                                    }
+                                })
+                                .catch(error => {
+                                    console.log('❌ Error fetching image for paste:', error);
+                                    findAndClickPostButton();
+                                });
+                        }
+                        
+                        function handleCarouselPaste(carouselImages, textArea) {
+                            console.log('🖼️ Handling carousel paste for', carouselImages.length, 'images');
+                            
+                            if (carouselImages.length === 0) {
+                                findAndClickPostButton();
+                                return;
+                            }
+                            
+                            // Fetch all images first, then paste them all at once (same as video method)
+                            console.log('📥 Fetching all carousel images...');
+                            
+                            Promise.all(carouselImages.map((imageUrl, index) => 
+                                fetch(imageUrl)
+                                    .then(response => response.blob())
+                                    .then(blob => {
+                                        console.log(`📤 Carousel image ${index + 1}/${carouselImages.length} blob created`);
+                                        return new File([blob], `carousel-${index + 1}.jpg`, { type: 'image/jpeg' });
+                                    })
+                                    .catch(error => {
+                                        console.log(`❌ Failed to fetch carousel image ${index + 1}:`, error);
+                                        return null;
+                                    })
+                            ))
+                            .then(files => {
+                                // Filter out any failed fetches
+                                const validFiles = files.filter(file => file !== null);
+                                console.log(`✅ Successfully fetched ${validFiles.length}/${carouselImages.length} carousel images`);
+                                
+                                if (validFiles.length === 0) {
+                                    console.log('❌ No valid images to paste');
+                                    findAndClickPostButton();
+                                    return;
+                                }
+                                
+                                // Create clipboard data with all images (same approach as video)
+                                try {
+                                    const clipboardData = new DataTransfer();
+                                    validFiles.forEach(file => {
+                                        clipboardData.items.add(file);
+                                    });
+                                    
+                                    // Focus on the text area
+                                    textArea.focus();
+                                    
+                                    // Create a paste event with all image data (same as video)
+                                    const pasteEvent = new ClipboardEvent('paste', {
+                                        clipboardData: clipboardData,
+                                        bubbles: true,
+                                        cancelable: true
+                                    });
+                                    
+                                    console.log('📋 Dispatching paste event with all carousel images...');
+                                    textArea.dispatchEvent(pasteEvent);
+                                    
+                                    // Wait for images to process
+                                    setTimeout(() => {
+                                    console.log('✅ All carousel images pasted, waiting for processing...');
+                                    waitForImageToProcess(() => {
+                                        // After images show up, restore text if it was deferred
+                                        if (savedPostContent) {
+                                            applyPostText(textArea, savedPostContent);
+                                        }
+                                    });
+                                    }, 2000);
+                                    
+                                } catch (error) {
+                                    console.log('⚠️ DataTransfer method failed for carousel, trying alternative approach:', error);
+                                    
+                                    // Method 2: Try using modern Clipboard API with multiple items
+                                    if (navigator.clipboard && navigator.clipboard.write) {
+                                        const clipboardItems = validFiles.map(file => 
+                                            new ClipboardItem({ 'image/jpeg': file })
+                                        );
+                                        
+                                        navigator.clipboard.write(clipboardItems)
+                                            .then(() => {
+                                                console.log('📋 All carousel images copied to clipboard, focusing text area...');
+                                                textArea.focus();
+                                                
+                                                // Simulate Ctrl+V
+                                                const pasteEvent = new KeyboardEvent('keydown', {
+                                                    key: 'v',
+                                                    code: 'KeyV',
+                                                    ctrlKey: true,
+                                                    bubbles: true,
+                                                    cancelable: true
+                                                });
+                                                
+                                                textArea.dispatchEvent(pasteEvent);
+                                                
+                                                setTimeout(() => {
+                                                    console.log('✅ All carousel images pasted, waiting for processing...');
+                                                    waitForImageToProcess(() => {
+                                                        if (savedPostContent) {
+                                                            applyPostText(textArea, savedPostContent);
+                                                        }
+                                                    });
+                                                }, 2000);
+                                            })
+                                            .catch(err => {
+                                                console.log('❌ Clipboard API failed for carousel:', err);
+                                                findAndClickPostButton();
+                                            });
+                                    } else {
+                                        console.log('❌ No clipboard method available for carousel');
+                                        findAndClickPostButton();
+                                    }
+                                }
+                            })
+                            .catch(error => {
+                                console.log('❌ Failed to fetch carousel images:', error);
+                                findAndClickPostButton();
+                            });
+                        }
+                        
+                        function handleCarouselDrop(carouselImages, textArea) {
+                            console.log('🖱️ Handling carousel drag-and-drop for', carouselImages.length, 'images');
+                            if (!carouselImages || carouselImages.length === 0) {
+                                findAndClickPostButton();
+                                return;
+                            }
+                            
+                            // Find a likely drop target area (prefer media drop zones, then editor container)
+                            const dropTargets = [
+                                '[data-test-id="composer-media-drop-target"]',
+                                '[class*="share-box"] [class*="drop"]',
+                                '.share-box__container',
+                                '.share-creation-state__content',
+                                '.composer-editor',
+                                '.ql-editor',
+                                '.ember-view[role="dialog"] .artdeco-modal__content'
+                            ];
+                            let dropArea = null;
+                            for (const sel of dropTargets) {
+                                const el = document.querySelector(sel);
+                                if (el) { dropArea = el; break; }
+                            }
+                            if (!dropArea) {
+                                console.log('⚠️ Drop area not found, falling back to paste method');
+                                handleCarouselPaste(carouselImages, textArea);
+                                return;
+                            }
+                            
+                            // Fetch all images and build a single DataTransfer containing all files
+                            console.log('📥 Fetching all carousel images for drag-and-drop...');
+                            Promise.all(carouselImages.map((imageUrl, index) =>
+                                fetch(imageUrl)
+                                    .then(r => r.blob())
+                                    .then(blob => new File([blob], `carousel-${index + 1}.jpg`, { type: 'image/jpeg' }))
+                                    .catch(err => { console.log('❌ Fetch failed for', imageUrl, err); return null; })
+                            )).then(files => {
+                                const validFiles = files.filter(Boolean);
+                                if (validFiles.length === 0) {
+                                    console.log('❌ No valid files fetched, falling back to paste');
+                                    handleCarouselPaste(carouselImages, textArea);
+                                    return;
+                                }
+                                
+                                // Attempt 1: Single clipboard paste with all files (preferred)
+                                try {
+                                    ensureCaretAtEnd(textArea);
+                                    const dt = new DataTransfer();
+                                    validFiles.forEach(f => dt.items.add(f));
+                                    const pasteEvt = new ClipboardEvent('paste', { bubbles: true, cancelable: true });
+                                    Object.defineProperty(pasteEvt, 'clipboardData', { value: dt });
+                                    console.log('📋 Dispatching single paste with all files...');
+                                    textArea.dispatchEvent(pasteEvt);
+                                    setTimeout(() => {
+                                        console.log('✅ Paste dispatched, waiting for processing...');
+                                        waitForImageToProcess();
+                                    }, 500);
+                                    return;
+                                } catch (e1) {
+                                    console.log('⚠️ Multi-file paste failed, trying drag-and-drop next', e1);
+                                }
+
+                                // Attempt 2: Drag-and-drop with all files
+                                try {
+                                    const dataTransfer = new DataTransfer();
+                                    validFiles.forEach(file => dataTransfer.items.add(file));
+                                    ensureCaretAtEnd(textArea);
+                                    if (dropArea && dropArea.scrollIntoView) {
+                                        try { dropArea.scrollIntoView({ block: 'center', behavior: 'instant' }); } catch (_) {}
+                                    }
+                                    const fireDragEvent = (type, target) => {
+                                        const evt = new DragEvent(type, { bubbles: true, cancelable: true });
+                                        Object.defineProperty(evt, 'dataTransfer', { value: dataTransfer });
+                                        target.dispatchEvent(evt);
+                                    };
+                                    console.log('📦 Dispatching dragenter/dragover/drop with all files...');
+                                    fireDragEvent('dragenter', dropArea);
+                                    fireDragEvent('dragover', dropArea);
+                                    fireDragEvent('drop', dropArea);
+                                    setTimeout(() => {
+                                        console.log('✅ Drag-and-drop dispatched, waiting for images to process...');
+                                        waitForImageToProcess();
+                                    }, 500);
+                                } catch (e2) {
+                                    console.log('⚠️ Drag-and-drop method failed, falling back to sequential paste', e2);
+                                    handleCarouselPaste(carouselImages, textArea);
+                                }
+                            }).catch(err => {
+                                console.log('❌ Failed preparing files for drag-and-drop', err);
+                                handleCarouselPaste(carouselImages, textArea);
+                            });
+                        }
+                        
+                        function handleVideoPaste(videoUrl, textArea) {
+                            console.log('🎥 Handling video paste for:', videoUrl);
+                            
+                            // Fetch the video and convert to blob
+                            fetch(videoUrl)
+                                .then(response => response.blob())
+                                .then(blob => {
+                                    console.log('📤 Video blob created, preparing clipboard data...');
+                                    
+                                    // Method 1: Try using DataTransfer and ClipboardEvent
+                                    try {
+                                        const clipboardData = new DataTransfer();
+                                        const file = new File([blob], 'video.mp4', { type: 'video/mp4' });
+                                        clipboardData.items.add(file);
+                                        
+                                        // Focus on the text area
+                                        textArea.focus();
+                                        
+                                        // Create a paste event with the video data
+                                        const pasteEvent = new ClipboardEvent('paste', {
+                                            clipboardData: clipboardData,
+                                            bubbles: true,
+                                            cancelable: true
+                                        });
+                                        
+                                        console.log('📋 Dispatching paste event with video...');
+                                        textArea.dispatchEvent(pasteEvent);
+                                        
+                                        // Wait for video to process
+                                        setTimeout(() => {
+                                            console.log('✅ Video paste completed, waiting for processing...');
+                                            waitForVideoToProcess();
+                                        }, 3000); // Videos take longer to process
+                                        
+                                    } catch (error) {
+                                        console.log('⚠️ DataTransfer method failed, trying alternative approach:', error);
+                                        
+                                        // Method 2: Try using modern Clipboard API
+                                        if (navigator.clipboard && navigator.clipboard.write) {
+                                            const clipboardItem = new ClipboardItem({
+                                                'video/mp4': blob
+                                            });
+                                            
+                                            navigator.clipboard.write([clipboardItem])
+                                                .then(() => {
+                                                    console.log('📋 Video copied to clipboard, focusing text area...');
+                                                    textArea.focus();
+                                                    
+                                                    // Simulate Ctrl+V
+                                                    const pasteEvent = new KeyboardEvent('keydown', {
+                                                        key: 'v',
+                                                        code: 'KeyV',
+                                                        ctrlKey: true,
+                                                        bubbles: true,
+                                                        cancelable: true
+                                                    });
+                                                    
+                                                    textArea.dispatchEvent(pasteEvent);
+                                                    
+                                                    setTimeout(() => {
+                                                        console.log('✅ Video paste completed, waiting for processing...');
+                                                        waitForVideoToProcess();
+                                                    }, 3000);
+                                                })
+                                                .catch(err => {
+                                                    console.log('❌ Clipboard API failed:', err);
+                                                    findAndClickPostButton();
+                                                });
+                                        } else {
+                                            console.log('❌ Clipboard API not available, falling back to post button');
+                                            findAndClickPostButton();
+                                        }
+                                    }
+                                })
+                                .catch(error => {
+                                    console.log('❌ Error fetching video for paste:', error);
+                                    findAndClickPostButton();
+                                });
+                        }
+                        
+                        function handleImageUpload(imageUrl) {
+                            console.log('🖼️ Handling single image upload:', imageUrl);
+                            
+                            // Look for image upload button
+                            const imageSelectors = [
+                                'button[aria-label="Add media"]',
+                                'button[aria-label*="Add an image"]',
+                                'button[aria-label*="Add image"]',
+                                'button[aria-label*="Photo"]',
+                                'button[data-test-id="image-upload-button"]',
+                                'button.share-promoted-detour-button',
+                                'button[class*="image"]',
+                                'button[class*="photo"]',
+                                'input[type="file"][accept*="image"]',
+                                'button:has(svg[class*="image"])',
+                                'button:has(svg[class*="photo"])'
+                            ];
+                            
+                            let imageButton = null;
+                            for (const selector of imageSelectors) {
+                                imageButton = document.querySelector(selector);
+                                if (imageButton) {
+                                    console.log('✅ Found image upload button with selector:', selector);
+                                    console.log('🔍 Button details:', {
+                                        ariaLabel: imageButton.getAttribute('aria-label'),
+                                        className: imageButton.className,
+                                        type: imageButton.type,
+                                        dataViewName: imageButton.getAttribute('data-view-name')
+                                    });
+                                    break;
+                                }
+                            }
+                            
+                            if (imageButton) {
+                                console.log('🖼️ Clicking image upload button...');
+                                imageButton.click();
+                                
+                                // Wait for file input to appear
+                                setTimeout(() => {
+                                    console.log('🔍 Looking for file input after button click...');
+                                    const fileInput = document.querySelector('input[type="file"][accept*="image"]');
+                                    if (fileInput) {
+                                        console.log('📁 Found file input, uploading image...');
+                                        console.log('📁 File input details:', {
+                                            type: fileInput.type,
+                                            accept: fileInput.accept,
+                                            name: fileInput.name,
+                                            multiple: fileInput.multiple
+                                        });
+                                        uploadImageFile(fileInput, imageUrl);
+                                    } else {
+                                        console.log('❌ File input not found, proceeding without image');
+                                        console.log('🔍 Available file inputs:', document.querySelectorAll('input[type="file"]').length);
+                                        findAndClickPostButton();
+                                    }
+                                }, 1000);
+                            } else {
+                                console.log('❌ Image upload button not found, proceeding without image');
+                                findAndClickPostButton();
+                            }
+                        }
+                        
+                        function handleCarouselUpload(carouselImages, textArea) {
+                            console.log('🖼️ Handling carousel upload with', carouselImages.length, 'images');
+                            
+                            if (carouselImages.length === 0) {
+                                findAndClickPostButton();
+                                return;
+                            }
+                            
+                            // Look for image upload button or area
+                            console.log('🔍 Looking for image upload button...');
+                            
+                            const uploadSelectors = [
+                                'button[aria-label*="Add photo"]',
+                                'button[aria-label*="Photo"]',
+                                'button[aria-label*="Image"]',
+                                'button[data-test-id*="photo"]',
+                                'button[data-test-id*="image"]',
+                                'button[class*="photo"]',
+                                'button[class*="image"]',
+                                '.share-box__button--photo',
+                                '.feed-shared-text-input__button--photo',
+                                'button[data-control-name="composer_photo"]',
+                                'input[type="file"][accept*="image"]'
+                            ];
+                            
+                            let uploadButton = null;
+                            let fileInput = null;
+                            
+                            // First try to find file input
+                            for (const selector of uploadSelectors) {
+                                const element = document.querySelector(selector);
+                                if (element) {
+                                    if (element.tagName === 'INPUT' && element.type === 'file') {
+                                        fileInput = element;
+                                        console.log('✅ Found file input with selector:', selector);
+                                        break;
+                                    } else if (element.tagName === 'BUTTON') {
+                                        uploadButton = element;
+                                        console.log('✅ Found upload button with selector:', selector);
+                                        break;
+                                    }
+                                }
+                            }
+                            
+                            if (fileInput) {
+                                // Direct file input found, use it
+                                console.log('📁 Using direct file input for carousel upload');
+                                uploadCarouselFiles(fileInput, carouselImages);
+                            } else if (uploadButton) {
+                                // Upload button found, click it to open file dialog
+                                console.log('🖱️ Clicking upload button to open file dialog');
+                                uploadButton.click();
+                                
+                                // Wait for file input to appear
+                                setTimeout(() => {
+                                    const fileInputs = document.querySelectorAll('input[type="file"][accept*="image"]');
+                                    if (fileInputs.length > 0) {
+                                        console.log('✅ File input appeared after button click');
+                                        uploadCarouselFiles(fileInputs[0], carouselImages);
+                            } else {
+                                        console.log('❌ No file input found after button click, trying clipboard method');
+                                        handleCarouselPaste(carouselImages, textArea);
+                                    }
+                                }, 1000);
+                            } else {
+                                console.log('❌ No upload area found, falling back to clipboard method');
+                                handleCarouselPaste(carouselImages, textArea);
+                            }
+                        }
+                        
+                        function uploadCarouselFiles(fileInput, carouselImages) {
+                            console.log('📤 Uploading carousel files:', carouselImages.length);
+                            
+                            // Create a DataTransfer object with all files
+                            const dataTransfer = new DataTransfer();
+                            
+                            // Fetch all images and add them to the DataTransfer
+                            Promise.all(carouselImages.map((imageUrl, index) => 
+                                fetch(imageUrl)
+                                    .then(response => response.blob())
+                                    .then(blob => {
+                                        console.log(`📤 Carousel image ${index + 1}/${carouselImages.length} blob created`);
+                                        return new File([blob], `carousel-${index + 1}.jpg`, { type: 'image/jpeg' });
+                                    })
+                                    .catch(error => {
+                                        console.log(`❌ Failed to fetch carousel image ${index + 1}:`, error);
+                                        return null;
+                                    })
+                            ))
+                            .then(files => {
+                                const validFiles = files.filter(file => file !== null);
+                                console.log(`✅ Successfully fetched ${validFiles.length}/${carouselImages.length} carousel images`);
+                                
+                                if (validFiles.length === 0) {
+                                    console.log('❌ No valid images to upload');
+                                findAndClickPostButton();
+                                    return;
+                                }
+                                
+                                // Add all files to DataTransfer
+                                validFiles.forEach(file => {
+                                    dataTransfer.items.add(file);
+                                });
+                                
+                                // Set the files on the input
+                                fileInput.files = dataTransfer.files;
+                                
+                                // Trigger change event
+                                fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+                                
+                                console.log('✅ Carousel files uploaded, waiting for processing...');
+                                
+                                // Wait for images to process
+                                setTimeout(() => {
+                                    waitForImageToProcess();
+                                }, 2000);
+                            })
+                            .catch(error => {
+                                console.log('❌ Failed to upload carousel files:', error);
+                                findAndClickPostButton();
+                            });
+                        }
+                        
+                        function uploadImageFile(fileInput, imageUrl) {
+                            console.log('📤 Uploading image from URL:', imageUrl);
+                            
+                            // Fetch the image and convert to file
+                            fetch(imageUrl)
+                                .then(response => response.blob())
+                                .then(blob => {
+                                    const file = new File([blob], 'image.jpg', { type: 'image/jpeg' });
+                                    
+                                    // Create a new FileList
+                                    const dataTransfer = new DataTransfer();
+                                    dataTransfer.items.add(file);
+                                    fileInput.files = dataTransfer.files;
+                                    
+                                    // Trigger change event
+                                    fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+                                    
+                                    console.log('✅ Image file uploaded, waiting for processing...');
+                                    console.log('📁 File input details:', {
+                                        files: fileInput.files.length,
+                                        accept: fileInput.accept,
+                                        name: fileInput.name
+                                    });
+                                    
+                                    // Wait for image to appear in the post composer
+                                    waitForImageToProcess();
+                                })
+                                .catch(error => {
+                                    console.log('❌ Error uploading image:', error);
+                                    findAndClickPostButton();
+                                });
+                        }
+                        
+                        function waitForImageToProcess(onDone) {
+                            console.log('🖼️ Waiting for image to process and appear in post composer...');
+                            
+                            let attempts = 0;
+                            const maxAttempts = 30; // 30 seconds max wait for carousel images
+                            
+                            const checkForImage = () => {
+                                attempts++;
+                                
+                                // Look for image preview elements in the post composer
+                                const imageSelectors = [
+                                    '[data-test-id="post-composer-image-preview"]',
+                                    '.post-composer-image-preview',
+                                    '.share-box__image-preview',
+                                    '.feed-shared-image-preview',
+                                    'img[src*="cloudinary"]',
+                                    '.image-preview img',
+                                    '.post-image img',
+                                    '[class*="image"][class*="preview"] img',
+                                    '.ql-editor img',
+                                    // Additional selectors for LinkedIn's current UI
+                                    '[data-test-id="post-composer"] img',
+                                    '.share-box img',
+                                    '.feed-shared-text-input img',
+                                    '[role="textbox"] img',
+                                    'div[contenteditable="true"] img'
+                                ];
+                                
+                                let imageFound = false;
+                                for (const selector of imageSelectors) {
+                                    const imageElement = document.querySelector(selector);
+                                    if (imageElement) {
+                                        // Validate that this is actually an uploaded image, not a tracking pixel
+                                        const isValidImage = imageElement.src && 
+                                                           !imageElement.src.includes('px.ads.linkedin.com') &&
+                                                           !imageElement.src.includes('tracking') &&
+                                                           !imageElement.src.includes('pixel') &&
+                                                           !imageElement.className.includes('hidden') &&
+                                                           !imageElement.className.includes('tracking') &&
+                                                           imageElement.offsetWidth > 0 &&
+                                                           imageElement.offsetHeight > 0;
+                                        
+                                        if (isValidImage) {
+                                            console.log('✅ Image preview found with selector:', selector);
+                                            console.log('🖼️ Image element details:', {
+                                                src: imageElement.src,
+                                                alt: imageElement.alt,
+                                                className: imageElement.className,
+                                                parentElement: imageElement.parentElement?.className,
+                                                width: imageElement.offsetWidth,
+                                                height: imageElement.offsetHeight
+                                            });
+                                            imageFound = true;
+                                            break;
+                                        } else {
+                                            console.log('⚠️ Found image element but it appears to be a tracking pixel or invalid:', {
+                                                src: imageElement.src,
+                                                className: imageElement.className,
+                                                width: imageElement.offsetWidth,
+                                                height: imageElement.offsetHeight
+                                            });
+                                        }
+                                    }
+                                }
+                                
+                                // Also check for any loading indicators that might be present
+                                const loadingSelectors = [
+                                    '[data-test-id="post-composer-image-loading"]',
+                                    '.image-loading',
+                                    '.loading-spinner',
+                                    '[class*="loading"]'
+                                ];
+                                
+                                let isLoading = false;
+                                for (const selector of loadingSelectors) {
+                                    if (document.querySelector(selector)) {
+                                        console.log('⏳ Image still loading, found loading indicator:', selector);
+                                        isLoading = true;
+                                        break;
+                                    }
+                                }
+                                
+                                if (imageFound) {
+                                    console.log('✅ Image successfully processed and visible in post composer');
+                                    // Allow caller to restore text, then proceed
+                                    try { if (typeof onDone === 'function') onDone(); } catch (_) {}
+                                    // Wait a bit more for image to fully load, then continue
+                                    setTimeout(() => {
+                                        if (savedPostContent) {
+                                            applyPostText(modalTextArea, savedPostContent);
+                                        }
+                                        // Wait a moment for button to enable after text restoration
+                                        setTimeout(() => {
+                                            waitForPostButtonAndClick();
+                                        }, 500);
+                                    }, 2000);
+                                } else if (isLoading && attempts < maxAttempts) {
+                                    console.log(`⏳ Image still loading, attempt ${attempts}/${maxAttempts}...`);
+                                    setTimeout(checkForImage, 1000);
+                                } else if (attempts < maxAttempts) {
+                                    console.log(`⏳ Image not ready yet, attempt ${attempts}/${maxAttempts}...`);
+                                    // Log all available elements for debugging
+                                    if (attempts % 5 === 0) {
+                                        console.log('🔍 Available elements in post composer:', {
+                                            allImages: document.querySelectorAll('img').length,
+                                            allButtons: document.querySelectorAll('button').length,
+                                            postComposer: document.querySelector('[data-test-id="post-composer"]')?.innerHTML?.substring(0, 200),
+                                            shareBox: document.querySelector('.share-box')?.innerHTML?.substring(0, 200)
+                                        });
+                                        
+                                        // Log all image elements for debugging
+                                        const allImages = document.querySelectorAll('img');
+                                        console.log('🖼️ All image elements found:', Array.from(allImages).map(img => ({
+                                            src: img.src,
+                                            className: img.className,
+                                            width: img.offsetWidth,
+                                            height: img.offsetHeight,
+                                            hidden: img.hidden || img.style.display === 'none'
+                                        })));
+                                    }
+                                    setTimeout(checkForImage, 1000);
+                                } else {
+                                    console.log('⚠️ Image processing timeout, proceeding with post anyway');
+                                    console.log('💡 Note: Sometimes LinkedIn processes images in the background and they appear after posting');
+                                    findAndClickPostButton();
+                                }
+                            };
+                            
+                            // Start checking after a short delay
+                            setTimeout(checkForImage, 2000);
+                        }
+                        
+                        function waitForVideoToProcess() {
+                            console.log('🎥 Waiting for video to process and appear in post composer...');
+                            
+                            let attempts = 0;
+                            const maxAttempts = 60; // 60 seconds max wait for videos (they take longer)
+                            
+                            const checkForVideo = () => {
+                                attempts++;
+                                
+                                // Look for video preview elements in the post composer
+                                const videoSelectors = [
+                                    '[data-test-id="post-composer-video-preview"]',
+                                    '.post-composer-video-preview',
+                                    '.share-box__video-preview',
+                                    '.feed-shared-video-preview',
+                                    'video[src*="cloudinary"]',
+                                    'video[src*="linkedin"]',
+                                    '.video-preview video',
+                                    '.post-video video',
+                                    '[class*="video"][class*="preview"] video',
+                                    '.ql-editor video',
+                                    // Additional selectors for LinkedIn's current UI
+                                    '[data-test-id="post-composer"] video',
+                                    '.share-box video',
+                                    '.feed-shared-text-input video',
+                                    '[role="textbox"] video',
+                                    'div[contenteditable="true"] video'
+                                ];
+                                
+                                let videoFound = false;
+                                for (const selector of videoSelectors) {
+                                    const videoElement = document.querySelector(selector);
+                                    if (videoElement) {
+                                        // Validate that this is actually an uploaded video, not a tracking element
+                                        const isValidVideo = videoElement.src && 
+                                                           !videoElement.src.includes('px.ads.linkedin.com') &&
+                                                           !videoElement.src.includes('tracking') &&
+                                                           !videoElement.src.includes('pixel') &&
+                                                           !videoElement.className.includes('hidden') &&
+                                                           !videoElement.className.includes('tracking') &&
+                                                           videoElement.offsetWidth > 0 &&
+                                                           videoElement.offsetHeight > 0;
+                                        
+                                        if (isValidVideo) {
+                                            console.log('✅ Video preview found with selector:', selector);
+                                            console.log('🎥 Video element details:', {
+                                                src: videoElement.src,
+                                                className: videoElement.className,
+                                                parentElement: videoElement.parentElement?.className,
+                                                width: videoElement.offsetWidth,
+                                                height: videoElement.offsetHeight
+                                            });
+                                            videoFound = true;
+                                            break;
+                                        } else {
+                                            console.log('⚠️ Found video element but it appears to be invalid:', {
+                                                src: videoElement.src,
+                                                className: videoElement.className,
+                                                width: videoElement.offsetWidth,
+                                                height: videoElement.offsetHeight
+                                            });
+                                        }
+                                    }
+                                }
+                                
+                                // Also check for any loading indicators that might be present
+                                const loadingSelectors = [
+                                    '[data-test-id="post-composer-video-loading"]',
+                                    '.video-loading',
+                                    '.loading-spinner',
+                                    '[class*="loading"]'
+                                ];
+                                
+                                let isLoading = false;
+                                for (const selector of loadingSelectors) {
+                                    if (document.querySelector(selector)) {
+                                        console.log('⏳ Video still loading, found loading indicator:', selector);
+                                        isLoading = true;
+                                        break;
+                                    }
+                                }
+                                
+                                if (videoFound) {
+                                    console.log('✅ Video successfully processed and visible in post composer');
+                                    // Wait a bit more for video to fully load
+                                    setTimeout(() => {
+                                        findAndClickPostButton();
+                                    }, 3000);
+                                } else if (isLoading && attempts < maxAttempts) {
+                                    console.log(`⏳ Video still loading, attempt ${attempts}/${maxAttempts}...`);
+                                    setTimeout(checkForVideo, 1000);
+                                } else if (attempts < maxAttempts) {
+                                    console.log(`⏳ Video not ready yet, attempt ${attempts}/${maxAttempts}...`);
+                                    // Log all available elements for debugging
+                                    if (attempts % 5 === 0) {
+                                        console.log('🔍 Available elements in post composer:', {
+                                            allVideos: document.querySelectorAll('video').length,
+                                            allButtons: document.querySelectorAll('button').length,
+                                            postComposer: document.querySelector('[data-test-id="post-composer"]')?.innerHTML?.substring(0, 200),
+                                            shareBox: document.querySelector('.share-box')?.innerHTML?.substring(0, 200)
+                                        });
+                                        
+                                        // Log all video elements for debugging
+                                        const allVideos = document.querySelectorAll('video');
+                                        console.log('🎥 All video elements found:', Array.from(allVideos).map(video => ({
+                                            src: video.src,
+                                            className: video.className,
+                                            width: video.offsetWidth,
+                                            height: video.offsetHeight,
+                                            hidden: video.hidden || video.style.display === 'none'
+                                        })));
+                                    }
+                                    setTimeout(checkForVideo, 1000);
+                                } else {
+                                    console.log('⚠️ Video processing timeout, proceeding with post anyway');
+                                    console.log('💡 Note: Sometimes LinkedIn processes videos in the background and they appear after posting');
+                                    findAndClickPostButton();
+                                }
+                            };
+                            
+                            // Start checking after a short delay
+                            setTimeout(checkForVideo, 3000);
+                        }
+                        
+                        function findAndClickPostButton() {
+                            console.log('🔍 Looking for post button...');
+                            
+                            // Step 3: Find and click the post button in the modal
+                            setTimeout(() => {
+                                const postButtonSelectors = [
+                                    '[data-test-id="post-composer-submit-button"]',
+                                    'button[type="submit"]',
+                                    '.share-box__submit-button',
+                                    '.share-actions__primary-action',
+                                    'button[aria-label*="Post"]',
+                                    'button[aria-label*="Share"]',
+                                    'button[aria-label="Post"]',
+                                    'button[aria-label="Share"]',
+                                    'button[class*="submit"]',
+                                    'button[class*="post"]',
+                                    'button[class*="share"]',
+                                    '.artdeco-button--primary',
+                                    'button[data-control-name="share.post"]',
+                                    'button[data-control-name="composer.share"]'
+                                ];
+                                
+                                let postButton = null;
+                                for (const selector of postButtonSelectors) {
+                                    postButton = document.querySelector(selector);
+                                    if (postButton) {
+                                        console.log('✅ Found post button with selector:', selector);
+                                        console.log('🔍 Button details:', {
+                                            text: postButton.textContent?.trim(),
+                                            ariaLabel: postButton.getAttribute('aria-label'),
+                                            className: postButton.className,
+                                            type: postButton.type,
+                                            disabled: postButton.disabled
+                                        });
+                                        break;
+                                    }
+                                }
+                                
+                                if (postButton) {
+                                    console.log('🖱️ Clicking post button...');
+                                    
+                                    // Check if button is disabled
+                                    if (postButton.disabled) {
+                                        console.log('⚠️ Post button is disabled, waiting...');
+                                        setTimeout(() => {
+                                            if (!postButton.disabled) {
+                                                console.log('✅ Button enabled, clicking now...');
+                                                postButton.click();
+                                                checkPostSuccess();
+                                            } else {
+                                                console.log('❌ Button still disabled after wait');
+                                                resolve({ success: false, error: 'Post button disabled' });
+                                            }
+                                        }, 3000);
+                                    } else {
+                                        postButton.click();
+                                        checkPostSuccess();
+                                    }
+                                } else {
+                                    console.log('❌ Post button not found in modal');
+                                    console.log('🔍 Available buttons:', Array.from(document.querySelectorAll('button')).map(btn => ({
+                                        text: btn.textContent?.trim(),
+                                        ariaLabel: btn.getAttribute('aria-label'),
+                                        className: btn.className,
+                                        type: btn.type
+                                    })));
+                                    resolve({ success: false, error: 'Post button not found in modal' });
+                                }
+                                
+                                function checkPostSuccess() {
+                                    // Wait a bit and check if modal closed or post appeared
+                                    setTimeout(() => {
+                                        console.log('🔍 Checking if post was successful...');
+                                        
+                                        // Check if modal is still open
+                                        const modal = document.querySelector('[data-test-id="post-composer"]') || 
+                                                     document.querySelector('.share-box') ||
+                                                     document.querySelector('.feed-shared-text-input');
+                                        
+                                        if (!modal || modal.style.display === 'none') {
+                                            console.log('✅ Modal closed, post likely successful');
+                                            resolve({ success: true, linkedinPostId: 'linkedin-' + Date.now() });
+                                        } else {
+                                            console.log('⚠️ Modal still open, post may have failed');
+                                            // Try clicking again after a short delay
+                                            setTimeout(() => {
+                                                const retryButton = document.querySelector('[data-test-id="post-composer-submit-button"]') ||
+                                                                   document.querySelector('button[type="submit"]') ||
+                                                                   document.querySelector('.share-box__submit-button');
+                                                if (retryButton && !retryButton.disabled) {
+                                                    console.log('🔄 Retrying post button click...');
+                                                    retryButton.click();
+                                                    setTimeout(() => {
+                                                        console.log('✅ Post submitted successfully (retry)');
+                                                        resolve({ success: true, linkedinPostId: 'linkedin-' + Date.now() });
+                                                    }, 2000);
+                                                } else {
+                                                    console.log('❌ Post submission failed');
+                                                    resolve({ success: false, error: 'Post submission failed' });
+                                                }
+                                            }, 2000);
+                                        }
+                                    }, 3000);
+                                }
+                            }, 2000);
+                        }
+                    } else {
+                        console.log('❌ Modal text area not found');
+                        resolve({ success: false, error: 'Modal text area not found' });
+                    }
+                }, 2000);
+            } else {
+                console.log('❌ Post input not found');
+                console.log('🔍 Available elements on page:');
+                console.log('All divs:', document.querySelectorAll('div').length);
+                console.log('All buttons:', document.querySelectorAll('button').length);
+                console.log('All contenteditable:', document.querySelectorAll('[contenteditable]').length);
+                console.log('All inputs:', document.querySelectorAll('input').length);
+                console.log('All textareas:', document.querySelectorAll('textarea').length);
+                resolve({ success: false, error: 'Post input not found' });
+            }
+        }, 3000); // Wait 3 seconds for LinkedIn to load
+    });
+};
+
+const updatePostStatus = async (postId, status, linkedinPostId = null) => {
+    try {
+        const profileResult = await chrome.storage.local.get(['linkedinId', 'linkedinProfile']);
+        let linkedinId = profileResult.linkedinId;
+        
+        // Fallback to linkedinProfile if linkedinId is not available
+        if (!linkedinId && profileResult.linkedinProfile) {
+            linkedinId = profileResult.linkedinProfile.publicIdentifier;
+        }
+        
+        if (!linkedinId) {
+            linkedinId = 'test-user-123';
+        }
+        
+        console.log('🔑 Using LinkedIn ID for status update:', linkedinId);
+        
+        const updateData = {
+            status: status,
+            linkedin_post_id: linkedinPostId
+        };
+        
+        const response = await fetch(`${PLATFORM_URL}/api/content-creator/posts/${postId}/update-status`, {
+            method: 'POST',
+            headers: {
+                'lk-id': linkedinId,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(updateData)
+        });
+        
+        if (response.ok) {
+            console.log('✅ Post status updated:', postId, status);
+        } else {
+            console.log('❌ Failed to update post status:', response.status);
+        }
+        
+    } catch (error) {
+        console.error('❌ Error updating post status:', error);
+    }
+};
+
 // Function to store our LinkedIn profile information for reliable sender detection
 const storeLinkedInProfile = async () => {
     try {
@@ -105,6 +1523,98 @@ const handleConnectionInviteRequest = async (data) => {
         
         if (!tab || !tab.id) {
             throw new Error('Failed to create tab');
+        }
+        
+        // Step 1.5: Create overlay immediately to prevent any user interaction during loading
+        console.log('🛡️ Creating overlay immediately to block interactions...');
+        try {
+            await chrome.scripting.executeScript({
+                target: { tabId: tab.id },
+                func: () => {
+                    // Create overlay immediately
+                    const createOverlay = () => {
+                        // Remove any existing overlay first
+                        const existingOverlay = document.getElementById('linkdominator-automation-overlay');
+                        if (existingOverlay) {
+                            existingOverlay.remove();
+                        }
+                        
+                        const overlay = document.createElement('div');
+                        overlay.id = 'linkdominator-automation-overlay';
+                        overlay.style.cssText = `
+                            position: fixed !important;
+                            top: 0 !important;
+                            left: 0 !important;
+                            width: 100vw !important;
+                            height: 100vh !important;
+                            background: rgba(0, 0, 0, 0.2) !important;
+                            z-index: 2147483647 !important;
+                            pointer-events: all !important;
+                            display: flex !important;
+                            align-items: center !important;
+                            justify-content: center !important;
+                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+                            backdrop-filter: blur(2px) !important;
+                        `;
+                        
+                        const overlayContent = document.createElement('div');
+                        overlayContent.style.cssText = `
+                            background: rgba(255, 255, 255, 0.98) !important;
+                            padding: 25px 35px !important;
+                            border-radius: 12px !important;
+                            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2) !important;
+                            text-align: center !important;
+                            color: #333 !important;
+                            font-size: 15px !important;
+                            font-weight: 600 !important;
+                            border: 2px solid #0077b5 !important;
+                            min-width: 280px !important;
+                        `;
+                        overlayContent.innerHTML = `
+                            <div style="margin-bottom: 12px; font-size: 18px;">🤖 LinkDominator</div>
+                            <div style="color: #666; font-size: 13px; margin-bottom: 8px;">Loading profile...</div>
+                            <div style="color: #999; font-size: 11px;">Please wait, do not interact with this page</div>
+                        `;
+                        
+                        overlay.appendChild(overlayContent);
+                        
+                        // Add to document immediately
+                        document.documentElement.appendChild(overlay);
+                        
+                        // Disable page interactions
+                        document.body.style.pointerEvents = 'none';
+                        document.body.style.overflow = 'hidden';
+                        document.documentElement.style.overflow = 'hidden';
+                        
+                        // Force visibility
+                        overlay.style.display = 'flex';
+                        overlay.style.visibility = 'visible';
+                        overlay.style.opacity = '1';
+                        
+                        console.log('🛡️ Early overlay created - user interactions blocked');
+                        return overlay;
+                    };
+                    
+                    // Create overlay immediately
+                    createOverlay();
+                    
+                    // Store the remove function globally for later use
+                    window.linkdominatorRemoveOverlay = () => {
+                        const overlay = document.getElementById('linkdominator-automation-overlay');
+                        if (overlay) {
+                            overlay.remove();
+                        }
+                        // Restore page interactions
+                        document.body.style.pointerEvents = '';
+                        document.body.style.overflow = '';
+                        document.documentElement.style.overflow = '';
+                        console.log('🛡️ Overlay removed - user interactions restored');
+                    };
+                }
+            });
+            console.log('✅ Early overlay created successfully');
+        } catch (error) {
+            console.log('⚠️ Could not create early overlay (page might not be ready):', error.message);
         }
         
         // Step 2: Wait for page to load
@@ -1744,6 +3254,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
         // console.log('⏰ Checking all active campaigns for invite acceptances...');
         // console.log('🕐 Alarm fired at:', new Date().toLocaleTimeString());
         checkAllCampaignsForAcceptances();
+    }else if(alarm.name.startsWith('next_step_')){
+        console.log(`🔔 Alarm triggered: ${alarm.name}`);
+        handleNextStepExecution(alarm.name);
     }else if(alarm.name == 'custom_like_post'){
         console.log('👍 LIKE POST: Custom like post alarm triggered');
         chrome.storage.local.get(["campaignCustomLikePost","nodeModelCustomLikePost"]).then((result) => {
@@ -1971,6 +3484,10 @@ chrome.alarms.onAlarm.addListener((alarm) => {
             }
         });
         return;
+    }else if(alarm.name === 'content_creator_check'){
+        // Skip content creator alarm - it's handled by the dedicated listener
+        console.log('⏰ Content Creator alarm - skipping general campaign processing');
+        return;
     }else{
         console.log('🎯 Starting general campaign alarm for:', alarm.name);
         chrome.storage.local.get(["campaign","nodeModel"]).then((result) => {
@@ -2008,6 +3525,152 @@ chrome.alarms.onAlarm.addListener((alarm) => {
         });
     }
 })
+
+/**
+ * Handle execution of next step after send-invites
+ * @param {string} alarmName 
+ */
+const handleNextStepExecution = async (alarmName) => {
+    console.log(`🎯 HANDLING NEXT STEP EXECUTION: ${alarmName}`);
+    
+    try {
+        // Extract campaign ID from alarm name (format: next_step_255_1)
+        const parts = alarmName.split('_');
+        const campaignId = parseInt(parts[2]);
+        
+        console.log(`🔍 Campaign ID: ${campaignId}`);
+        
+        // Get the stored next node info
+        const storageKey = `next_node_${campaignId}`;
+        const result = await chrome.storage.local.get([storageKey]);
+        
+        if (!result[storageKey]) {
+            console.error(`❌ No next node info found for campaign ${campaignId}`);
+            return;
+        }
+        
+        const { campaign, node } = result[storageKey];
+        console.log(`📋 Campaign: ${campaign.name} (ID: ${campaign.id})`);
+        console.log(`🎯 Next node: ${node.label} (${node.value})`);
+        
+        // Get leads for this campaign using callback pattern
+        getCampaignLeads(campaign.id, (leadsData) => {
+            console.log(`👥 Found ${leadsData.length} leads for next step execution`);
+            
+            if (leadsData.length > 0) {
+                // Execute the next node
+                runSequence(campaign, leadsData, node).then(() => {
+                    console.log(`✅ Next step executed successfully: ${node.label}`);
+                }).catch((error) => {
+                    console.error(`❌ Error executing next step: ${error}`);
+                });
+            } else {
+                console.log(`⚠️ No leads found for next step execution`);
+            }
+        });
+        
+        // Clean up the stored next node info
+        chrome.storage.local.remove([storageKey]);
+        
+    } catch (error) {
+        console.error('❌ Error in handleNextStepExecution:', error);
+    }
+};
+
+/**
+ * Check for next steps after send-invites is completed
+ * @param {object} campaign 
+ */
+const checkForNextStepsAfterInvites = async (campaign) => {
+    console.log(`🔍 CHECKING NEXT STEPS for campaign ${campaign.id} (${campaign.name})`);
+    
+    try {
+        // Get the campaign sequence
+        await getCampaignSequence(campaign.id);
+        console.log(`📋 Campaign sequence loaded with ${campaignSequence.nodeModel.length} nodes`);
+        
+        // Find the next node after send-invites
+        const nextNode = campaignSequence.nodeModel.find(node => 
+            node.value !== 'send-invites' && !node.runStatus && node.type === 'action'
+        );
+        
+        if (nextNode) {
+            console.log(`🔄 Found next node: ${nextNode.label} (${nextNode.value})`);
+            console.log(`⏰ Setting up next node execution...`);
+            
+            // Check if there's a timing node before this action node
+            let delayInMinutes = 0.1; // Default immediate execution
+            const nodeIndex = campaignSequence.nodeModel.findIndex(n => n.key === nextNode.key);
+            
+            // Look for a timing node before this action node
+            if (nodeIndex > 0) {
+                const previousNode = campaignSequence.nodeModel[nodeIndex - 1];
+                if (previousNode.type === 'timing' && previousNode.time && previousNode.value) {
+                    // Calculate delay based on timing node
+                    delayInMinutes = previousNode.time === 'days' 
+                        ? previousNode.value * 24 * 60
+                        : previousNode.value * 60;
+                    
+                    console.log(`⏰ Found timing node: ${previousNode.value} ${previousNode.time}`);
+                    console.log(`⏰ Calculated delay: ${delayInMinutes} minutes`);
+                    
+                    // Mark the timing node as completed
+                    await updateSequenceNodeModel(campaign, { ...previousNode, runStatus: true });
+                }
+            }
+            
+            const alarmName = `next_step_${campaign.id}_${nextNode.key}`;
+            
+            chrome.alarms.create(alarmName, {
+                delayInMinutes: delayInMinutes
+            });
+            
+            console.log(`⏰ Alarm created: ${alarmName} with ${delayInMinutes} minute delay`);
+            console.log(`🎯 Next step will execute: ${nextNode.label}`);
+            
+            // Store the next node info for execution
+            chrome.storage.local.set({
+                [`next_node_${campaign.id}`]: {
+                    campaign: campaign,
+                    node: nextNode,
+                    alarmName: alarmName
+                }
+            });
+            
+        } else {
+            console.log('❌ No next action node found');
+            
+            // Check if there's an "end" node
+            const endNode = campaignSequence.nodeModel.find(node => 
+                node.type === 'end' || node.value === 'end'
+            );
+            
+            if (endNode) {
+                console.log('🏁 END node detected - marking campaign as completed');
+                
+                try {
+                    // Mark the end node as complete
+                    await updateSequenceNodeModel(campaign, { ...endNode, runStatus: true });
+                    
+                    // Mark the campaign as completed
+                    await updateCampaign({
+                        campaignId: campaign.id,
+                        status: 'completed'
+                    });
+                    
+                    console.log('✅ Campaign marked as COMPLETED');
+                } catch (error) {
+                    console.error('❌ Failed to mark campaign as completed:', error);
+                }
+            } else {
+                console.log('⚠️ No "end" node found - campaign will remain active');
+            }
+        }
+        
+    } catch (error) {
+        console.error('❌ Error in checkForNextStepsAfterInvites:', error);
+    }
+};
 
 /**
  * Set new campaign schedule
@@ -2130,10 +3793,16 @@ const setCampaignAlarm = async (campaign) => {
             }else{
                 console.log('✅ Send-invites ALREADY COMPLETED - invites were sent!');
                 console.log(`📊 Node 0 (send-invites) runStatus: ${nodeModelArr[0].runStatus}`);
-                console.log('⏸️ Skipping alarm creation - waiting for acceptance check to handle next steps');
-                console.log('💡 The continuous_invite_monitoring will detect acceptances and trigger next actions');
+                console.log('🔄 Checking for next steps in sequence...');
                 
-                // Don't create any alarm - let the acceptance monitoring handle it
+                // Check for next steps immediately instead of waiting for acceptances
+                try {
+                    await checkForNextStepsAfterInvites(campaign);
+                    console.log('✅ Next steps check completed');
+                } catch (error) {
+                    console.error('❌ Error checking for next steps:', error);
+                }
+                
                 return;
             }
         }else if(nodeModelArr[0].value == 'like-post'){
@@ -3015,7 +4684,13 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                 
                 // Get accepted leads for the next node
                 await getLeadGenRunning(currentCampaign.id);
-                const acceptedLeads = campaignLeadgenRunning.filter(lead => lead.acceptedStatus === true);
+                console.log(`🔍 DEBUG: Total leads in campaignLeadgenRunning: ${campaignLeadgenRunning.length}`);
+                console.log(`🔍 DEBUG: Sample lead data:`, campaignLeadgenRunning[0]);
+                
+                const acceptedLeads = campaignLeadgenRunning.filter(lead => 
+                    lead.accept_status === true || lead.accept_status === 1 || lead.acceptedStatus === true
+                );
+                console.log(`🔍 DEBUG: Found ${acceptedLeads.length} accepted leads after filtering`);
                 
                 if (acceptedLeads.length > 0) {
                     console.log(`👥 Found ${acceptedLeads.length} accepted leads for next node execution`);
@@ -3058,50 +4733,24 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
         return;
     }
     
-    // If current node is call, check if campaign should be completed
+    // If current node is call, campaign should continue running to monitor for responses
     if (nodeModel.value === 'call') {
-        console.log('🔧 DEBUG: Call action completed, checking if campaign should be marked as completed...');
+        console.log('🔧 DEBUG: Call action completed - campaign will continue running to monitor for responses...');
         
+        // For call campaigns, we should NOT mark as completed after sending call messages
+        // The campaign should remain active to monitor for user responses
+        console.log('📞 Call message sent - campaign will continue running to monitor responses');
+        console.log('🔄 Campaign remains active for response monitoring');
+        console.log('💡 User can respond to the call message, and the system will detect it');
+        
+        // Update UI status to show call sent and waiting for response
         try {
-            // Check if there are any more unrun actions in the sequence
-            await getCampaignSequence(currentCampaign.id);
-            console.log(`📋 Campaign sequence loaded with ${campaignSequence.nodeModel.length} nodes`);
-            
-            // Find any remaining unrun action nodes (excluding send-invites and call)
-            const remainingActions = campaignSequence.nodeModel.filter(node => 
-                node.type === 'action' && 
-                node.runStatus === false && 
-                node.value !== 'send-invites' && 
-                node.value !== 'call' &&
-                node.value !== 'end'
-            );
-            
-            if (remainingActions.length === 0) {
-                console.log('🎉 No more actions available - marking campaign as completed');
-                
-                await updateCampaign({
-                    campaignId: currentCampaign.id,
-                    status: 'completed'
-                });
-                console.log('✅ Campaign marked as completed in backend');
-                
-                // Clear any pending alarms for this campaign
-                chrome.alarms.clear('lead_generation');
-                chrome.alarms.clear('accepted_leads');
-                console.log('🧹 Cleared pending campaign alarms');
-                
-                console.log('🎊 CAMPAIGN COMPLETED SUCCESSFULLY!');
-                console.log('📞 All call actions have been completed');
-                console.log('🛑 Campaign will no longer run automatically');
-            } else {
-                console.log(`📋 Found ${remainingActions.length} remaining actions, campaign will continue`);
-                console.log('Remaining actions:', remainingActions.map(a => `${a.label} (${a.value})`));
-            }
+            updateCampaignStatus('running', 'Call message sent - waiting for response');
         } catch (error) {
-            console.error('❌ Failed to check campaign completion status:', error);
+            console.log('⚠️ Could not update UI status:', error.message);
         }
         
-        console.log('🔧 DEBUG: Returning early after call node handling to preserve completion state');
+        console.log('🔧 DEBUG: Call node completed, campaign continues running for response monitoring');
         return;
     }
 
@@ -3148,9 +4797,14 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
             // Check if this is a direct-action campaign (first node is NOT send-invites)
             const firstNode = sequenceNodes[0];
             const isDirectActionCampaign = firstNode && firstNode.value !== 'send-invites';
+            const isSendInvitesCompleted = firstNode && firstNode.value === 'send-invites' && firstNode.runStatus === true;
             
-            if (isDirectActionCampaign) {
-                console.log('💡 This is a direct-action campaign - executing next node immediately');
+            if (isDirectActionCampaign || isSendInvitesCompleted) {
+                if (isDirectActionCampaign) {
+                    console.log('💡 This is a direct-action campaign - executing next node immediately');
+                } else {
+                    console.log('💡 Send-invites completed - executing next node immediately');
+                }
                 
                 // Filter out audience objects - only keep actual lead objects with connectionId
                 const validLeads = leads.filter(lead => lead.connectionId && lead.firstName);
@@ -3417,8 +5071,9 @@ const messageConnection = scheduleInfo => {
             console.log('📄 Response data:', res);
             
             // Extract conversation URN ID from response if available
+            let conversationUrnId = null;
             if (res && res.value && res.value.entityUrn) {
-                const conversationUrnId = res.value.entityUrn.replace('urn:li:fsd_conversation:', '');
+                conversationUrnId = res.value.entityUrn.replace('urn:li:fsd_conversation:', '');
                 arConnectionModel.conversationUrnId = conversationUrnId;
                 console.log('─'.repeat(80));
                 console.log('🔗 MESSAGE FLOW: CONVERSATION ESTABLISHED');
@@ -3427,6 +5082,33 @@ const messageConnection = scheduleInfo => {
                 console.log(`👤 Lead: ${arConnectionModel.name || 'Unknown'}`);
                 console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
                 console.log('─'.repeat(80));
+                
+                // DEBUG: Log the full response to see what we got
+                console.log('🔍 DEBUG: Full API response for conversation URN extraction:', JSON.stringify(res, null, 2));
+            } else {
+                // Try alternative conversation URN extraction methods
+                console.log('⚠️ No conversation URN found in standard location, trying alternatives...');
+                
+                // Try different possible locations for conversation URN
+                if (res && res.value && res.value.conversationUrn) {
+                    conversationUrnId = res.value.conversationUrn.replace('urn:li:fsd_conversation:', '').replace('urn:li:fs_conversation:', '');
+                    arConnectionModel.conversationUrnId = conversationUrnId;
+                    console.log('✅ Found conversation URN in alternative location:', conversationUrnId);
+                
+                // Update monitoring data with the conversation URN
+                updateMonitoringDataWithConversationUrn(arConnectionModel.connectionId, conversationUrnId);
+                } else if (res && res.conversationUrn) {
+                    conversationUrnId = res.conversationUrn.replace('urn:li:fsd_conversation:', '').replace('urn:li:fs_conversation:', '');
+                    arConnectionModel.conversationUrnId = conversationUrnId;
+                    console.log('✅ Found conversation URN in root location:', conversationUrnId);
+                
+                // Update monitoring data with the conversation URN
+                updateMonitoringDataWithConversationUrn(arConnectionModel.connectionId, conversationUrnId);
+                } else {
+                    console.log('❌ No conversation URN found in any expected location');
+                    console.log('🔍 Available response keys:', Object.keys(res || {}));
+                }
+            }
                 
                 // Set up response monitoring if this is a call message
                 if (arConnectionModel.message && arConnectionModel.message.toLowerCase().includes('call')) {
@@ -3451,7 +5133,7 @@ const messageConnection = scheduleInfo => {
                                             leadName: arConnectionModel.name,
                                             connectionId: arConnectionModel.connectionId,
                                             campaignId: campaignId,
-                                            conversationUrnId: conversationUrnId,
+                                            conversationUrnId: arConnectionModel.conversationUrnId,
                                             sentAt: Date.now(),
                                             status: 'waiting_for_response',
                                             lastCheckedMessageId: null,
@@ -3461,15 +5143,22 @@ const messageConnection = scheduleInfo => {
                                         }
                                     });
                                     console.log('📊 Response monitoring set up for call message:', responseMonitoringKey);
-                                    console.log('🔗 Conversation URN ID stored:', conversationUrnId);
+                                    console.log('🔗 Conversation URN ID stored:', arConnectionModel.conversationUrnId);
+                                    console.log('🔍 DEBUG: Full monitoring data stored:', {
+                                        callId: null,
+                                        leadName: arConnectionModel.name,
+                                        connectionId: arConnectionModel.connectionId,
+                                        campaignId: campaignId,
+                                        conversationUrnId: arConnectionModel.conversationUrnId,
+                                        sentAt: Date.now(),
+                                        status: 'waiting_for_response'
+                                    });
                                     break;
                                 }
                             }
                         }
                     }, 1000);
                 }
-            }
-            
             console.log('─'.repeat(80));
             console.log('🎉 MESSAGE FLOW: COMPLETED');
             console.log('='.repeat(80));
@@ -4352,21 +6041,117 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
                     const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
                     
                     try {
+                        // Create overlay to block user interactions
+                        const createOverlay = () => {
+                            // Remove any existing overlay first
+                            const existingOverlay = document.getElementById('linkdominator-automation-overlay');
+                            if (existingOverlay) {
+                                existingOverlay.remove();
+                            }
+                            
+                            const overlay = document.createElement('div');
+                            overlay.id = 'linkdominator-automation-overlay';
+                            overlay.style.cssText = `
+                                position: fixed !important;
+                                top: 0 !important;
+                                left: 0 !important;
+                                width: 100vw !important;
+                                height: 100vh !important;
+                                background: rgba(0, 0, 0, 0.2) !important;
+                                z-index: 2147483647 !important;
+                                pointer-events: all !important;
+                                display: flex !important;
+                                align-items: center !important;
+                                justify-content: center !important;
+                                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+                                backdrop-filter: blur(2px) !important;
+                            `;
+                            
+                            const overlayContent = document.createElement('div');
+                            overlayContent.style.cssText = `
+                                background: rgba(255, 255, 255, 0.98) !important;
+                                padding: 25px 35px !important;
+                                border-radius: 12px !important;
+                                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2) !important;
+                                text-align: center !important;
+                                color: #333 !important;
+                                font-size: 15px !important;
+                                font-weight: 600 !important;
+                                border: 2px solid #0077b5 !important;
+                                min-width: 280px !important;
+                            `;
+                            overlayContent.innerHTML = `
+                                <div style="margin-bottom: 12px; font-size: 18px;">🤖 LinkDominator</div>
+                                <div style="color: #666; font-size: 13px; margin-bottom: 8px;">Processing connection invite...</div>
+                                <div style="color: #999; font-size: 11px;">Please wait, do not interact with this page</div>
+                            `;
+                            
+                            overlay.appendChild(overlayContent);
+                            
+                            // Add to document immediately
+                            document.documentElement.appendChild(overlay);
+                            
+                            // Disable page interactions
+                            document.body.style.pointerEvents = 'none';
+                            document.body.style.overflow = 'hidden';
+                            document.documentElement.style.overflow = 'hidden';
+                            
+                            // Force visibility
+                            overlay.style.display = 'flex';
+                            overlay.style.visibility = 'visible';
+                            overlay.style.opacity = '1';
+                            
+                            console.log('🛡️ Overlay created - user interactions blocked');
+                            return overlay;
+                        };
+                        
+                        const removeOverlay = () => {
+                            const overlay = document.getElementById('linkdominator-automation-overlay');
+                            if (overlay) {
+                                overlay.remove();
+                            }
+                            // Restore page interactions
+                            document.body.style.pointerEvents = '';
+                            document.body.style.overflow = '';
+                            document.documentElement.style.overflow = '';
+                            console.log('🛡️ Overlay removed - user interactions restored');
+                        };
+                        
+                        // Update overlay text to show automation is starting
+                        const updateOverlayText = (text) => {
+                            const overlay = document.getElementById('linkdominator-automation-overlay');
+                            if (overlay) {
+                                const contentDiv = overlay.querySelector('div');
+                                if (contentDiv) {
+                                    contentDiv.innerHTML = `
+                                        <div style="margin-bottom: 12px; font-size: 18px;">🤖 LinkDominator</div>
+                                        <div style="color: #666; font-size: 13px; margin-bottom: 8px;">${text}</div>
+                                        <div style="color: #999; font-size: 11px;">Please wait, do not interact with this page</div>
+                                    `;
+                                }
+                            }
+                        };
+                        
+                        // Update overlay text to show automation is starting
+                        updateOverlayText('Processing connection invite...');
+                        
                         console.log('🔍 Step 4: Checking connection status...');
                         console.log('🚨 TEST: Script is executing the try block!');
                         
                         // Check if already connected
                         const connectedElements = document.querySelectorAll('[aria-label*="Connected"], [aria-label*="connected"]');
                         if (connectedElements.length > 0) {
-                            console.log('ℹ️ Already connected to this profile');
-                            return { success: false, skipped: true, reason: 'Already connected' };
+                            console.log('✅ Already connected to this profile - SUCCESSFUL SKIP');
+                            window.linkdominatorAutomationResult = { success: true, skipped: true, reason: 'Already connected' };
+                            return { success: true, skipped: true, reason: 'Already connected' };
                         }
                         
                         // Check if invite already sent
                         const inviteSentElements = document.querySelectorAll('[aria-label*="Invitation sent"], [aria-label*="invitation sent"]');
                         if (inviteSentElements.length > 0) {
-                            console.log('ℹ️ Invite already sent to this profile');
-                            return { success: false, skipped: true, reason: 'Invite already sent' };
+                            console.log('✅ Invite already sent to this profile - SUCCESSFUL SKIP');
+                            window.linkdominatorAutomationResult = { success: true, skipped: true, reason: 'Invite already sent' };
+                            return { success: true, skipped: true, reason: 'Invite already sent' };
                         }
                         
                         console.log('🔍 Step 5: Looking for Connect button...');
@@ -4376,24 +6161,41 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
                         console.log('🚨 DEBUG: About to check for direct Connect buttons...');
                         
                         // Find Connect button - ONLY within the main profile div
-                        const mainProfileDiv = document.querySelector('.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk');
+                        const mainProfileDiv = document.querySelector('.ph5.pb5');
                         console.log('🔍 Main profile div found:', mainProfileDiv);
                         
                         if (!mainProfileDiv) {
                             console.log('❌ Main profile div not found - cannot proceed safely');
+                            console.log('🔍 Available divs with classes containing "ph5":');
+                            const ph5Divs = document.querySelectorAll('[class*="ph5"]');
+                            ph5Divs.forEach((div, index) => {
+                                console.log(`   ${index + 1}. Class: "${div.className}"`);
+                            });
+                            console.log('🔍 Available divs with classes containing "pb5":');
+                            const pb5Divs = document.querySelectorAll('[class*="pb5"]');
+                            pb5Divs.forEach((div, index) => {
+                                console.log(`   ${index + 1}. Class: "${div.className}"`);
+                            });
+                            window.linkdominatorAutomationResult = { success: false, error: 'Main profile container not found' };
                             return { success: false, error: 'Main profile container not found' };
                         }
                         
                         const connectSelectors = [
-                            '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk button[aria-label*="Connect"]',
-                            '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk button[aria-label*="connect"]',
-                            '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk button[aria-label*="Invite"]',
-                            '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk button[aria-label*="invite"]',
-                            '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .artdeco-button[aria-label*="Connect"]',
-                            '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .artdeco-button[aria-label*="Invite"]',
-                            '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk [data-control-name="connect"]',
-                            '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .pv-s-profile-actions--connect',
-                            '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .pv-s-profile-actions button'
+                            '.ph5.pb5 button[aria-label*="Connect"]',
+                            '.ph5.pb5 button[aria-label*="connect"]',
+                            '.ph5.pb5 button[aria-label*="Invite"]',
+                            '.ph5.pb5 button[aria-label*="invite"]',
+                            '.ph5.pb5 .artdeco-button[aria-label*="Connect"]',
+                            '.ph5.pb5 .artdeco-button[aria-label*="Invite"]',
+                            '.ph5.pb5 [data-control-name="connect"]',
+                            '.ph5.pb5 .pv-s-profile-actions--connect',
+                            '.ph5.pb5 .pv-s-profile-actions button',
+                            '.ph5.pb5 * button[aria-label*="Connect"]',
+                            '.ph5.pb5 * button[aria-label*="connect"]',
+                            '.ph5.pb5 * button[aria-label*="Invite"]',
+                            '.ph5.pb5 * button[aria-label*="invite"]',
+                            '.ph5.pb5 * .artdeco-button[aria-label*="Connect"]',
+                            '.ph5.pb5 * .artdeco-button[aria-label*="Invite"]'
                         ];
                         
                         console.log('🔍 Checking for direct Connect buttons within main profile div...');
@@ -4439,7 +6241,7 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
                         if (!connectButton) {
                             console.log('🚨 DEBUG: No Connect button found by text, checking More dropdown within main profile div...');
                             console.log('🔍 Checking "More" dropdown for Connect button...');
-                            const moreButton = mainProfileDiv.querySelector('button[aria-label*="More actions"], button[aria-label*="More"], .artdeco-dropdown__trigger');
+                            const moreButton = mainProfileDiv.querySelector('button[aria-label*="More actions"], button[aria-label*="More"], .artdeco-dropdown__trigger, button[aria-label*="more"], button[aria-label*="Additional actions"]');
                             console.log('🔍 More button search result:', moreButton);
                             if (moreButton) {
                                 console.log('✅ Found "More" button, details:', {
@@ -4457,21 +6259,29 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
                                 // Look for Connect button in dropdown within main profile div
                                 console.log('🔍 Searching for Connect button in dropdown within main profile div...');
                                 const dropdownConnectSelectors = [
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk button[aria-label*="Connect"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk button[aria-label*="connect"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk button[aria-label*="Invite"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk button[aria-label*="invite"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .artdeco-dropdown__content button[aria-label*="Connect"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .artdeco-dropdown__content button[aria-label*="connect"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .artdeco-dropdown__content button[aria-label*="Invite"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .artdeco-dropdown__content button[aria-label*="invite"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .artdeco-dropdown__item[aria-label*="Connect"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .artdeco-dropdown__item[aria-label*="connect"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .artdeco-dropdown__item[aria-label*="Invite"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .artdeco-dropdown__item[aria-label*="invite"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk [aria-label*="Invite"][aria-label*="connect"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk [role="button"][aria-label*="Connect"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk [role="button"][aria-label*="Invite"]'
+                                    '.ph5.pb5 button[aria-label*="Connect"]',
+                                    '.ph5.pb5 button[aria-label*="connect"]',
+                                    '.ph5.pb5 button[aria-label*="Invite"]',
+                                    '.ph5.pb5 button[aria-label*="invite"]',
+                                    '.ph5.pb5 .artdeco-dropdown__content button[aria-label*="Connect"]',
+                                    '.ph5.pb5 .artdeco-dropdown__content button[aria-label*="connect"]',
+                                    '.ph5.pb5 .artdeco-dropdown__content button[aria-label*="Invite"]',
+                                    '.ph5.pb5 .artdeco-dropdown__content button[aria-label*="invite"]',
+                                    '.ph5.pb5 .artdeco-dropdown__item[aria-label*="Connect"]',
+                                    '.ph5.pb5 .artdeco-dropdown__item[aria-label*="connect"]',
+                                    '.ph5.pb5 .artdeco-dropdown__item[aria-label*="Invite"]',
+                                    '.ph5.pb5 .artdeco-dropdown__item[aria-label*="invite"]',
+                                    '.ph5.pb5 [aria-label*="Invite"][aria-label*="connect"]',
+                                    '.ph5.pb5 [role="button"][aria-label*="Connect"]',
+                                    '.ph5.pb5 [role="button"][aria-label*="Invite"]',
+                                    '.ph5.pb5 * button[aria-label*="Connect"]',
+                                    '.ph5.pb5 * button[aria-label*="connect"]',
+                                    '.ph5.pb5 * button[aria-label*="Invite"]',
+                                    '.ph5.pb5 * button[aria-label*="invite"]',
+                                    '.ph5.pb5 * .artdeco-dropdown__content button[aria-label*="Connect"]',
+                                    '.ph5.pb5 * .artdeco-dropdown__content button[aria-label*="connect"]',
+                                    '.ph5.pb5 * .artdeco-dropdown__content button[aria-label*="Invite"]',
+                                    '.ph5.pb5 * .artdeco-dropdown__content button[aria-label*="invite"]'
                                 ];
                                 
                                 for (const selector of dropdownConnectSelectors) {
@@ -4521,6 +6331,7 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
                         
                         if (!connectButton) {
                             console.log('❌ Connect button not found');
+                            window.linkdominatorAutomationResult = { success: false, error: 'User not found or connection not available' };
                             return { success: false, error: 'User not found or connection not available' };
                         }
                         
@@ -4569,6 +6380,7 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
                         
                         if (!sendButton) {
                             console.log('❌ Send button not found');
+                            window.linkdominatorAutomationResult = { success: false, error: 'Connection not successfully sent' };
                             return { success: false, error: 'Connection not successfully sent' };
                         }
                         
@@ -4590,17 +6402,21 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
                             const element = document.querySelector(selector);
                             if (element) {
                                 console.log('✅ Invite sent successfully confirmed');
+                                window.linkdominatorAutomationResult = { success: true };
                                 return { success: true };
                             }
                         }
                         
                         console.log('✅ Invite sent (no explicit confirmation found)');
                         console.log('🚨 TEST: Script completed successfully!');
+                        window.linkdominatorAutomationResult = { success: true };
                         return { success: true };
                         
                     } catch (error) {
                         console.log('🚨 TEST: Script caught an error!');
                         console.error('❌ Error in automation:', error.message);
+                        removeOverlay();
+                        window.linkdominatorAutomationResult = { success: false, error: error.message };
                         return { success: false, error: error.message };
                     }
                 },
@@ -4611,15 +6427,89 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
             console.log('🔄 Step 4: Waiting for automation to complete...');
             await delay(5000); // Give time for automation to complete
             
+            // Check automation result from the injected script
+            let automationResult = null;
+            try {
+                // Try to get the result from the injected script
+                const results = await chrome.scripting.executeScript({
+                    target: { tabId: tab.id },
+                    func: () => {
+                        return window.linkdominatorAutomationResult || { success: false, error: 'No result available' };
+                    }
+                });
+                automationResult = results[0]?.result;
+                console.log('🔍 Automation result:', automationResult);
+                
+                // Remove overlay after getting result
+                await chrome.scripting.executeScript({
+                    target: { tabId: tab.id },
+                    func: () => {
+                        if (window.linkdominatorRemoveOverlay) {
+                            window.linkdominatorRemoveOverlay();
+                        } else {
+                            // Fallback if stored function not available
+                            const overlay = document.getElementById('linkdominator-automation-overlay');
+                            if (overlay) {
+                                overlay.remove();
+                            }
+                            document.body.style.pointerEvents = '';
+                            document.body.style.overflow = '';
+                            document.documentElement.style.overflow = '';
+                            console.log('🛡️ Overlay removed - user interactions restored');
+                        }
+                    }
+                });
+            } catch (error) {
+                console.log('⚠️ Could not get automation result:', error.message);
+                automationResult = { success: false, error: 'Could not get result' };
+                
+                // Still try to remove overlay even if we couldn't get result
+                try {
+                    await chrome.scripting.executeScript({
+                        target: { tabId: tab.id },
+                        func: () => {
+                            if (window.linkdominatorRemoveOverlay) {
+                                window.linkdominatorRemoveOverlay();
+                            } else {
+                                // Fallback if stored function not available
+                                const overlay = document.getElementById('linkdominator-automation-overlay');
+                                if (overlay) {
+                                    overlay.remove();
+                                }
+                                document.body.style.pointerEvents = '';
+                                document.body.style.overflow = '';
+                                document.documentElement.style.overflow = '';
+                                console.log('🛡️ Overlay removed - user interactions restored');
+                            }
+                        }
+                    });
+                } catch (overlayError) {
+                    console.log('⚠️ Could not remove overlay:', overlayError.message);
+                }
+            }
+            
             // Step 5: Close the tab
             console.log('🔄 Step 5: Closing tab...');
             await chrome.tabs.remove(tab.id);
             console.log('✅ Tab closed');
             
-            console.log(`✅ INVITATION SUCCESSFULLY SENT to ${lead.name} (${lead.connectionId})`);
-            console.log(`🎯 Browser automation - Invitation sent successfully`);
-            console.log(`📝 Message: ${newMessage || 'Default connection message'}`);
-            console.log(`💡 Verify in LinkedIn: My Network → Manage my network → Sent invitations`);
+            // Check if automation succeeded or was successfully skipped
+            if (automationResult && automationResult.success) {
+                if (automationResult.skipped) {
+                    console.log(`✅ INVITATION SKIPPED for ${lead.name} (${lead.connectionId})`);
+                    console.log(`📝 Reason: ${automationResult.reason}`);
+                    console.log(`💡 This is normal - invite already sent or already connected`);
+                } else {
+                    console.log(`✅ INVITATION SUCCESSFULLY SENT to ${lead.name} (${lead.connectionId})`);
+                    console.log(`🎯 Browser automation - Invitation sent successfully`);
+                    console.log(`📝 Message: ${newMessage || 'Default connection message'}`);
+                    console.log(`💡 Verify in LinkedIn: My Network → Manage my network → Sent invitations`);
+                }
+            } else {
+                console.log(`❌ INVITATION FAILED for ${lead.name} (${lead.connectionId})`);
+                console.log(`🚨 Browser automation failed: ${automationResult?.error || 'Unknown error'}`);
+                throw new Error(`Automation failed: ${automationResult?.error || 'Unknown error'}`);
+            }
             
             // Update lead status
             try {
@@ -7398,11 +9288,24 @@ const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => 
         if (conversations.length === 0) {
             console.log('🔍 No conversations via API, trying direct conversation access...');
             
-            // Known conversation ID for Eleazar (from the URL you provided)
-            const knownConversationIds = [
-                '2-MmJlMWU1MzMtMGUzYi00ODI2LThjNWEtYjQyZTAwZWEyNjM4XzEwMA==',
-                connectionId // Also try the connection ID itself
-            ];
+            // Try to get the actual conversation URN from monitoring data first
+            const monitoringKey = `call_response_monitoring_${connectionId}`;
+            const allStorage = await chrome.storage.local.get();
+            const monitoringEntries = Object.keys(allStorage).filter(key => key.startsWith('call_response_monitoring_'));
+            
+            let knownConversationIds = [connectionId]; // Start with connection ID as fallback
+            
+            // Look for monitoring data that might have the conversation URN
+            for (const key of monitoringEntries) {
+                const monitoringData = allStorage[key];
+                console.log(`🔍 Checking monitoring entry: ${key}`, monitoringData);
+                if (monitoringData.connectionId === connectionId && monitoringData.conversationUrnId) {
+                    console.log(`✅ Found conversation URN in monitoring data: ${monitoringData.conversationUrnId}`);
+                    knownConversationIds.unshift(monitoringData.conversationUrnId); // Put it first
+                }
+            }
+            
+            console.log(`📋 Will try these conversation IDs in order:`, knownConversationIds);
             
             for (const conversationId of knownConversationIds) {
                 try {
@@ -8768,23 +10671,23 @@ const debugCampaignStorage = async () => {
         const campaignSpecificKeys = Object.keys(allStorage).filter(key => key.startsWith('campaign_') && !campaignKeys.includes(key));
         campaignKeys.push(...campaignSpecificKeys);
         
-        console.log('📊 All storage keys:', Object.keys(allStorage));
-        console.log('📊 Campaign-specific keys found:', campaignSpecificKeys);
+        // console.log('📊 All storage keys:', Object.keys(allStorage));
+        // console.log('📊 Campaign-specific keys found:', campaignSpecificKeys);
         
-        for (const key of campaignKeys) {
-            if (allStorage[key]) {
-                console.log(`🔍 Found data in key '${key}':`, allStorage[key]);
-                if (allStorage[key].campaign) {
-                    console.log(`   - Campaign ID: ${allStorage[key].campaign.id}`);
-                    console.log(`   - Campaign Name: ${allStorage[key].campaign.name}`);
-                    console.log(`   - Has sequence: ${!!allStorage[key].sequence}`);
-                    if (allStorage[key].sequence && allStorage[key].sequence[0]) {
-                        console.log(`   - First node AI mode: ${allStorage[key].sequence[0].ai_mode}`);
-                        console.log(`   - First node review time: ${allStorage[key].sequence[0].review_time}`);
-                    }
-                }
-            }
-        }
+        // for (const key of campaignKeys) {
+        //     if (allStorage[key]) {
+        //         console.log(`🔍 Found data in key '${key}':`, allStorage[key]);
+        //         if (allStorage[key].campaign) {
+        //             console.log(`   - Campaign ID: ${allStorage[key].campaign.id}`);
+        //             console.log(`   - Campaign Name: ${allStorage[key].campaign.name}`);
+        //             console.log(`   - Has sequence: ${!!allStorage[key].sequence}`);
+        //             if (allStorage[key].sequence && allStorage[key].sequence[0]) {
+        //                 console.log(`   - First node AI mode: ${allStorage[key].sequence[0].ai_mode}`);
+        //                 console.log(`   - First node review time: ${allStorage[key].sequence[0].review_time}`);
+        //             }
+        //         }
+        //     }
+        // }
         
         // Check monitoring data
         const monitoringKeys = Object.keys(allStorage).filter(key => key.startsWith('call_response_monitoring_'));
@@ -9412,6 +11315,37 @@ const trySendQueuedDraft = async (monitoringData) => {
  };
 
 /**
+ * Update monitoring data with conversation URN after message is sent
+ */
+const updateMonitoringDataWithConversationUrn = async (connectionId, conversationUrnId) => {
+    try {
+        console.log(`🔄 Updating monitoring data for ${connectionId} with conversation URN: ${conversationUrnId}`);
+        
+        // Find all monitoring entries for this connection
+        const allStorage = await chrome.storage.local.get();
+        const monitoringKeys = Object.keys(allStorage).filter(key => 
+            key.startsWith('call_response_monitoring_') && key.includes(connectionId)
+        );
+        
+        for (const key of monitoringKeys) {
+            const monitoringData = allStorage[key];
+            if (monitoringData && !monitoringData.conversationUrnId) {
+                console.log(`✅ Updating ${key} with conversation URN`);
+                await chrome.storage.local.set({ 
+                    [key]: {
+                        ...monitoringData,
+                        conversationUrnId: conversationUrnId
+                    }
+                });
+                console.log(`✅ Successfully updated monitoring data with conversation URN`);
+            }
+        }
+    } catch (error) {
+        console.error('❌ Error updating monitoring data with conversation URN:', error);
+    }
+};
+
+/**
  * Set up monitoring for AI message responses
  */
 const setupAIMessageMonitoring = async (monitoringData) => {
@@ -9425,6 +11359,18 @@ const setupAIMessageMonitoring = async (monitoringData) => {
         const existingMonitoring = await chrome.storage.local.get([responseMonitoringKey]);
         if (existingMonitoring[responseMonitoringKey]) {
             console.log(`✅ Monitoring already exists for ${monitoringData.leadName}`);
+            
+            // Update existing monitoring with new conversation URN if available
+            if (monitoringData.conversationUrnId && !existingMonitoring[responseMonitoringKey].conversationUrnId) {
+                console.log(`🔄 Updating existing monitoring with conversation URN: ${monitoringData.conversationUrnId}`);
+                await chrome.storage.local.set({ 
+                    [responseMonitoringKey]: {
+                        ...existingMonitoring[responseMonitoringKey],
+                        conversationUrnId: monitoringData.conversationUrnId
+                    }
+                });
+                console.log(`✅ Updated monitoring data with conversation URN`);
+            }
             return;
         }
         
@@ -11153,3 +13099,28 @@ const updateReminderStatus = async (reminderId, status, linkedinId, errorMessage
         console.error('❌ Error updating reminder status:', error);
     }
 };
+
+// Add periodic check for scheduled posts
+chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name === 'content_creator_check') {
+        console.log('⏰ Content Creator alarm triggered');
+        handleContentCreatorPosts();
+    }
+});
+
+// Create alarm for content creator posts (check every 30 seconds for immediate posts)
+chrome.alarms.create('content_creator_check', { 
+    delayInMinutes: 0.5, 
+    periodInMinutes: 0.5 
+});
+
+// Listen for immediate content creator checks
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.action === 'checkContentCreatorPosts') {
+        console.log('🚀 Immediate content creator check requested');
+        handleContentCreatorPosts();
+        sendResponse({success: true});
+    }
+});
+
+console.log('✅ Content Creator extension integration initialized');
