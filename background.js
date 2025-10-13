@@ -4,8 +4,23 @@
 // importScripts('./js/actions/campaignAction.js');
 importScripts('./env.js');
 
-// Content Creator functionality
+// ============================================================================
+// 🚫 DEPRECATED: Content Creator Posting (NOW HANDLED BY BACKEND API)
+// ============================================================================
+// LinkedIn posting is now done via LinkedIn Official API from the backend.
+// The extension is NO LONGER used for creating/publishing LinkedIn posts.
+// Posts are automatically published by the backend using LinkedIn's /rest/posts API.
+// ============================================================================
+
+/*
+// DEPRECATED - Content Creator functionality (NO LONGER USED)
 const handleContentCreatorPosts = async () => {
+    console.log('⚠️ Content Creator posting is now handled by backend API');
+    console.log('ℹ️ This function is deprecated and no longer needed');
+    return;
+    
+    // OLD CODE COMMENTED OUT - KEPT FOR REFERENCE ONLY
+    /*
     try {
         console.log('🚀 Checking for scheduled posts...');
         
@@ -60,9 +75,15 @@ const handleContentCreatorPosts = async () => {
     } catch (error) {
         console.error('❌ Error in handleContentCreatorPosts:', error);
     }
+    *​/
 };
 
+// DEPRECATED - Publishing LinkedIn posts via extension (NO LONGER USED)
 const publishLinkedInPost = async (post) => {
+    console.log('⚠️ LinkedIn posting is now handled by backend API - extension posting disabled');
+    return;
+    
+    /* OLD CODE COMMENTED OUT
     try {
         console.log('📤 Publishing post:', post.id);
         
@@ -3485,8 +3506,8 @@ chrome.alarms.onAlarm.addListener((alarm) => {
         });
         return;
     }else if(alarm.name === 'content_creator_check'){
-        // Skip content creator alarm - it's handled by the dedicated listener
-        console.log('⏰ Content Creator alarm - skipping general campaign processing');
+        // DEPRECATED: Content creator posting now handled by backend API
+        console.log('⚠️ Content Creator alarm - NOW HANDLED BY BACKEND API (No action needed)');
         return;
     }else{
         console.log('🎯 Starting general campaign alarm for:', alarm.name);
@@ -13100,27 +13121,35 @@ const updateReminderStatus = async (reminderId, status, linkedinId, errorMessage
     }
 };
 
-// Add periodic check for scheduled posts
+// ============================================================================
+// 🚫 DEPRECATED: Content Creator Alarms (DISABLED - NOW HANDLED BY BACKEND)
+// ============================================================================
+// LinkedIn posts are now published automatically by the backend via LinkedIn API.
+// No extension automation needed for posting!
+// ============================================================================
+
+/*
+// DEPRECATED - Periodic check for scheduled posts (NO LONGER USED)
 chrome.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === 'content_creator_check') {
-        console.log('⏰ Content Creator alarm triggered');
-        handleContentCreatorPosts();
+        console.log('⚠️ Content Creator alarm - NOW HANDLED BY BACKEND API');
+        // Do nothing - backend handles posting
     }
 });
 
-// Create alarm for content creator posts (check every 30 seconds for immediate posts)
-chrome.alarms.create('content_creator_check', { 
-    delayInMinutes: 0.5, 
-    periodInMinutes: 0.5 
-});
+// DEPRECATED - Alarm creation (DISABLED)
+// chrome.alarms.create('content_creator_check', { 
+//     delayInMinutes: 0.5, 
+//     periodInMinutes: 0.5 
+// });
 
-// Listen for immediate content creator checks
+// DEPRECATED - Manual check listener (DISABLED)
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === 'checkContentCreatorPosts') {
-        console.log('🚀 Immediate content creator check requested');
-        handleContentCreatorPosts();
-        sendResponse({success: true});
+        console.log('⚠️ Content Creator posting is now handled by backend API');
+        sendResponse({success: true, message: 'Posting handled by backend'});
     }
 });
+*/
 
 console.log('✅ Content Creator extension integration initialized');
