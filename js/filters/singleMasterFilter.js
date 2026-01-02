@@ -31,11 +31,27 @@ const fetchSingleSearchFilter = (keyword, typeObj, query, listElem, selectedElem
 }
 
 const fetchLanguage = (lang, typeObj, listElem, selectedElem) => {
-   fetch(`${filterApi}/lang?` + (new URLSearchParams({lang: lang}).toString()))
-		.then(res => res.json())
+   fetch(`${filterApi}/lang?` + (new URLSearchParams({lang: lang}).toString()), {
+       headers: {
+           'ngrok-skip-browser-warning': 'true' // Bypass ngrok warning page
+       }
+   })
+		.then(res => {
+			// Check if response is HTML (ngrok warning page) instead of JSON
+			const contentType = res.headers.get('content-type');
+			if (contentType && contentType.includes('text/html')) {
+				throw new Error('Received HTML instead of JSON - ngrok warning page');
+			}
+			return res.json();
+		})
 		.then(res => {
 			setSingleSearchFilterResultToList(res, typeObj, listElem, selectedElem)
    	})
+		.catch(error => {
+			console.error('Error fetching language:', error);
+			// Show user-friendly error message
+			$(listElem).html('<li class="list-group-item text-danger">Error loading languages. Please try again.</li>');
+		})
 }
 
 const setSingleSearchFilterResultToList = (res, typeObj, listElem, selectedElem) => {

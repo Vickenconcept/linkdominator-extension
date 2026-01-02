@@ -238,16 +238,47 @@ const fsGetConnections = async () => {
             await new Promise(resolve => setTimeout(resolve, randomDelay));
             
             console.log(`Fetching connections from position: ${getConnectParams.startPosition}`);
-            console.log('Search URL:', `${voyagerBlockSearchUrl}&query=${getConnectParams.queryParams}&start=${getConnectParams.startPosition}`);
-            console.log('Query Parameters:', getConnectParams.queryParams);
             
-            const data = await makeLinkedInApiRequest(
-                `${voyagerBlockSearchUrl}&query=${getConnectParams.queryParams}&start=${getConnectParams.startPosition}`
-            );
-            
-            console.log('LinkedIn API Response:', data);
-            
-            let res = {'data': data};
+            let res;
+            if (getConnectParams.usePhantomSearch) {
+                console.log('Using PhantomBuster Search Export for audience search', {
+                    searchUrl: getConnectParams.searchUrl,
+                    limit: $('#afs-total').val()
+                });
+
+                const response = await fetch(`${PLATFORM_URL}/api/audience/search-export`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'lk-id': linkedinId,
+                        'ngrok-skip-browser-warning': 'true' // Bypass ngrok warning page
+                    },
+                    body: JSON.stringify({
+                        search_url: getConnectParams.searchUrl || null,
+                        keywords: getConnectParams.keywords,
+                        connection_degrees: getConnectParams.connection_degrees,
+                        limit: parseInt($('#afs-total').val(), 10) || undefined
+                    })
+                });
+
+                if (!response.ok) {
+                    const body = await response.text();
+                    throw new Error(`Search export failed: ${response.status} ${body}`);
+                }
+
+                res = await response.json();
+            } else {
+                console.log('Search URL:', `${voyagerBlockSearchUrl}&query=${getConnectParams.queryParams}&start=${getConnectParams.startPosition}`);
+                console.log('Query Parameters:', getConnectParams.queryParams);
+                
+                const data = await makeLinkedInApiRequest(
+                    `${voyagerBlockSearchUrl}&query=${getConnectParams.queryParams}&start=${getConnectParams.startPosition}`
+                );
+                
+                console.log('LinkedIn API Response:', data);
+                
+                res = {'data': data};
+            }
             let elements = res['data'].data.elements;
             let included = res['data'].included;
 
@@ -288,18 +319,30 @@ const fsGetConnections = async () => {
                                 
                                 console.log('Item passed LinkedIn Member check');
                                 
-                                if (getConnectParams.positiveKeywords) {
+                                // If using PhantomBuster and search URL already includes keywords,
+                                // skip positive keyword filtering here (LinkedIn already filtered by keywords)
+                                // The filterProfilesByPreferences function will handle additional filtering later
+                                const searchKeywords = (getConnectParams.keywords || '').toLowerCase().trim();
+                                const positiveKeywords = (getConnectParams.positiveKeywords || '').toLowerCase().trim();
+                                const keywordsMatch = searchKeywords && positiveKeywords && 
+                                    positiveKeywords.split(',').some(kw => searchKeywords.includes(kw.trim()));
+                                
+                                if (getConnectParams.positiveKeywords && !keywordsMatch) {
+                                    // Only filter if positive keywords don't match search keywords
                                     console.log('Checking positive keywords:', getConnectParams.positiveKeywords);
                                     let keywordMatched = false;
                                     for (let text of getConnectParams.positiveKeywords.split(',')) {
                                         const cleanText = text.trim().toLowerCase();
                                         const titleText = item.title.text.toLowerCase();
                                         const subtitleText = item.primarySubtitle.text.toLowerCase();
+                                        // Also check headline if available (PhantomBuster data)
+                                        const headlineText = (item.headline || item.primarySubtitle?.text || '').toLowerCase();
                                         
-                                        if (titleText.includes(cleanText) || subtitleText.includes(cleanText)) {
+                                        if (titleText.includes(cleanText) || subtitleText.includes(cleanText) || headlineText.includes(cleanText)) {
                                             console.log(`Item matched positive keyword "${cleanText}":`, {
                                                 title: item.title.text,
-                                                subtitle: item.primarySubtitle.text
+                                                subtitle: item.primarySubtitle.text,
+                                                headline: item.headline || item.primarySubtitle?.text
                                             });
                                             keywordMatched = true;
                                             audConnectionItems.push(item);
@@ -310,9 +353,14 @@ const fsGetConnections = async () => {
                                         console.log(`Item filtered out - no positive keyword match:`, {
                                             title: item.title.text,
                                             subtitle: item.primarySubtitle.text,
+                                            headline: item.headline || item.primarySubtitle?.text,
                                             keywords: getConnectParams.positiveKeywords
                                         });
                                     }
+                                } else if (getConnectParams.positiveKeywords && keywordsMatch) {
+                                    // Search keywords match positive keywords - LinkedIn already filtered, include all results
+                                    console.log('Positive keywords match search keywords - including all results (already filtered by LinkedIn)');
+                                    audConnectionItems.push(item);
                                 } else if (getConnectParams.negativeKeywords) {
                                     console.log('Checking negative keywords:', getConnectParams.negativeKeywords);
                                     let shouldExclude = false;
@@ -392,7 +440,12 @@ const fsGetConnections = async () => {
                         $('#afc-displayNewAudienceStatus').html(
                             `<i class="fas fa-check"></i> Found ${audConnectionItems.length} connections!`
                         );
-                        afcSetConnectionData(totalResultCount);
+                        // Use Phantom version if using PhantomBuster search export
+                        if (getConnectParams.usePhantomSearch) {
+                            afcSetPhantomConnectionData(totalResultCount);
+                        } else {
+                            afcSetConnectionData(totalResultCount);
+                        }
                     }
 
                 } else if (((elements.length > 1 && (!elements[1].items || !elements[1].items.length)) || 
@@ -417,7 +470,12 @@ const fsGetConnections = async () => {
                     $('#afc-displayNewAudienceStatus').html(
                         `<i class="fas fa-check"></i> Found ${audConnectionItems.length} connections!`
                     );
-                    afcSetConnectionData(totalResultCount);
+                    // Use Phantom version if using PhantomBuster search export
+                    if (getConnectParams.usePhantomSearch) {
+                        afcSetPhantomConnectionData(totalResultCount);
+                    } else {
+                        afcSetConnectionData(totalResultCount);
+                    }
                 }
 
             } else if (audConnectionItems.length) {
@@ -430,7 +488,12 @@ const fsGetConnections = async () => {
                 $('#afc-displayNewAudienceStatus').html(
                     `<i class="fas fa-check"></i> Found ${audConnectionItems.length} connections!`
                 );
-                afcSetConnectionData(totalResultCount);
+                // Use Phantom version if using PhantomBuster search export
+                if (getConnectParams.usePhantomSearch) {
+                    afcSetPhantomConnectionData(totalResultCount);
+                } else {
+                    afcSetConnectionData(totalResultCount);
+                }
             } else {
                 console.log('No elements found and no connections collected');
                 window.searchActive = false;
@@ -673,10 +736,214 @@ $('.newAudienceAction').click(function(){
             audienceType = 'fSearch';
             $(this).attr('disabled', true);
 
+            const keywordTerm = ($('#afs-search-term').val() || '').trim();
+            const keywordFallback = ($('#afs-positiveKeywords').val() || '').trim();
+            const chosenKeywords = keywordTerm || keywordFallback;
+
+            // Map connection degree checkboxes to Phantom-friendly values
+            const degreeMap = {
+                'F': '1',
+                'S': '2',
+                'O': '3+'
+            };
+            const mappedDegrees = afsDegreeArr.length
+                ? afsDegreeArr.map(d => degreeMap[d] || d)
+                : [];
+
+            // Build minimal LinkedIn search URL - only keywords and network (connection degrees)
+            // All other filters (location, company, industry, school, etc.) are handled client-side
+            const buildLinkedInSearchUrl = () => {
+                if (!chosenKeywords) return ''; // No keywords, can't build URL
+                
+                const params = [];
+                
+                // Keywords (required)
+                params.push(`keywords=${encodeURIComponent(chosenKeywords)}`);
+                
+                // Add origin parameter (LinkedIn uses this for faceted search)
+                params.push(`origin=FACETED_SEARCH`);
+                
+                // Network (connection degrees) - LinkedIn uses JSON array format
+                const networkCodes = afsDegreeArr.length ? afsDegreeArr : ['S','O'];
+                params.push(`network=${encodeURIComponent(JSON.stringify(networkCodes))}`);
+                
+                // Add location (geoUrn) - LinkedIn uses JSON array format with string IDs
+                if ($('#afs-selectedLocation li').length > 0) {
+                    const geoUrns = [];
+                    $('#afs-selectedLocation li').each(function() {
+                        const geoUrn = $(this).data('regionid');
+                        if (geoUrn) {
+                            geoUrns.push(String(geoUrn)); // Ensure it's a string
+                        }
+                    });
+                    if (geoUrns.length > 0) {
+                        params.push(`geoUrn=${encodeURIComponent(JSON.stringify(geoUrns))}`);
+                        console.log('🔍 Location filter added to URL:', { geoUrns });
+                    }
+                }
+                
+                // Add current company - LinkedIn uses JSON array format with string IDs
+                if ($('#afs-selectedCurrComp li').length > 0) {
+                    const companies = [];
+                    $('#afs-selectedCurrComp li').each(function() {
+                        const companyId = $(this).data('currcompid');
+                        if (companyId) {
+                            companies.push(String(companyId)); // Ensure it's a string
+                        }
+                    });
+                    if (companies.length > 0) {
+                        params.push(`currentCompany=${encodeURIComponent(JSON.stringify(companies))}`);
+                        console.log('🔍 Current company filter added to URL:', { companies });
+                    }
+                }
+                
+                // Add past company - LinkedIn uses JSON array format with string IDs
+                if ($('#afs-selectedPastComp li').length > 0) {
+                    const pastCompanies = [];
+                    $('#afs-selectedPastComp li').each(function() {
+                        const pastCompanyId = $(this).data('pastcompid');
+                        if (pastCompanyId) {
+                            pastCompanies.push(String(pastCompanyId)); // Ensure it's a string
+                        }
+                    });
+                    if (pastCompanies.length > 0) {
+                        params.push(`pastCompany=${encodeURIComponent(JSON.stringify(pastCompanies))}`);
+                        console.log('🔍 Past company filter added to URL:', { pastCompanies });
+                    }
+                }
+                
+                // Add industry - LinkedIn uses JSON array format with string IDs
+                if ($('#afs-selectedIndustry li').length > 0) {
+                    const industries = [];
+                    $('#afs-selectedIndustry li').each(function() {
+                        const industryId = $(this).data('industryid');
+                        if (industryId) {
+                            industries.push(String(industryId)); // Ensure it's a string
+                        }
+                    });
+                    if (industries.length > 0) {
+                        params.push(`industry=${encodeURIComponent(JSON.stringify(industries))}`);
+                        console.log('🔍 Industry filter added to URL:', { industries });
+                    }
+                }
+                
+                // Add school - LinkedIn uses JSON array format with string IDs
+                if ($('#afs-selectedSchool li').length > 0) {
+                    const schools = [];
+                    $('#afs-selectedSchool li').each(function() {
+                        const schoolId = $(this).data('schoolid');
+                        if (schoolId) {
+                            schools.push(String(schoolId)); // Ensure it's a string
+                        }
+                    });
+                    if (schools.length > 0) {
+                        params.push(`schoolFilter=${encodeURIComponent(JSON.stringify(schools))}`);
+                        console.log('🔍 School filter added to URL:', { schools });
+                    }
+                }
+                
+                // Add profile language - LinkedIn uses JSON array format
+                if ($('#afs-selectedLanguage li').length > 0) {
+                    const languages = [];
+                    $('#afs-selectedLanguage li').each(function() {
+                        const lang = $(this).data('langcode');
+                        if (lang) {
+                            languages.push(String(lang)); // Ensure it's a string
+                        }
+                    });
+                    if (languages.length > 0) {
+                        params.push(`profileLanguage=${encodeURIComponent(JSON.stringify(languages))}`);
+                        console.log('🔍 Profile language filter added to URL:', { languages });
+                    }
+                }
+                
+                // Add firstName - LinkedIn supports this as a URL parameter
+                if ($('#afs-firstName').val() && $('#afs-firstName').val().trim()) {
+                    params.push(`firstName=${encodeURIComponent($('#afs-firstName').val().trim())}`);
+                    console.log('🔍 First name filter added to URL:', { firstName: $('#afs-firstName').val().trim() });
+                }
+                
+                // Add lastName - LinkedIn supports this as a URL parameter
+                if ($('#afs-lastName').val() && $('#afs-lastName').val().trim()) {
+                    params.push(`lastName=${encodeURIComponent($('#afs-lastName').val().trim())}`);
+                    console.log('🔍 Last name filter added to URL:', { lastName: $('#afs-lastName').val().trim() });
+                }
+                
+                // Add title - LinkedIn supports this as a URL parameter
+                if ($('#afs-title').val() && $('#afs-title').val().trim()) {
+                    params.push(`title=${encodeURIComponent($('#afs-title').val().trim())}`);
+                    console.log('🔍 Title filter added to URL:', { title: $('#afs-title').val().trim() });
+                }
+                
+                // Note: Company free text (#afs-company) is typically handled via keywords or currentCompany filter
+                // School free text (#afs-school) is typically handled via schoolFilter with IDs
+                
+                const finalUrl = `https://www.linkedin.com/search/results/people/?${params.join('&')}`;
+                console.log('🔍 Complete LinkedIn search URL with filters:', finalUrl);
+                return finalUrl;
+            };
+            
+            const searchUrl = buildLinkedInSearchUrl();
+
             if($('#afs-search-term').val())
                 query = `(keywords:${encodeURIComponent($('#afs-search-term').val())},flagshipSearchIntent:SEARCH_SRP,queryParameters:(${queryParams}resultType:List(PEOPLE)),includeFiltersInResponse:false)`
             else
                 query = `(flagshipSearchIntent:SEARCH_SRP,queryParameters:(${queryParams}resultType:List(PEOPLE)),includeFiltersInResponse:false)`;
+
+            // Collect filter values for client-side filtering (since LinkedIn URLs don't support all filters)
+            const filterValues = {
+                locations: [],
+                currentCompanies: [],
+                pastCompanies: [],
+                industries: [],
+                schools: [],
+                languages: []
+            };
+            
+            // Extract location filters
+            $('#afs-selectedLocation li').each(function() {
+                const name = $(this).data('name') || $(this).text().trim();
+                const regionId = $(this).data('regionid');
+                if (name) {
+                    filterValues.locations.push({ name, id: regionId });
+                    console.log('📍 Stored location filter:', { name, id: regionId });
+                }
+            });
+            
+            // Extract current company filters
+            $('#afs-selectedCurrComp li').each(function() {
+                const name = $(this).data('name') || $(this).text().trim();
+                const companyId = $(this).data('currcompid');
+                if (name) filterValues.currentCompanies.push({ name, id: companyId });
+            });
+            
+            // Extract past company filters
+            $('#afs-selectedPastComp li').each(function() {
+                const name = $(this).data('name') || $(this).text().trim();
+                const companyId = $(this).data('pastcompid');
+                if (name) filterValues.pastCompanies.push({ name, id: companyId });
+            });
+            
+            // Extract industry filters
+            $('#afs-selectedIndustry li').each(function() {
+                const name = $(this).data('name') || $(this).text().trim();
+                const industryId = $(this).data('industryid');
+                if (name) filterValues.industries.push({ name, id: industryId });
+            });
+            
+            // Extract school filters
+            $('#afs-selectedSchool li').each(function() {
+                const name = $(this).data('name') || $(this).text().trim();
+                const schoolId = $(this).data('schoolid');
+                if (name) filterValues.schools.push({ name, id: schoolId });
+            });
+            
+            // Extract language filters
+            $('#afs-selectedLanguage li').each(function() {
+                const name = $(this).data('name') || $(this).text().trim();
+                const langCode = $(this).data('langcode');
+                if (name) filterValues.languages.push({ name, code: langCode });
+            });
 
             getConnectParams = {
                 queryParams: query,
@@ -687,6 +954,11 @@ $('.newAudienceAction').click(function(){
                 audienceType: audienceType,
                 positiveKeywords: $('#afs-positiveKeywords').val(),
                 negativeKeywords: $('#afs-negativeKeywords').val(),
+                usePhantomSearch: true,
+                searchUrl: searchUrl, // Complete URL with all filters (or empty if no keywords)
+                keywords: chosenKeywords, // Keywords for PhantomBuster (extracted from URL or provided)
+                connection_degrees: mappedDegrees,
+                filterValues: filterValues // Store filter values for client-side filtering
             }
             fsGetConnections() 
         }else if($('#nav-link-fpost').hasClass('active')) {
@@ -717,17 +989,14 @@ $('.newAudienceAction').click(function(){
                 $(this).attr('disabled', true);
 
                 if (afcPostIdLiked.val() != ''){
-                    afcPostId = 'activity:'+afcPostIdLiked.val();
-
-                    afcGetLikedProfiles(afcPostId,afcTotal,afcStartP.val(),afcDelay.val(), afcAudienceName.val(),audienceType);
+                    afcPostId = buildLinkedInPostUrl('activity', afcPostIdLiked.val());
+                    afcGetLikedProfiles(afcPostId,afcTotal,afcDelay.val(), afcAudienceName.val(),audienceType);
                 }else if (afcArticleIdLiked.val() != ''){
-                    afcPostId = 'article%3A'+afcArticleIdLiked.val();
-
-                    afcGetLikedProfiles(afcPostId,afcTotal,afcStartP.val(),afcDelay.val(),afcAudienceName.val(),audienceType);
+                    afcPostId = buildLinkedInPostUrl('article', afcArticleIdLiked.val());
+                    afcGetLikedProfiles(afcPostId,afcTotal,afcDelay.val(),afcAudienceName.val(),audienceType);
                 }else if (afcVideoIdLiked.val() != ''){
-                    afcPostId = 'ugcPost%3A'+afcVideoIdLiked.val();
-
-                    afcGetLikedProfiles(afcPostId,afcTotal,afcStartP.val(),afcDelay.val(),afcAudienceName.val(),audienceType);
+                    afcPostId = buildLinkedInPostUrl('ugcPost', afcVideoIdLiked.val());
+                    afcGetLikedProfiles(afcPostId,afcTotal,afcDelay.val(),afcAudienceName.val(),audienceType);
                 }else if (afcPostIdComment.val() != ''){
                     afcPostId = 'activity%3A'+afcPostIdComment.val();
 
@@ -1053,7 +1322,7 @@ const afcMyNetworks = (afcAudienceName, afcTotal, afcStartP, afcDelay, audienceT
     lopper()
 }
 
-const afcGetLikedProfiles = (afcPostId,afcTotal,afcStartP,afcDelay,afcAudienceName,audienceType) => {
+const afcGetLikedProfilesLegacy = (afcPostId,afcTotal,afcStartP,afcDelay,afcAudienceName,audienceType) => {
     var con = [];
     var degree = [];
     var conArr = [];
@@ -1336,6 +1605,96 @@ const afcGetLikedProfiles = (afcPostId,afcTotal,afcStartP,afcDelay,afcAudienceNa
         }, afcDelay * 1000)
     }
     alpLooper()
+}
+
+const afcGetLikedProfiles = async (postUrl, afcTotal, afcDelay, afcAudienceName, audienceType) => {
+    try {
+        if (!postUrl) {
+            throw new Error('Invalid LinkedIn post URL. Please check the ID and try again.');
+        }
+        $('.newAudience-notice').show();
+        $('#afc-displayNewAudienceStatus').html('Fetching post likers. This may take a moment...');
+        $('.newAudienceAction').attr('disabled', true);
+
+        const requestedLimit = parseInt($('#afs-total').val()) || afcTotal;
+        const payload = {
+            post_url: postUrl,
+            limit: requestedLimit
+        };
+
+        console.log('Requesting post likers:', {
+            post_url: postUrl,
+            requested_limit: requestedLimit,
+            payload: payload
+        });
+
+        const response = await fetch(`${PLATFORM_URL}/api/audience/post-likers`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'lk-id': linkedinId,
+                'ngrok-skip-browser-warning': 'true' // Bypass ngrok warning page
+            },
+            body: JSON.stringify(payload)
+        });
+
+        const result = await response.json();
+        if (!response.ok || result.status !== 200) {
+            throw new Error(result.message || 'Failed to fetch post likers');
+        }
+
+        let profiles = result.data?.profiles || [];
+        console.log('Received post likers from backend:', {
+            profiles_count: profiles.length,
+            total_from_phantom: result.data?.total_from_phantom,
+            after_limit: result.data?.after_limit,
+            skipped_companies: result.data?.skipped_companies,
+            skipped_no_profile_link: result.data?.skipped_no_profile_link,
+            requested_limit: requestedLimit
+        });
+
+        if (!profiles.length) {
+            $('#afc-displayNewAudienceStatus').html('No likers found for this post.');
+            $('.newAudienceAction').attr('disabled', false);
+            return;
+        }
+
+        const profilesBeforeFilter = profiles.length;
+        profiles = filterProfilesByPreferences(profiles);
+        const profilesAfterFilter = profiles.length;
+        
+        if (profilesBeforeFilter > profilesAfterFilter) {
+            console.log(`Filtered ${profilesBeforeFilter} profiles down to ${profilesAfterFilter} based on your preferences (degree, keywords, etc.)`);
+        }
+        
+        if (!profiles.length) {
+            $('#afc-displayNewAudienceStatus').html('No profiles matched your filters.');
+            $('.newAudienceAction').attr('disabled', false);
+            return;
+        }
+
+        const connections = transformProfilesToConnections(profiles, afcAudienceName);
+        if (!connections.length) {
+            $('#afc-displayNewAudienceStatus').html('No connections could be created from the returned data.');
+            $('.newAudienceAction').attr('disabled', false);
+            return;
+        }
+
+        newAudience(
+            connections,
+            afcDelay,
+            afcAudienceName,
+            audienceType,
+            [],
+            [],
+            [],
+            []
+        );
+    } catch (error) {
+        handleAudienceCreationError(error, 'post-likers');
+    } finally {
+        $('.newAudienceAction').attr('disabled', false);
+    }
 }
 
 const afcGetCommentProfiles = (afcPostId,afcTotal,afcStartP,afcDelay,afcAudienceName,audienceType) => {
@@ -1836,6 +2195,103 @@ const afcGroupMembers = async () => {
     getConnectionsLooper()
 }
 
+// PhantomBuster search export - skip Voyager API calls, work like post likers
+const afcSetPhantomConnectionData = (totalResultCount) => {
+    let profiles = [];
+    let profileUrn, publicIdentifier;
+
+    // Remove duplicates by trackingId - keep only first occurrence of each unique trackingId
+    const seenTrackingIds = new Set();
+    audConnectionItems = audConnectionItems.filter((obj) => {
+        const trackingId = obj.trackingId;
+        if (seenTrackingIds.has(trackingId)) {
+            return false; // Duplicate, skip it
+        }
+        seenTrackingIds.add(trackingId);
+        return true; // First occurrence, keep it
+    });
+
+    // Transform to profile format (like post likers)
+    for(let item of audConnectionItems) {
+        if (!item.entityUrn) continue;
+        
+        profileUrn = item.entityUrn;
+
+        if(profileUrn.includes('urn:li:fsd_entityResultViewModel:(urn:li:fsd_profile:') && 
+            profileUrn.includes(',SEARCH_SRP,DEFAULT)')) {
+
+            profileUrn = profileUrn.replace('urn:li:fsd_entityResultViewModel:(urn:li:fsd_profile:','')
+            profileUrn = profileUrn.replace(',SEARCH_SRP,DEFAULT)','')
+            publicIdentifier = item.navigationUrl ? item.navigationUrl.split('?')[0].replace('https://www.linkedin.com/in/','').replace('https://linkedin.com/in/','') : profileUrn;
+            
+            const nameParts = item.title?.text?.split(' ') || [];
+            const firstName = nameParts[0] || '';
+            const lastName = nameParts.slice(1).join(' ') || '';
+            const networkDistance = item.entityCustomTrackingInfo?.memberDistance ? 
+                parseInt(item.entityCustomTrackingInfo.memberDistance.split("_")[1]) : null;
+            
+            // Map connection degree
+            let connectionDegree = null;
+            if (networkDistance === 1) connectionDegree = '1st';
+            else if (networkDistance === 2) connectionDegree = '2nd';
+            else if (networkDistance >= 3) connectionDegree = '3rd';
+            
+            profiles.push({
+                firstName: firstName,
+                lastName: lastName,
+                fullName: item.title?.text || `${firstName} ${lastName}`.trim(),
+                headline: item.primarySubtitle?.text || '',
+                location: item.secondarySubtitle?.text || item.phantomData?.location || '',
+                publicIdentifier: publicIdentifier,
+                profileUrl: item.navigationUrl || `https://www.linkedin.com/in/${publicIdentifier}`,
+                connectionId: profileUrn,
+                memberUrn: item.trackingUrn || null,
+                connectionDegree: connectionDegree,
+                connectionDegreeValue: networkDistance,
+                trackingId: item.trackingId || profileUrn,
+                // Preserve PhantomBuster data for filtering
+                company: item.phantomData?.company || null,
+                companyId: item.phantomData?.companyId || null,
+                company2: item.phantomData?.company2 || null,
+                industry: item.phantomData?.industry || null,
+                school: item.phantomData?.school || null,
+                school2: item.phantomData?.school2 || null,
+                pastCompany: item.phantomData?.company2 || null
+            });
+        }
+    }
+
+    // Filter by preferences (like post likers) - this also applies the limit
+    profiles = filterProfilesByPreferences(profiles);
+
+    if (!profiles.length) {
+        $('#afc-displayNewAudienceStatus').html('No profiles matched your filters.');
+        $('.newAudienceAction').attr('disabled', false);
+        return;
+    }
+
+    // Transform to connections format (like post likers)
+    const connections = transformProfilesToConnections(profiles, getConnectParams.audienceName);
+    
+    if (!connections.length) {
+        $('#afc-displayNewAudienceStatus').html('No connections could be created from the returned data.');
+        $('.newAudienceAction').attr('disabled', false);
+        return;
+    }
+
+    // Call newAudience directly without Voyager API calls (like post likers)
+    newAudience(
+        connections,
+        getConnectParams.delayTime,
+        getConnectParams.audienceName,
+        getConnectParams.audienceType,
+        [], // memberBadgesData - empty, no Voyager call
+        [], // networkInfoData - empty, no Voyager call
+        [], // positionGroupsData - empty, no Voyager call
+        []  // companyData - empty, no Voyager call
+    );
+}
+
 const afcSetConnectionData = (totalResultCount) => {
     let conArr = [], connections = [];
     let profileUrn, publicIdentifier;
@@ -1882,7 +2338,8 @@ const afcSetConnectionData = (totalResultCount) => {
         }
     }
 
-    memberBadgesEndpoint(connections,getConnectParams.delayTime,getConnectParams.audienceName,getConnectParams.audienceType)
+    // Skip memberBadgesEndpoint (deprecated Voyager API) and save directly
+    newAudience(connections, getConnectParams.delayTime, getConnectParams.audienceName, getConnectParams.audienceType, [], [], [], [])
 }
 
 const afcSetGroupConnectionData = (totalResultCount) => {
@@ -1923,7 +2380,8 @@ const afcSetGroupConnectionData = (totalResultCount) => {
         }
     }
 
-    memberBadgesEndpoint(connections, getConnectParams.delayTime,getConnectParams.audienceName,getConnectParams.audienceType);
+    // Skip memberBadgesEndpoint (deprecated Voyager API) and save directly
+    newAudience(connections, getConnectParams.delayTime, getConnectParams.audienceName, getConnectParams.audienceType, [], [], [], [])
 }
 
 const memberBadgesEndpoint = async (con, afcDelay, afcAudienceName, audienceType) => {
@@ -2169,6 +2627,353 @@ const getConnectContactInfo = async (connectionId) => {
     })
 }
 
+function buildLinkedInPostUrl(type, id) {
+    if (!id) return null;
+    const cleanId = String(id).trim();
+    switch (type) {
+        case 'activity':
+            return `https://www.linkedin.com/feed/update/urn:li:activity:${cleanId}/`;
+        case 'article':
+            return `https://www.linkedin.com/feed/update/urn:li:article:${cleanId}/`;
+        case 'ugcPost':
+            return `https://www.linkedin.com/feed/update/urn:li:ugcPost:${cleanId}/`;
+        default:
+            return null;
+    }
+}
+
+function filterProfilesByPreferences(profiles) {
+    let filtered = [...profiles];
+
+    const degreeFilters = [];
+    if ($('#afs-connFirstCheck').prop('checked')) degreeFilters.push('DISTANCE_1');
+    if ($('#afs-connSecondCheck').prop('checked')) degreeFilters.push('DISTANCE_2');
+    if ($('#afs-connThirdCheck').prop('checked')) {
+        degreeFilters.push('DISTANCE_3');
+        degreeFilters.push('OUT_OF_NETWORK');
+    }
+
+    if (degreeFilters.length) {
+        filtered = filtered.filter(profile => {
+            // If connectionDegree is null/undefined (PhantomBuster data), 
+            // treat as OUT_OF_NETWORK and only include if 3rd degree is checked
+            if (!profile.connectionDegree) {
+                return degreeFilters.includes('OUT_OF_NETWORK') || degreeFilters.includes('DISTANCE_3');
+            }
+            const mapped = mapConnectionDegree(profile.connectionDegree);
+            return degreeFilters.includes(mapped);
+        });
+    }
+
+    const positiveKeywords = ($('#afs-positiveKeywords').val() || '')
+        .toLowerCase()
+        .split(',')
+        .map(keyword => keyword.trim())
+        .filter(Boolean);
+
+    // If using PhantomBuster and search URL already includes keywords that match positive keywords,
+    // skip filtering here (LinkedIn already filtered by keywords in the search URL)
+    const searchKeywords = (getConnectParams?.keywords || '').toLowerCase().trim();
+    const keywordsMatch = searchKeywords && positiveKeywords.length > 0 && 
+        positiveKeywords.some(kw => searchKeywords.includes(kw));
+
+    if (positiveKeywords.length && !keywordsMatch) {
+        // Only filter if positive keywords don't match search keywords
+        filtered = filtered.filter(profile => {
+            const haystack = `${profile.fullName || ''} ${profile.headline || ''}`.toLowerCase();
+            return positiveKeywords.some(keyword => haystack.includes(keyword));
+        });
+    }
+    // If keywordsMatch is true, skip filtering (LinkedIn already filtered)
+
+    const negativeKeywords = ($('#afs-negativeKeywords').val() || '')
+        .toLowerCase()
+        .split(',')
+        .map(keyword => keyword.trim())
+        .filter(Boolean);
+
+    if (negativeKeywords.length) {
+        filtered = filtered.filter(profile => {
+            const haystack = `${profile.fullName || ''} ${profile.headline || ''}`.toLowerCase();
+            return negativeKeywords.every(keyword => !haystack.includes(keyword));
+        });
+    }
+
+    // Client-side filtering for location, company, industry, school is DISABLED
+    // LinkedIn URL parameters handle filtering directly, so PhantomBuster returns pre-filtered results
+    // We only filter by connection degree and keywords here (which LinkedIn may not handle perfectly)
+    const filterValues = getConnectParams?.filterValues;
+    console.log('🔍 filterProfilesByPreferences: LinkedIn URL filters applied', {
+        profilesCount: filtered.length,
+        note: 'Location, company, industry, and school filters are handled by LinkedIn URL parameters - no client-side filtering needed'
+    });
+    
+    // DISABLED: Client-side filtering for location, company, industry, school
+    // LinkedIn URL parameters handle these filters, so PhantomBuster returns pre-filtered results
+    // Only connection degree and keyword filtering happens here
+    if (false && filterValues) { // Disabled - LinkedIn URL handles filtering
+        const beforeLocationFilter = filtered.length;
+        
+        // Filter by location
+        if (filterValues.locations && filterValues.locations.length > 0) {
+            const locationNames = filterValues.locations.map(loc => loc.name.toLowerCase().trim());
+            console.log('🔍 Applying location filter:', { 
+                filterLocations: locationNames,
+                filterLocationObjects: filterValues.locations,
+                profilesBeforeFilter: filtered.length 
+            });
+            
+            filtered = filtered.filter(profile => {
+                const profileLocation = (profile.location || '').toLowerCase().trim();
+                if (!profileLocation) return false; // Skip profiles with no location
+                
+                // Check if profile location matches any of the filter location names
+                // This handles cases like:
+                // - Filter: "Nigeria" matches "Lagos State, Nigeria" ✅
+                // - Filter: "Lagos" matches "Lagos State, Nigeria" ✅
+                // - Filter: "Lagos State" matches "Lagos State, Nigeria" ✅
+                // - Filter: "United States" matches "Philadelphia, Pennsylvania, United States" ✅
+                const matches = locationNames.some(locName => {
+                    // 1. Direct substring match: profile location contains filter location name
+                    // Example: "lagos state, nigeria" contains "nigeria" ✅
+                    if (profileLocation.includes(locName)) {
+                        return true;
+                    }
+                    
+                    // 2. Reverse match: filter location name contains profile location
+                    // This handles cases where filter is more specific than profile
+                    // Example: Filter "Lagos State, Nigeria" matches profile "Nigeria" ✅
+                    if (locName.includes(profileLocation) && profileLocation.length > 2) {
+                        return true;
+                    }
+                    
+                    // 3. Word-by-word match: check if any significant word in filter matches profile
+                    // Split by spaces, commas, and other delimiters
+                    const filterWords = locName.split(/[\s,]+/).filter(w => w.length > 2); // Ignore short words like "of", "in"
+                    const profileWords = profileLocation.split(/[\s,]+/).filter(w => w.length > 2);
+                    
+                    // Check if any filter word appears in profile words
+                    return filterWords.some(fw => profileWords.includes(fw));
+                });
+                
+                if (!matches) {
+                    console.log(`❌ Profile filtered out by location:`, {
+                        name: profile.fullName,
+                        profileLocation: profile.location,
+                        profileLocationLower: profileLocation,
+                        filterLocations: locationNames,
+                        filterWords: locationNames.map(loc => loc.split(/[\s,]+/).filter(w => w.length > 2)),
+                        profileWords: profileLocation.split(/[\s,]+/).filter(w => w.length > 2)
+                    });
+                } else {
+                    const matchedFilter = locationNames.find(locName => {
+                        if (profileLocation.includes(locName)) return true;
+                        if (locName.includes(profileLocation) && profileLocation.length > 2) return true;
+                        const filterWords = locName.split(/[\s,]+/).filter(w => w.length > 2);
+                        const profileWords = profileLocation.split(/[\s,]+/).filter(w => w.length > 2);
+                        return filterWords.some(fw => profileWords.includes(fw));
+                    });
+                    console.log(`✅ Profile matched location filter:`, {
+                        name: profile.fullName,
+                        profileLocation: profile.location,
+                        matchedFilter: matchedFilter
+                    });
+                }
+                
+                return matches;
+            });
+            
+            console.log('🔍 Location filter applied:', { 
+                before: beforeLocationFilter, 
+                after: filtered.length,
+                removed: beforeLocationFilter - filtered.length
+            });
+        } else {
+            console.log('🔍 No location filter applied (filterValues.locations is empty)');
+        }
+
+        // Filter by current company (flexible matching like location)
+        if (filterValues.currentCompanies && filterValues.currentCompanies.length > 0) {
+            const companyNames = filterValues.currentCompanies.map(comp => comp.name.toLowerCase().trim());
+            const beforeCompanyFilter = filtered.length;
+            
+            filtered = filtered.filter(profile => {
+                const profileCompany = (profile.company || '').toLowerCase().trim();
+                const profileCompany2 = (profile.company2 || '').toLowerCase().trim();
+                
+                return companyNames.some(compName => {
+                    // Direct match: profile company contains filter company name
+                    if (profileCompany.includes(compName) || profileCompany2.includes(compName)) {
+                        return true;
+                    }
+                    // Reverse match: filter company name contains profile company
+                    if ((compName.includes(profileCompany) && profileCompany.length > 2) ||
+                        (compName.includes(profileCompany2) && profileCompany2.length > 2)) {
+                        return true;
+                    }
+                    // Word-by-word match
+                    const filterWords = compName.split(/[\s,]+/).filter(w => w.length > 2);
+                    const companyWords = profileCompany.split(/[\s,]+/).filter(w => w.length > 2);
+                    const company2Words = profileCompany2.split(/[\s,]+/).filter(w => w.length > 2);
+                    return filterWords.some(fw => companyWords.includes(fw) || company2Words.includes(fw));
+                });
+            });
+            
+            console.log('🔍 Company filter applied:', { 
+                before: beforeCompanyFilter, 
+                after: filtered.length,
+                removed: beforeCompanyFilter - filtered.length
+            });
+        }
+
+        // Filter by past company (flexible matching)
+        if (filterValues.pastCompanies && filterValues.pastCompanies.length > 0) {
+            const pastCompanyNames = filterValues.pastCompanies.map(comp => comp.name.toLowerCase().trim());
+            const beforePastCompanyFilter = filtered.length;
+            
+            filtered = filtered.filter(profile => {
+                const profileCompany2 = (profile.pastCompany || profile.company2 || '').toLowerCase().trim();
+                const profileHeadline = (profile.headline || '').toLowerCase();
+                
+                return pastCompanyNames.some(compName => {
+                    // Check company2 and headline for past company mentions
+                    if (profileCompany2.includes(compName) || profileHeadline.includes(compName)) {
+                        return true;
+                    }
+                    // Reverse match
+                    if ((compName.includes(profileCompany2) && profileCompany2.length > 2)) {
+                        return true;
+                    }
+                    // Word-by-word match
+                    const filterWords = compName.split(/[\s,]+/).filter(w => w.length > 2);
+                    const company2Words = profileCompany2.split(/[\s,]+/).filter(w => w.length > 2);
+                    return filterWords.some(fw => company2Words.includes(fw));
+                });
+            });
+            
+            console.log('🔍 Past company filter applied:', { 
+                before: beforePastCompanyFilter, 
+                after: filtered.length,
+                removed: beforePastCompanyFilter - filtered.length
+            });
+        }
+
+        // Filter by industry (flexible matching)
+        if (filterValues.industries && filterValues.industries.length > 0) {
+            const industryNames = filterValues.industries.map(ind => ind.name.toLowerCase().trim());
+            const beforeIndustryFilter = filtered.length;
+            
+            filtered = filtered.filter(profile => {
+                const profileIndustry = (profile.industry || '').toLowerCase().trim();
+                
+                return industryNames.some(indName => {
+                    // Direct match
+                    if (profileIndustry.includes(indName)) {
+                        return true;
+                    }
+                    // Reverse match
+                    if (indName.includes(profileIndustry) && profileIndustry.length > 2) {
+                        return true;
+                    }
+                    // Word-by-word match
+                    const filterWords = indName.split(/[\s,]+/).filter(w => w.length > 2);
+                    const industryWords = profileIndustry.split(/[\s,]+/).filter(w => w.length > 2);
+                    return filterWords.some(fw => industryWords.includes(fw));
+                });
+            });
+            
+            console.log('🔍 Industry filter applied:', { 
+                before: beforeIndustryFilter, 
+                after: filtered.length,
+                removed: beforeIndustryFilter - filtered.length
+            });
+        }
+
+        // Filter by school (flexible matching)
+        if (filterValues.schools && filterValues.schools.length > 0) {
+            const schoolNames = filterValues.schools.map(sch => sch.name.toLowerCase().trim());
+            const beforeSchoolFilter = filtered.length;
+            
+            filtered = filtered.filter(profile => {
+                const profileSchool = (profile.school || '').toLowerCase().trim();
+                const profileSchool2 = (profile.school2 || '').toLowerCase().trim();
+                
+                return schoolNames.some(schName => {
+                    // Direct match
+                    if (profileSchool.includes(schName) || profileSchool2.includes(schName)) {
+                        return true;
+                    }
+                    // Reverse match
+                    if ((schName.includes(profileSchool) && profileSchool.length > 2) ||
+                        (schName.includes(profileSchool2) && profileSchool2.length > 2)) {
+                        return true;
+                    }
+                    // Word-by-word match
+                    const filterWords = schName.split(/[\s,]+/).filter(w => w.length > 2);
+                    const schoolWords = profileSchool.split(/[\s,]+/).filter(w => w.length > 2);
+                    const school2Words = profileSchool2.split(/[\s,]+/).filter(w => w.length > 2);
+                    return filterWords.some(fw => schoolWords.includes(fw) || school2Words.includes(fw));
+                });
+            });
+            
+            console.log('🔍 School filter applied:', { 
+                before: beforeSchoolFilter, 
+                after: filtered.length,
+                removed: beforeSchoolFilter - filtered.length
+            });
+        }
+    }
+
+    const total = parseInt($('#afs-total').val());
+    if (!isNaN(total) && filtered.length > total) {
+        filtered = filtered.slice(0, total);
+    }
+
+    return filtered;
+}
+
+function mapConnectionDegree(degreeLabel) {
+    if (!degreeLabel) {
+        return 'OUT_OF_NETWORK';
+    }
+
+    const normalized = degreeLabel.toString().toLowerCase();
+    if (normalized.includes('1')) return 'DISTANCE_1';
+    if (normalized.includes('2')) return 'DISTANCE_2';
+    if (normalized.includes('3')) return 'DISTANCE_3';
+    return 'OUT_OF_NETWORK';
+}
+
+function transformProfilesToConnections(profiles, afcAudienceName) {
+    const audienceId = Math.floor(Math.random()*90000) + 10000;
+    return profiles.map(profile => {
+        const distanceCheck = mapConnectionDegree(profile.connectionDegree);
+        const firstName = profile.firstName || '';
+        const lastName = profile.lastName || '';
+        const name = profile.fullName || `${firstName} ${lastName}`.trim();
+
+        return {
+            audienceId: audienceId,
+            firstName: firstName,
+            lastName: lastName,
+            name: name,
+            title: profile.headline || '',
+            locationName: profile.location || '',
+            publicIdentifier: profile.publicIdentifier || null,
+            connectionId: profile.connectionId || profile.publicIdentifier || profile.profileUrl,
+            totalResultCount: profiles.length,
+            memberUrn: profile.memberUrn || null,
+            networkDistance: profile.connectionDegreeValue || null,
+            trackingId: profile.trackingId || profile.connectionId || profile.publicIdentifier,
+            navigationUrl: profile.profileUrl || null,
+            targetId: profile.publicIdentifier || null,
+            distanceCheck: distanceCheck,
+            sourcePost: profile.postUrl || null,
+            audienceName: afcAudienceName
+        };
+    });
+}
+
 const newAudience = async (con, afcDelay, afcAudienceName, audienceType, memberBadgesData, networkInfoData, positionGroupsData, companyData) => {
     // post auidence name, id and user linkedin id with a call back of audience id
     
@@ -2182,6 +2987,9 @@ const newAudience = async (con, afcDelay, afcAudienceName, audienceType, memberB
     await $.ajax({
         method: 'post',
         url: `${filterApi}/audience`,
+        headers: {
+            'ngrok-skip-browser-warning': 'true' // Bypass ngrok warning page
+        },
         data: json_data,
         success: function(data){
             console.log('Audience creation response:', data);
@@ -2214,25 +3022,37 @@ const newAudience = async (con, afcDelay, afcAudienceName, audienceType, memberB
 
 const newAudienceList = async (audienceData, con, memberBadgesData, networkInfoData, positionGroupsData, companyData) => {
     $('.newAudience-notice').show()
-    var x=0, s=0;
+    var x=0, s=0, f=0; // x = saved, s = skipped, f = failed
     var index;
     
     // Extract audience_id from the response data
     let audienceId;
-    if (typeof audienceData === 'object' && audienceData.audience_id) {
-        audienceId = audienceData.audience_id;
-        console.log('Using audience_id from response:', audienceId);
-    } else if (typeof audienceData === 'object' && audienceData.audience_id) {
-        audienceId = audienceData.audience_id;
-        console.log('Using audience_id from fallback:', audienceId);
-    } else {
+    console.log('Extracting audience_id from audienceData:', audienceData);
+    
+    if (typeof audienceData === 'object') {
+        // Try different possible field names
+        audienceId = audienceData.audience_id 
+            || audienceData.audienceId 
+            || audienceData.id
+            || (audienceData.audience && (audienceData.audience.audience_id || audienceData.audience.audienceId || audienceData.audience.id));
+        
+        if (audienceId) {
+            console.log('Using audience_id from response:', audienceId);
+        } else {
+            console.error('Could not extract audience_id. Available keys:', Object.keys(audienceData));
+            console.error('Full audienceData:', JSON.stringify(audienceData, null, 2));
+        }
+    }
+    
+    if (!audienceId) {
         console.error('Could not extract audience_id from:', audienceData);
-        $('#afc-displayNewAudienceStatus').html('Error: Could not get audience ID')
+        $('#afc-displayNewAudienceStatus').html('Error: Could not get audience ID. Check console for details.')
         $('.newAudienceAction').attr('disabled', false)
         return;
     }
 
     console.log('Starting to save connections. Total connections to save:', con.length);
+    console.log('Connections array:', con.map(c => ({ name: c.firstName + ' ' + c.lastName, connectionId: c.connectionId })));
 
     // loop through to post each connections
     for(var i=0; i<con.length; i++){
@@ -2280,14 +3100,10 @@ const newAudienceList = async (audienceData, con, memberBadgesData, networkInfoD
                     audienceId: audienceId
                 });
         
-                await $.ajax({
-                    method: 'post',
-                    beforeSend: function(request) {
-                        request.setRequestHeader('Content-Type', 'application/json')
-                        request.setRequestHeader('lk-id', linkedinId)
-                    },
-                    url: `${filterApi}/audience/list`,
-                    data: JSON.stringify({
+                // Use a promise to properly handle async in the loop
+                await new Promise((resolve, reject) => {
+                    // Prepare the payload with networkDistance
+                    const payload = {
                         audienceId: audienceId,
                         firstName: con[i].firstName,
                         lastName: con[i].lastName,
@@ -2297,31 +3113,59 @@ const newAudienceList = async (audienceData, con, memberBadgesData, networkInfoD
                         publicIdentifier: con[i].publicIdentifier,
                         connectionId: con[i].connectionId,
                         trackingId: con[i].trackingId,
-                        memberUrn: con[i].memberUrn
-                    }),
-                    success: function(data){
-                        console.log(`Connection ${i+1} save response:`, data);
-                        if(data.message == 'success'){
-                            var name = con[i].firstName+' '+con[i].lastName;
-                            var jobtitle = con[i].title;
-                            index = i +1;
-                            skipped= s;
-                            newAudienceListUpdate(con[i].connectionId, audienceId, distance, companyUrl, name, jobtitle, index, premium, influencer, jobSeeker, skipped)
-                            x++;
-                        }else if(data.message == 'User already added to audience list'){
-                            $('#afc-displayNewAudienceStatus').empty()
-                            display = `
-                            Connection already added to list.
-                            `;
-                            $('#afc-displayNewAudienceStatus').append(display)
-                            s++;
+                        memberUrn: con[i].memberUrn,
+                        networkDistance: con[i].networkDistance || null // Send network distance to backend
+                    };
+                    
+                    // Log what we're sending (especially networkDistance)
+                    console.log(`📊 POST-SCRAPING AUDIENCE: Sending to backend for ${con[i].firstName} ${con[i].lastName}:`, {
+                        networkDistance: payload.networkDistance,
+                        networkDistance_source: con[i].networkDistance !== undefined ? 'from_con_array' : 'not_found',
+                        con_i_keys: Object.keys(con[i]),
+                        has_networkDistance_in_con: 'networkDistance' in con[i],
+                        connectionDegreeValue: con[i].connectionDegreeValue,
+                        full_payload: payload
+                    });
+                    
+                    $.ajax({
+                        method: 'post',
+                        beforeSend: function(request) {
+                            request.setRequestHeader('Content-Type', 'application/json')
+                            request.setRequestHeader('lk-id', linkedinId)
+                            request.setRequestHeader('ngrok-skip-browser-warning', 'true') // Bypass ngrok warning page
+                        },
+                        url: `${filterApi}/audience/list`,
+                        data: JSON.stringify(payload),
+                        success: function(data){
+                            console.log(`Connection ${i+1}/${con.length} save response:`, data);
+                            if(data.message == 'success'){
+                                x++; // Increment actual saved count first
+                                var name = con[i].firstName+' '+con[i].lastName;
+                                var jobtitle = con[i].title;
+                                skipped = s;
+                                // Use x (actual saved count) instead of index (loop counter)
+                                newAudienceListUpdate(con[i].connectionId, audienceId, distance, companyUrl, name, jobtitle, x, premium, influencer, jobSeeker, skipped)
+                                resolve(data);
+                            }else if(data.message == 'User already added to audience list'){
+                                s++; // Increment skipped count
+                                $('#afc-displayNewAudienceStatus').empty()
+                                display = `
+                                Connection already added to list.
+                                `;
+                                $('#afc-displayNewAudienceStatus').append(display)
+                                resolve(data);
+                            } else {
+                                resolve(data);
+                            }
+                        },
+                        error: function(error){
+                            f++; // Increment failed count
+                            console.error(`Error saving connection ${i+1}/${con.length}:`, error)
+                            // Don't disable the form or clear status on individual errors
+                            // Let the process continue for other connections
+                            resolve(error); // Resolve instead of reject to continue loop
                         }
-                    },
-                    error: function(error){
-                        console.error(`Error saving connection ${i+1}:`, error)
-                        $('.newAudienceAction').attr('disabled', false)
-                        $('#afc-displayNewAudienceStatus').html('Something went wrong please try again.');
-                    }
+                    })
                 })
             }
         }
@@ -2330,11 +3174,15 @@ const newAudienceList = async (audienceData, con, memberBadgesData, networkInfoD
     
     // Show completion message
     $('#afc-displayNewAudienceStatus').empty()
-    $('#afc-displayNewAudienceStatus').html(`
-        <li><strong>Audience creation completed successfully!</strong></li>
+    let completionMessage = `
+        <li><strong>Audience creation completed!</strong></li>
         <li>Total users added: <b>${x}</b></li>
         <li>Total skipped: <b>${s}</b></li>
-    `)
+    `;
+    if (f > 0) {
+        completionMessage += `<li>Total failed: <b>${f}</b></li>`;
+    }
+    $('#afc-displayNewAudienceStatus').html(completionMessage)
     
     // Auto-close form after 3 seconds
     setTimeout(function() {
@@ -2365,6 +3213,7 @@ const newAudienceListUpdate = async (connectionId,audienceId,distance,companyUrl
         beforeSend: function(request) {
             request.setRequestHeader('Content-Type', 'application/json')
             request.setRequestHeader('lk-id', linkedinId)
+            request.setRequestHeader('ngrok-skip-browser-warning', 'true') // Bypass ngrok warning page
         },
         url: `${filterApi}/audience/list`,
         data: JSON.stringify({

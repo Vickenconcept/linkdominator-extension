@@ -105,78 +105,103 @@ $('body').on('click', '.followConnect', function(){
     }
 })
 
-const getConnections = async (queryParams,totalFollow,start,delayFollowTime) => {
+const getConnections = async (searchUrl, keywords, connectionDegrees, totalFollow, start, delayFollowTime) => {
     $('.follow').show()
     $('#displayFollowStatus').empty()
     $('#displayFollowStatus').html('Scanning. Please wait...')
-    console.log('FLC getConnections start', { start, totalFollow, delayFollowTime })
+    console.log('FLC getConnections start with PhantomBuster', { searchUrl, keywords, connectionDegrees, start, totalFollow, delayFollowTime })
     let followItems = [], totalResultCount = 0;
 
-    let getConnectionsLooper = () => {
-        setTimeout(async () => {
-            await $.ajax({
-                method: 'get',
-                timeout: 30000,
-                beforeSend: function(request) {
-                    request.setRequestHeader('csrf-token', jsession);
-                    request.setRequestHeader('accept', 'application/vnd.linkedin.normalized+json+2.1');
-                    request.setRequestHeader('content-type', contentType);
-                    request.setRequestHeader('x-li-lang', xLiLang);
-                    request.setRequestHeader('x-li-page-instance', 'urn:li:page:d_flagship3_search_srp_people;+veAhjOISYuf47u7igxvzw==');
-                    request.setRequestHeader('x-li-track', JSON.stringify({"clientVersion":"1.8.4154","osName":"web","timezoneOffset":1,"deviceFormFactor":"DESKTOP","mpName":"voyager-web"}));
-                    request.setRequestHeader('x-restli-protocol-version', xRestliProtocolVersion);
-                },
-                url: `${voyagerBlockSearchUrl}&query=${queryParams}&start=${start}`,
-                success: function(data){
-                    let res = {'data': data}
-                    let elements = res['data'].data.elements
+    let getConnectionsLooper = async () => {
+        try {
+            // Use PhantomBuster instead of Voyager API
+            const response = await window.fetchPhantomSearchResults({
+                searchUrl: searchUrl || null,
+                keywords: keywords,
+                connectionDegrees: connectionDegrees,
+                limit: totalFollow,
+                startPosition: start
+            });
 
-                    if(elements.length) {
-                        console.log('FLC fetch success', { elementsLen: elements.length })
-                        if(totalResultCount == 0)
-                            totalResultCount = res['data'].data.metadata.totalResultCount
+            // Response format: { data: { elements: [...], included: [...] }, included: [...] }
+            let elements = response.data?.elements || response.elements || [];
+            let included = response.included || [];
 
-                        if(elements[1].items.length) {
-                            for(let item of elements[1].items) {
-                                followItems.push(item)
-                            }
+            console.log('FLC fetch success', { elementsLen: elements.length, includedLen: included.length });
 
-                            if(followItems.length < totalFollow) {
-                                start = parseInt(start) + 11
-                                $('#startPosition').val(start)
-                                console.log('FLC paging next chunk', { newStart: start, collected: followItems.length, target: totalFollow })
-                                getConnectionsLooper()
-                            }else {
-                                console.log('FLC collected enough items', { collected: followItems.length, totalResultCount })
-                                cleanConnectionsData(followItems, totalResultCount, delayFollowTime)
-                            }
-                        }else {
-                            $('#displayFollowStatus').empty()
-                            $('#displayFollowStatus').html('No result found, change your search criteria and try again!')
-                            console.warn('FLC no items in elements[1].items')
-                            $('.followConnect').attr('disabled', false)
-                        }                        
-                    }else if(followItems.length) {
-                        $('#displayFollowStatus').empty()
-                        $('#displayFollowStatus').html(`Found ${followItems.length}. Following...`)
-                        console.log('FLC switching to follow phase', { collected: followItems.length })
-                        cleanConnectionsData(followItems, totalResultCount, delayFollowTime)
-                    }else {
-                        $('#displayFollowStatus').empty()
-                        $('#displayFollowStatus').html('No result found, change your search criteria and try again!')
-                        console.warn('FLC no elements and no collected items')
-                        $('.followConnect').attr('disabled', false)
-                    }
-                },
-                error: function(error){
-                    console.error('FLC fetch error', error)
-                    $('#displayFollowStatus').html('Something went wrong while trying to get connections!')
-                    $('.followConnect').attr('disabled', false)
+            if(elements && elements.length) {
+                if(totalResultCount == 0) {
+                    totalResultCount = response.data?.metadata?.totalResultCount || included.length;
                 }
-            })
-        }, 10000)
+
+                // Find the element that contains the search results
+                let searchResultElement = null;
+                for(let i = 0; i < elements.length; i++) {
+                    if(elements[i] && elements[i].items && elements[i].items.length > 0) {
+                        searchResultElement = elements[i];
+                        break;
+                    }
+                }
+
+                if(searchResultElement && searchResultElement.items && searchResultElement.items.length > 0) {
+                    // Add items from elements
+                    for(let item of searchResultElement.items) {
+                        followItems.push(item);
+                    }
+
+                    // Also add items from included array
+                    for(let item of included) {
+                        if(item.title && item.title.text && !item.title.text.includes('LinkedIn Member')) {
+                            // Check if already added (avoid duplicates)
+                            const alreadyAdded = followItems.some(f => 
+                                f.trackingId === item.trackingId || 
+                                f.navigationUrl === item.navigationUrl
+                            );
+                            if(!alreadyAdded) {
+                                followItems.push(item);
+                            }
+                        }
+                    }
+
+                    if(followItems.length < totalFollow) {
+                        start = parseInt(start) + followItems.length;
+                        $('#startPosition').val(start);
+                        console.log('FLC paging next chunk', { newStart: start, collected: followItems.length, target: totalFollow });
+                        setTimeout(() => {
+                            getConnectionsLooper();
+                        }, 10000);
+                    } else {
+                        console.log('FLC collected enough items', { collected: followItems.length, totalResultCount });
+                        cleanConnectionsData(followItems, totalResultCount, delayFollowTime);
+                    }
+                } else {
+                    if(followItems.length) {
+                        $('#displayFollowStatus').html(`Found ${followItems.length}. Following...`);
+                        console.log('FLC switching to follow phase', { collected: followItems.length });
+                        cleanConnectionsData(followItems, totalResultCount, delayFollowTime);
+                    } else {
+                        $('#displayFollowStatus').html('No result found, change your search criteria and try again!');
+                        console.warn('FLC no items in search results');
+                        $('.followConnect').attr('disabled', false);
+                    }
+                }
+            } else if(followItems.length) {
+                $('#displayFollowStatus').html(`Found ${followItems.length}. Following...`);
+                console.log('FLC switching to follow phase', { collected: followItems.length });
+                cleanConnectionsData(followItems, totalResultCount, delayFollowTime);
+            } else {
+                $('#displayFollowStatus').html('No result found, change your search criteria and try again!');
+                console.warn('FLC no elements and no collected items');
+                $('.followConnect').attr('disabled', false);
+            }
+        } catch(error) {
+            console.error('FLC fetch error', error);
+            $('#displayFollowStatus').html(`Error: ${error.message || 'Something went wrong while trying to get connections!'}`);
+            $('.followConnect').attr('disabled', false);
+        }
     }
-    getConnectionsLooper()
+    
+    getConnectionsLooper();
 }
 
 const cleanConnectionsData = (followItems, totalResultCount, delayFollowTime) => {
@@ -188,25 +213,49 @@ const cleanConnectionsData = (followItems, totalResultCount, delayFollowTime) =>
 
     // get all connection ids to an array
     for(let item of followItems) {
-        // var imgUrn = item.targetUrn;
-        // var netDistance = item.memberDistance.value.split("_")
-        // var targetIdd;
-        // if(item.trackingUrn.includes('urn:li:member:')){
-        //     targetIdd = item.trackingUrn.replace('urn:li:member:','') 
-        // }
+        let publicIdentifier = null;
         
-        profileUrn = item.itemUnion['*entityResult']
+        // Handle PhantomBuster/LinkedIn API format (new format)
+        if (item.entityUrn) {
+            // Extract from entityUrn: "urn:li:fsd_entityResultViewModel:(urn:li:fsd_profile:username,SEARCH_SRP,DEFAULT)"
+            const match = item.entityUrn.match(/urn:li:fsd_profile:([^,]+)/);
+            if (match && match[1]) {
+                publicIdentifier = match[1];
+            }
+        } 
+        
+        if (!publicIdentifier && item.navigationUrl) {
+            // Extract from navigationUrl: "https://www.linkedin.com/in/username"
+            const match = item.navigationUrl.match(/\/in\/([^\/\?]+)/);
+            if (match && match[1]) {
+                publicIdentifier = match[1];
+            }
+        } 
+        
+        if (!publicIdentifier && item.trackingUrn) {
+            // Extract from trackingUrn: "urn:li:member:username"
+            const match = item.trackingUrn.match(/urn:li:member:(.+)/);
+            if (match && match[1]) {
+                publicIdentifier = match[1];
+            }
+        }
+        
+        // Handle old Voyager API format (legacy format)
+        if (!publicIdentifier && item.itemUnion && item.itemUnion['*entityResult']) {
+            profileUrn = item.itemUnion['*entityResult'];
+            if (profileUrn && profileUrn.includes('urn:li:fsd_entityResultViewModel:(urn:li:fsd_profile:') && 
+                profileUrn.includes(',SEARCH_SRP,DEFAULT)')) {
+                profileUrn = profileUrn.replace('urn:li:fsd_entityResultViewModel:(urn:li:fsd_profile:', '');
+                profileUrn = profileUrn.replace(',SEARCH_SRP,DEFAULT)', '');
+                publicIdentifier = profileUrn;
+            }
+        }
 
-        if(profileUrn.includes('urn:li:fsd_entityResultViewModel:(urn:li:fsd_profile:') && 
-            profileUrn.includes(',SEARCH_SRP,DEFAULT)')) {
-
-            profileUrn = profileUrn.replace('urn:li:fsd_entityResultViewModel:(urn:li:fsd_profile:','')
-            profileUrn = profileUrn.replace(',SEARCH_SRP,DEFAULT)','')
-
+        if (publicIdentifier) {
             con.push({
-                // name: item.title.text,
-                // title: item.headline.text,
-                conId: profileUrn,
+                name: item.title?.text || '',
+                title: item.primarySubtitle?.text || '',
+                conId: publicIdentifier,
                 totalResultCount: totalResultCount,
                 // publicIdentifier: item.publicIdentifier, 
                 // memberUrn: item.trackingUrn, 

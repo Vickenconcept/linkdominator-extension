@@ -115,16 +115,47 @@ $('.viewConnetionsAction').click(function(){
             console.log('📊 View Connections: Using selected audience:', $('#vcp-audience-select').val());
             vcpGetAudienceList($('#vcp-audience-select').val(), vcpDelay.val())
         } else if (searchTermEntered || queryParams != '') {
-            console.log('🔍 View Connections: Using search parameters');
-            console.log('🔧 View Connections: Built query parameters:', queryParams);
+            console.log('🔍 View Connections: Using PhantomBuster search');
             
-            if($('#vcp-search-term').val())
-                query = `(keywords:${encodeURIComponent($('#vcp-search-term').val())},flagshipSearchIntent:SEARCH_SRP,queryParameters:(${queryParams}resultType:List(PEOPLE)),includeFiltersInResponse:false)`
-            else
-                query = `(flagshipSearchIntent:SEARCH_SRP,queryParameters:(${queryParams}resultType:List(PEOPLE)),includeFiltersInResponse:false)`;
+            // Get keywords
+            const keywords = $('#vcp-search-term').val() ? $('#vcp-search-term').val().trim() : '';
+            
+            if (!keywords) {
+                $('#vcp-error-notice').html('Please enter search keywords');
+                $('.viewConnetionsAction').attr('disabled', false);
+                return;
+            }
 
-            console.log('🔍 View Connections: Final LinkedIn search query:', query);
-            vcpGetConnections(query,vcpStartP,vcpTotal,vcpDelay.val())
+            // Map connection degrees - default to all if not specified
+            const degreeMap = {
+                'F': '1',
+                'S': '2',
+                'O': '3+'
+            };
+            let connectionDegrees = [];
+            
+            // Check for connection degree checkboxes (if they exist in UI)
+            if ($('#vcp-connFirstCheck').length && $('#vcp-connFirstCheck').prop('checked')) {
+                connectionDegrees.push('1');
+            }
+            if ($('#vcp-connSecondCheck').length && $('#vcp-connSecondCheck').prop('checked')) {
+                connectionDegrees.push('2');
+            }
+            if ($('#vcp-connThirdCheck').length && $('#vcp-connThirdCheck').prop('checked')) {
+                connectionDegrees.push('3+');
+            }
+            
+            // If no connection degrees selected, default to all (2nd and 3rd+)
+            if (connectionDegrees.length === 0) {
+                connectionDegrees = ['2', '3+'];
+            }
+
+            // Build LinkedIn search URL using reusable function
+            const searchUrl = window.buildLinkedInSearchUrl ? 
+                window.buildLinkedInSearchUrl(keywords, 'vcp-', ['S', 'O']) : '';
+
+            console.log('🔍 View Connections: Using PhantomBuster search:', { searchUrl, keywords, connectionDegrees });
+            vcpGetConnections(searchUrl, keywords, connectionDegrees, vcpStartP, vcpTotal, vcpDelay.val())
         } else {
             console.log('❌ View Connections: No method properly selected');
             $('#vcp-error-notice').html('Please select a method: either choose an audience or use search parameters');
@@ -134,9 +165,11 @@ $('.viewConnetionsAction').click(function(){
     }
 })
 
-const vcpGetConnections = async (queryParams,vcpStartP,vcpTotal,vcpDelay) => {
-    console.log('🔍 View Connections: Starting LinkedIn search...', {
-        queryParams: queryParams,
+const vcpGetConnections = async (searchUrl, keywords, connectionDegrees, vcpStartP, vcpTotal, vcpDelay) => {
+    console.log('🔍 View Connections: Starting PhantomBuster search...', {
+        searchUrl: searchUrl,
+        keywords: keywords,
+        connectionDegrees: connectionDegrees,
         startPosition: vcpStartP,
         totalToFind: vcpTotal,
         delay: vcpDelay
@@ -147,100 +180,100 @@ const vcpGetConnections = async (queryParams,vcpStartP,vcpTotal,vcpDelay) => {
     $('#displayViewConnectionStatus').html('Scanning. Please wait...')
     let viewItems = [], totalResultCount = 0;
 
-    let getConnectionsLooper = () => {
-        setTimeout(async () => {
-            await $.ajax({
-                method: 'get',
-                beforeSend: function(request) {
-                    request.setRequestHeader('csrf-token', jsession);
-                    request.setRequestHeader('accept', 'application/vnd.linkedin.normalized+json+2.1');
-                    request.setRequestHeader('content-type', contentType);
-                    request.setRequestHeader('x-li-lang', xLiLang);
-                    request.setRequestHeader('x-li-page-instance', 'urn:li:page:d_flagship3_search_srp_people;QazGJ/pNTwuq6OTtMClfPw==');
-                    request.setRequestHeader('x-li-track', JSON.stringify({"clientVersion":"1.10.1335","osName":"web","timezoneOffset":1,"deviceFormFactor":"DESKTOP","mpName":"voyager-web"}));
-                    request.setRequestHeader('x-restli-protocol-version', xRestliProtocolVersion);
-                },
-                url: `${voyagerBlockSearchUrl}&query=${queryParams}&start=${vcpStartP}`,
-                success: function(data){
-                    console.log('🔍 View Connections: LinkedIn search API response:', data);
-                    let res = {'data': data}
-                    let elements = res['data'].data.elements
-                    let included = res['data'].included
+    let getConnectionsLooper = async () => {
+        try {
+            // Use PhantomBuster instead of Voyager API
+            const response = await window.fetchPhantomSearchResults({
+                searchUrl: searchUrl || null,
+                keywords: keywords,
+                connectionDegrees: connectionDegrees,
+                limit: vcpTotal,
+                startPosition: vcpStartP
+            });
 
-                    console.log('📊 View Connections: Response structure:', {
-                        elementsLength: elements.length,
-                        includedLength: included.length,
-                        elements: elements,
-                        included: included
-                    });
+            // Response format: { data: { elements: [...], included: [...] }, included: [...] }
+            let elements = response.data?.elements || response.elements || [];
+            let included = response.included || [];
 
-                    if(elements && elements.length) {
-                        if(totalResultCount == 0)
-                            totalResultCount = res['data'].data.metadata.totalResultCount
+            console.log('📊 View Connections: Response structure:', {
+                elementsLength: elements.length,
+                includedLength: included.length
+            });
 
-                        console.log(`📈 View Connections: Total results available: ${totalResultCount}`);
-
-                        // Find the element that contains the search results (same fix as Get Connection Info)
-                        let searchResultElement = null;
-                        for(let i = 0; i < elements.length; i++) {
-                            if(elements[i] && elements[i].items && elements[i].items.length > 0) {
-                                console.log(`✅ View Connections: Found search results in elements[${i}]`);
-                                searchResultElement = elements[i];
-                                break;
-                            }
-                        }
-
-                        if(searchResultElement && searchResultElement.items.length) {
-                            console.log(`👥 View Connections: Found ${searchResultElement.items.length} connections in search results`);
-                            
-                            for(let item of included) {
-                                if(item.hasOwnProperty('title') && item.hasOwnProperty('primarySubtitle')) {
-                                    if(item.title.text && item.primarySubtitle.text && item.title.text.includes('LinkedIn Member') == false) {
-                                        viewItems.push(item)
-                                        console.log(`✅ View Connections: Added profile: ${item.title.text} - ${item.primarySubtitle.text}`);
-                                    } else {
-                                        console.log(`⚠️ View Connections: Skipped LinkedIn Member or invalid profile`);
-                                    }
-                                } else {
-                                    console.log(`⚠️ View Connections: Item missing title or subtitle:`, item);
-                                }
-                            }
-
-                            console.log(`📊 View Connections: Total profiles collected: ${viewItems.length}/${vcpTotal}`);
-
-                            if(viewItems.length < vcpTotal) {
-                                vcpStartP = parseInt(vcpStartP) + 11
-                                $('#vcp-startPosition').val(vcpStartP)
-                                console.log(`🔄 View Connections: Getting more results, new start position: ${vcpStartP}`);
-                                getConnectionsLooper()
-                            }else {
-                                console.log('✅ View Connections: Collected enough profiles, starting data extraction...');
-                                vcpCleanConnectionsData(viewItems, totalResultCount, vcpDelay)
-                            }
-                        }else {
-                            console.log('⚠️ View Connections: No search result items found in any elements');
-                            $('#displayViewConnectionStatus').html('No result found, change your search criteria and try again!')
-                            $('.viewConnetionsAction').attr('disabled', false)
-                        }
-                    }else if(viewItems.length) {
-                        console.log(`✅ View Connections: No more results from API, but have ${viewItems.length} profiles to process`);
-                        $('#displayViewConnectionStatus').html(`Found ${viewItems.length}. Viewing...`)
-                        vcpCleanConnectionsData(viewItems, totalResultCount, vcpDelay)
-                    }else {
-                        console.log('❌ View Connections: No results found at all');
-                        $('#displayViewConnectionStatus').html('No result found, change your search criteria and try again!')
-                        $('.viewConnetionsAction').attr('disabled', false)
-                    }
-                },
-                error: function(error){
-                    console.error('❌ View Connections: LinkedIn search API error:', error);
-                    $('#displayViewConnectionStatus').html('Something went wrong while trying to get connections!')
-                    $('.viewConnetionsAction').attr('disabled', false)
+            if(elements && elements.length) {
+                if(totalResultCount == 0) {
+                    totalResultCount = response.data?.metadata?.totalResultCount || included.length;
                 }
-            })
-        },10000)
+
+                console.log(`📈 View Connections: Total results available: ${totalResultCount}`);
+
+                // Find the element that contains the search results
+                let searchResultElement = null;
+                for(let i = 0; i < elements.length; i++) {
+                    if(elements[i] && elements[i].items && elements[i].items.length > 0) {
+                        console.log(`✅ View Connections: Found search results in elements[${i}]`);
+                        searchResultElement = elements[i];
+                        break;
+                    }
+                }
+
+                if(searchResultElement && searchResultElement.items.length) {
+                    console.log(`👥 View Connections: Found ${searchResultElement.items.length} connections in search results`);
+                    
+                    for(let item of included) {
+                        if(item.hasOwnProperty('title') && item.hasOwnProperty('primarySubtitle')) {
+                            if(item.title.text && item.primarySubtitle.text && item.title.text.includes('LinkedIn Member') == false) {
+                                viewItems.push(item)
+                                console.log(`✅ View Connections: Added profile: ${item.title.text} - ${item.primarySubtitle.text}`);
+                            } else {
+                                console.log(`⚠️ View Connections: Skipped LinkedIn Member or invalid profile`);
+                            }
+                        } else {
+                            console.log(`⚠️ View Connections: Item missing title or subtitle:`, item);
+                        }
+                    }
+
+                    console.log(`📊 View Connections: Total profiles collected: ${viewItems.length}/${vcpTotal}`);
+
+                    if(viewItems.length < vcpTotal) {
+                        vcpStartP = parseInt(vcpStartP) + viewItems.length;
+                        $('#vcp-startPosition').val(vcpStartP);
+                        console.log(`🔄 View Connections: Getting more results, new start position: ${vcpStartP}`);
+                        setTimeout(() => {
+                            getConnectionsLooper();
+                        }, 10000);
+                    } else {
+                        console.log('✅ View Connections: Collected enough profiles, starting data extraction...');
+                        vcpCleanConnectionsData(viewItems, totalResultCount, vcpDelay);
+                    }
+                } else {
+                    console.log('⚠️ View Connections: No search result items found in any elements');
+                    if(viewItems.length) {
+                        console.log(`✅ View Connections: No more results from API, but have ${viewItems.length} profiles to process`);
+                        $('#displayViewConnectionStatus').html(`Found ${viewItems.length}. Viewing...`);
+                        vcpCleanConnectionsData(viewItems, totalResultCount, vcpDelay);
+                    } else {
+                        $('#displayViewConnectionStatus').html('No result found, change your search criteria and try again!');
+                        $('.viewConnetionsAction').attr('disabled', false);
+                    }
+                }
+            } else if(viewItems.length) {
+                console.log(`✅ View Connections: No more results from API, but have ${viewItems.length} profiles to process`);
+                $('#displayViewConnectionStatus').html(`Found ${viewItems.length}. Viewing...`);
+                vcpCleanConnectionsData(viewItems, totalResultCount, vcpDelay);
+            } else {
+                console.log('❌ View Connections: No results found at all');
+                $('#displayViewConnectionStatus').html('No result found, change your search criteria and try again!');
+                $('.viewConnetionsAction').attr('disabled', false);
+            }
+        } catch(error) {
+            console.error('❌ View Connections: Error fetching connections:', error);
+            $('#displayViewConnectionStatus').html(`Error: ${error.message || 'Something went wrong while trying to get connections!'}`);
+            $('.viewConnetionsAction').attr('disabled', false);
+        }
     }
-    getConnectionsLooper()
+    
+    getConnectionsLooper();
 }
 
 const vcpCleanConnectionsData = (viewItems, totalResultCount, vcpDelay) => {

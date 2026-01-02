@@ -114,16 +114,33 @@ $('.connectionInfoAction').click(function(){
             console.log('📊 Get Connections Info: Using selected audience:', $('#gci-audience-select').val());
             gciAudienceList($('#gci-totalScrape').val(), gciDelay.val(), $('#gci-audience-select').val())
         } else if (searchTermEntered || queryParams != '') {
-            console.log('🔍 Get Connections Info: Using search parameters');
-            console.log('🔧 Get Connections Info: Built query parameters:', queryParams);
+            console.log('🔍 Get Connections Info: Using PhantomBuster search');
             
-            if($('#gci-search-term').val())
-                query = `(keywords:${encodeURIComponent($('#gci-search-term').val())},flagshipSearchIntent:SEARCH_SRP,queryParameters:(${queryParams}resultType:List(PEOPLE)),includeFiltersInResponse:false)`
-            else
-                query = `(flagshipSearchIntent:SEARCH_SRP,queryParameters:(${queryParams}resultType:List(PEOPLE)),includeFiltersInResponse:false)`;
+            // Get keywords
+            const keywords = $('#gci-search-term').val() ? $('#gci-search-term').val().trim() : '';
             
-            console.log('🔍 Get Connections Info: Final LinkedIn search query:', query);
-            gciGetConnections(query,gciStartP,gciTotal,gciDelay.val())
+            if (!keywords) {
+                $('#gci-error-notice').html('Please enter search keywords');
+                $('.connectionInfoAction').attr('disabled', false);
+                return;
+            }
+
+            // Map connection degrees from UI checkboxes (F, S, O) to PhantomBuster format ('1', '2', '3+')
+            const degreeMap = {
+                'F': '1',
+                'S': '2',
+                'O': '3+'
+            };
+            const mappedDegrees = degreeArr.length
+                ? degreeArr.map(d => degreeMap[d] || d)
+                : ['2', '3+']; // Default to 2nd and 3rd+ if none selected
+
+            // Build LinkedIn search URL using reusable function
+            const searchUrl = window.buildLinkedInSearchUrl ? 
+                window.buildLinkedInSearchUrl(keywords, 'gci-', degreeArr.length ? degreeArr : ['S', 'O']) : '';
+
+            console.log('🔍 Get Connections Info: Using PhantomBuster search:', { searchUrl, keywords, connectionDegrees: mappedDegrees });
+            gciGetConnections(searchUrl, keywords, mappedDegrees, gciStartP, gciTotal, gciDelay.val())
         } else {
             console.log('❌ Get Connections Info: No method properly selected');
             $('#gci-error-notice').html('Please select a method: either choose an audience or use search parameters');
@@ -133,99 +150,112 @@ $('.connectionInfoAction').click(function(){
     }
 })
 
-const gciGetConnections = async (queryParams,gciStartP,gciTotal,gciDelay) => {
+const gciGetConnections = async (searchUrl, keywords, connectionDegrees, gciStartP, gciTotal, gciDelay) => {
     $('.getConnectInfo').show()
     $('#displayGetConnectInfoStatus').empty()
     $('#displayGetConnectInfoStatus').html('Scanning. Please wait...')
     let connectionItems = [], totalResultCount = 0;
 
-    let getConnectionsLooper = () => {
-        setTimeout(async () => {
-            await $.ajax({
-                method: 'get',
-                beforeSend: function(request) {
-                    request.setRequestHeader('csrf-token', jsession);
-                    request.setRequestHeader('accept', 'application/vnd.linkedin.normalized+json+2.1');
-                    request.setRequestHeader('content-type', contentType);
-                    request.setRequestHeader('x-li-lang', xLiLang);
-                    request.setRequestHeader('x-li-page-instance', 'urn:li:page:d_flagship3_search_srp_people;QazGJ/pNTwuq6OTtMClfPw==');
-                    request.setRequestHeader('x-li-track', JSON.stringify({"clientVersion":"1.10.1335","osName":"web","timezoneOffset":1,"deviceFormFactor":"DESKTOP","mpName":"voyager-web"}));
-                    request.setRequestHeader('x-restli-protocol-version', xRestliProtocolVersion);
-                },
-                url: `${voyagerBlockSearchUrl}&query=${queryParams}&start=${gciStartP}`,
-                success: function(data) {
-                    console.log('🔍 Get Connections Info: LinkedIn search API response:', data);
-                    let res = {'data': data}
-                    let elements = res['data'].data.elements
+    let getConnectionsLooper = async () => {
+        try {
+            // Use PhantomBuster instead of Voyager API
+            const response = await window.fetchPhantomSearchResults({
+                searchUrl: searchUrl || null,
+                keywords: keywords,
+                connectionDegrees: connectionDegrees,
+                limit: gciTotal,
+                startPosition: gciStartP
+            });
 
-                    console.log('📊 Get Connections Info: Elements structure:', {
-                        elementsLength: elements.length,
-                        elementsContent: elements
-                    });
+            // Response format: { data: { elements: [...], included: [...] }, included: [...] }
+            let elements = response.data?.elements || response.elements || [];
+            let included = response.included || [];
 
-                    if(elements && elements.length) {
-                        if(totalResultCount == 0)
-                            totalResultCount = res['data'].data.metadata.totalResultCount
+            console.log('📊 Get Connections Info: Response structure:', {
+                elementsLength: elements.length,
+                includedLength: included.length
+            });
 
-                        console.log(`📈 Get Connections Info: Total results available: ${totalResultCount}`);
-
-                        // Find the element that contains the search results
-                        let searchResultElement = null;
-                        for(let i = 0; i < elements.length; i++) {
-                            if(elements[i] && elements[i].items && elements[i].items.length > 0) {
-                                console.log(`✅ Get Connections Info: Found search results in elements[${i}]`);
-                                searchResultElement = elements[i];
-                                break;
-                            }
-                        }
-
-                        if(searchResultElement && searchResultElement.items.length) {
-                            console.log(`👥 Get Connections Info: Found ${searchResultElement.items.length} connections in this batch`);
-                            
-                            for(let item of searchResultElement.items) {
-                                connectionItems.push(item)
-                            }
-
-                            console.log(`📊 Get Connections Info: Total connections collected: ${connectionItems.length}/${gciTotal}`);
-
-                            if(connectionItems.length < gciTotal) {
-                                gciStartP = parseInt(gciStartP) + 11
-                                $('#gci-startPosition').val(gciStartP)
-                                console.log(`🔄 Get Connections Info: Getting more results, new start position: ${gciStartP}`);
-                                getConnectionsLooper()
-                            }else {
-                                console.log('✅ Get Connections Info: Collected enough connections, starting data extraction...');
-                                gciCleanConnectionsData(connectionItems, totalResultCount, gciDelay)
-                            }
-
-                        }else {
-                            console.log('⚠️ Get Connections Info: No connection items found in any elements');
-                            $('#displayGetConnectInfoStatus').empty()
-                            $('#displayGetConnectInfoStatus').html('No result found, change your search criteria and try again!')
-                            $('.connectionInfoAction').attr('disabled', false)
-                        }
-                    }else if(connectionItems.length) {
-                        console.log(`✅ Get Connections Info: No more results from API, but have ${connectionItems.length} connections to process`);
-                        $('#displayGetConnectInfoStatus').empty()
-                        $('#displayGetConnectInfoStatus').html(`Found ${connectionItems.length}. Getting Info...`)
-                        gciCleanConnectionsData(connectionItems, totalResultCount, gciDelay)
-                    }else {
-                        console.log('❌ Get Connections Info: No results found at all');
-                        $('#displayGetConnectInfoStatus').empty()
-                        $('#displayGetConnectInfoStatus').html('No result found, change your search criteria and try again!')
-                        $('.connectionInfoAction').attr('disabled', false)
-                    }
-                },
-                error: function(error) {
-                    console.error('❌ Get Connections Info: LinkedIn search API error:', error);
-                    $('#displayGetConnectInfoStatus').empty()
-                    $('#displayGetConnectInfoStatus').html('Error searching LinkedIn. Please try again or check console for details.')
-                    $('.connectionInfoAction').attr('disabled', false)
+            if(elements && elements.length) {
+                if(totalResultCount == 0) {
+                    totalResultCount = response.data?.metadata?.totalResultCount || included.length;
                 }
-            })
-        },10000)
+
+                console.log(`📈 Get Connections Info: Total results available: ${totalResultCount}`);
+
+                // Find the element that contains the search results
+                let searchResultElement = null;
+                for(let i = 0; i < elements.length; i++) {
+                    if(elements[i] && elements[i].items && elements[i].items.length > 0) {
+                        console.log(`✅ Get Connections Info: Found search results in elements[${i}]`);
+                        searchResultElement = elements[i];
+                        break;
+                    }
+                }
+
+                if(searchResultElement && searchResultElement.items && searchResultElement.items.length > 0) {
+                    console.log(`👥 Get Connections Info: Found ${searchResultElement.items.length} connections in this batch`);
+                    
+                    // Add items from elements
+                    for(let item of searchResultElement.items) {
+                        connectionItems.push(item);
+                    }
+
+                    // Also add items from included array
+                    for(let item of included) {
+                        if(item.title && item.title.text && !item.title.text.includes('LinkedIn Member')) {
+                            // Check if already added (avoid duplicates)
+                            const alreadyAdded = connectionItems.some(c => 
+                                c.trackingId === item.trackingId || 
+                                c.navigationUrl === item.navigationUrl
+                            );
+                            if(!alreadyAdded) {
+                                connectionItems.push(item);
+                            }
+                        }
+                    }
+
+                    console.log(`📊 Get Connections Info: Total connections collected: ${connectionItems.length}/${gciTotal}`);
+
+                    if(connectionItems.length < gciTotal) {
+                        gciStartP = parseInt(gciStartP) + connectionItems.length;
+                        $('#gci-startPosition').val(gciStartP);
+                        console.log(`🔄 Get Connections Info: Getting more results, new start position: ${gciStartP}`);
+                        setTimeout(() => {
+                            getConnectionsLooper();
+                        }, 10000);
+                    } else {
+                        console.log('✅ Get Connections Info: Collected enough connections, starting data extraction...');
+                        gciCleanConnectionsData(connectionItems, totalResultCount, gciDelay);
+                    }
+                } else {
+                    console.log('⚠️ Get Connections Info: No connection items found in any elements');
+                    if(connectionItems.length) {
+                        console.log(`✅ Get Connections Info: No more results from API, but have ${connectionItems.length} connections to process`);
+                        $('#displayGetConnectInfoStatus').html(`Found ${connectionItems.length}. Getting Info...`);
+                        gciCleanConnectionsData(connectionItems, totalResultCount, gciDelay);
+                    } else {
+                        $('#displayGetConnectInfoStatus').html('No result found, change your search criteria and try again!');
+                        $('.connectionInfoAction').attr('disabled', false);
+                    }
+                }
+            } else if(connectionItems.length) {
+                console.log(`✅ Get Connections Info: No more results from API, but have ${connectionItems.length} connections to process`);
+                $('#displayGetConnectInfoStatus').html(`Found ${connectionItems.length}. Getting Info...`);
+                gciCleanConnectionsData(connectionItems, totalResultCount, gciDelay);
+            } else {
+                console.log('❌ Get Connections Info: No results found at all');
+                $('#displayGetConnectInfoStatus').html('No result found, change your search criteria and try again!');
+                $('.connectionInfoAction').attr('disabled', false);
+            }
+        } catch(error) {
+            console.error('❌ Get Connections Info: Error fetching connections:', error);
+            $('#displayGetConnectInfoStatus').html(`Error: ${error.message || 'Error searching LinkedIn. Please try again or check console for details.'}`);
+            $('.connectionInfoAction').attr('disabled', false);
+        }
     }
-    getConnectionsLooper()
+    
+    getConnectionsLooper();
 }
 
 
@@ -246,33 +276,70 @@ const gciCleanConnectionsData = (connectionItems, totalResultCount, gciDelay) =>
         processedCount++;
         console.log(`🔍 Get Connections Info: Processing item ${processedCount}/${connectionItems.length}:`, item);
         
-        if(item && item.itemUnion && item.itemUnion['*entityResult']) {
+        let publicIdentifier = null;
+        
+        // Handle PhantomBuster/LinkedIn API format (new format)
+        if (item.entityUrn) {
+            // Extract from entityUrn: "urn:li:fsd_entityResultViewModel:(urn:li:fsd_profile:username,SEARCH_SRP,DEFAULT)"
+            const match = item.entityUrn.match(/urn:li:fsd_profile:([^,]+)/);
+            if (match && match[1]) {
+                publicIdentifier = match[1];
+            }
+        } 
+        
+        if (!publicIdentifier && item.navigationUrl) {
+            // Extract from navigationUrl: "https://www.linkedin.com/in/username"
+            const match = item.navigationUrl.match(/\/in\/([^\/\?]+)/);
+            if (match && match[1]) {
+                publicIdentifier = match[1];
+            }
+        } 
+        
+        if (!publicIdentifier && item.trackingUrn) {
+            // Extract from trackingUrn: "urn:li:member:username"
+            const match = item.trackingUrn.match(/urn:li:member:(.+)/);
+            if (match && match[1]) {
+                publicIdentifier = match[1];
+            }
+        }
+        
+        // Handle old Voyager API format (legacy format)
+        if (!publicIdentifier && item.itemUnion && item.itemUnion['*entityResult']) {
             profileUrn = item.itemUnion['*entityResult'];
-            console.log(`📝 Get Connections Info: Found profileUrn: ${profileUrn}`);
-            
-            if(profileUrn && typeof profileUrn === 'string' && 
+            if (profileUrn && typeof profileUrn === 'string' && 
                profileUrn.includes('urn:li:fsd_entityResultViewModel:(urn:li:fsd_profile:') && 
                profileUrn.includes(',SEARCH_SRP,DEFAULT)')) {
-
-                profileUrn = profileUrn.replace('urn:li:fsd_entityResultViewModel:(urn:li:fsd_profile:','')
-                profileUrn = profileUrn.replace(',SEARCH_SRP,DEFAULT)','')
-
-                conArr.push({
-                    conId: profileUrn,
-                    totalResultCount: totalResultCount,
-                });
-                
-                validCount++;
-                console.log(`✅ Get Connections Info: Valid profile extracted: ${profileUrn} (${validCount} total)`);
-            } else {
-                console.log(`⚠️ Get Connections Info: Invalid profileUrn format: ${profileUrn}`);
+                profileUrn = profileUrn.replace('urn:li:fsd_entityResultViewModel:(urn:li:fsd_profile:', '');
+                profileUrn = profileUrn.replace(',SEARCH_SRP,DEFAULT)', '');
+                publicIdentifier = profileUrn;
             }
-        } else {
-            console.log(`⚠️ Get Connections Info: Item missing required structure:`, {
-                hasItem: !!item,
-                hasItemUnion: !!(item && item.itemUnion),
-                hasEntityResult: !!(item && item.itemUnion && item.itemUnion['*entityResult'])
+        }
+
+        if (publicIdentifier) {
+            // Store full item data from PhantomBuster for later use (no Voyager API needed)
+            conArr.push({
+                conId: publicIdentifier,
+                connectionId: publicIdentifier, // Alias for compatibility
+                totalResultCount: totalResultCount,
+                // Store full PhantomBuster data
+                phantomData: {
+                    name: item.title?.text || '',
+                    firstName: item.firstName || (item.title?.text ? item.title.text.split(' ')[0] : ''),
+                    lastName: item.lastName || (item.title?.text ? item.title.text.split(' ').slice(1).join(' ') : ''),
+                    headline: item.primarySubtitle?.text || '',
+                    location: item.secondarySubtitle?.text || '',
+                    entityUrn: item.entityUrn || null,
+                    trackingUrn: item.trackingUrn || null,
+                    navigationUrl: item.navigationUrl || `https://www.linkedin.com/in/${publicIdentifier}`,
+                    trackingId: item.trackingId || null,
+                    memberDistance: item.entityCustomTrackingInfo?.memberDistance || null,
+                }
             });
+            
+            validCount++;
+            console.log(`✅ Get Connections Info: Valid profile extracted: ${publicIdentifier} (${validCount} total)`);
+        } else {
+            console.log(`⚠️ Get Connections Info: Could not extract public identifier from item:`, item);
         }
     }
     
@@ -394,71 +461,60 @@ const gciGetConnectionInfo = async (dataToScrape, gciDelay) => {
     $('#automation-list').append(displayAutomationRecord)
 
     for(const [i,v] of dataToScrape.entries()) {
-        console.log(`📧 Get Connections Info: Processing ${i+1}/${dataToScrape.length} - Connection ID: ${dataToScrape[i].connectionId || dataToScrape[i].conId}`);
+        const connectionId = dataToScrape[i].connectionId || dataToScrape[i].conId;
+        const phantomData = dataToScrape[i].phantomData || {};
         
-        $.ajax({
-            method: 'get',
-            beforeSend: function(request) {
-                request.setRequestHeader('csrf-token', jsession);
-                request.setRequestHeader('accept', acceptVnd);
-                request.setRequestHeader('content-type', contentType);
-                request.setRequestHeader('x-li-lang', xLiLang);
-                request.setRequestHeader('x-li-page-instance', 'urn:li:page:d_flagship3_feed;kk0zM9LQRYi/in3qM6Bi5w==');
-                request.setRequestHeader('x-li-track', JSON.stringify({"clientVersion":"1.10.3070","osName":"web","timezoneOffset":1,"deviceFormFactor":"DESKTOP","mpName":"voyager-web"}));
-                request.setRequestHeader('x-restli-protocol-version', xRestliProtocolVersion);
-            },
-            url: `${voyagerApi}/identity/profiles/${dataToScrape[i].connectionId || dataToScrape[i].conId}/profileContactInfo`,
-            success: function(data){
-                console.log(`📞 Get Connections Info: Contact info retrieved for connection ${i+1}`);
-                var resp = {'data': data};
+        console.log(`📧 Get Connections Info: Processing ${i+1}/${dataToScrape.length} - Connection ID: ${connectionId}`);
+        
+        // Use PhantomBuster data instead of making Voyager API calls
+        const name = phantomData.name || `${phantomData.firstName || ''} ${phantomData.lastName || ''}`.trim() || 'LinkedIn Member';
+        const firstName = phantomData.firstName || name.split(' ')[0] || '';
+        const lastName = phantomData.lastName || name.split(' ').slice(1).join(' ') || '';
+        const headline = phantomData.headline || '';
+        const location = phantomData.location || '';
+        const entityUrn = phantomData.entityUrn || `urn:li:fs_profile:${connectionId}`;
+        
+        console.log(`👤 Get Connections Info: Profile data from PhantomBuster for ${name} (${i+1}/${dataToScrape.length})`);
 
-                if (resp['data'].data){
-                    var profileViewCall = async () => {
-                        await $.ajax({
-                            method: 'get',
-                            async: false,
-                            beforeSend: function(request) {
-                                request.setRequestHeader('csrf-token', jsession);
-                            },
-                            url: `${voyagerApi}/identity/profiles/${dataToScrape[i].connectionId || dataToScrape[i].conId}/profileView`,
-                            success: function(data){
-                                var res = {'data': data}
-                                
-                                if(res['data'].profile.entityUrn){
-                                    var name = res['data'].profile.firstName +' '+  res['data'].profile.lastName;
-                                    console.log(`👤 Get Connections Info: Profile data retrieved for ${name} (${i+1}/${dataToScrape.length})`);
-
-                                    scrapedData.push({main: res, contact: resp, connectId: res['data'].profile.entityUrn.replace('urn:li:fs_profile:','')});
-            
-                                    $('#displayGetConnectInfoStatus').empty()
-                                    displayLi = `
-                                        <li>Connection: <b>${name}</b></li>
-                                        <li>Total scraped: <b>${x +1}</b></li>
-                                    `;
-                                    $('#displayGetConnectInfoStatus').append(displayLi)
-                                    // console.log( new Date())
-            
-                                    // update automation count done and time remained
-                                    $('#gci-numbered').text(`${x +1}/${dataToScrape.length}`)
-                                    $('#gci-remained-time').text(`${remainedTime(gciDelay, dataToScrape.length - (x +1))}`)
-            
-                                    x++;
-                                }
-                            },
-                            error: function(error){
-                                console.error(`❌ Get Connections Info: Error getting profile view for connection ${i+1}:`, error);
-                                $('#displayGetConnectInfoStatus').html('Something went wrong while trying to get profile.')
-                            }
-                        })
-                    }
-                    profileViewCall()
-               }
-            },
-            error: function(error){
-                console.error(`❌ Get Connections Info: Error getting contact info for connection ${i+1}:`, error);
-                $('#displayGetConnectInfoStatus').html('Something went wrong while trying to get profile contact.')
+        // Create mock response structure similar to Voyager API format for compatibility
+        const mockProfileData = {
+            'data': {
+                profile: {
+                    firstName: firstName,
+                    lastName: lastName,
+                    entityUrn: entityUrn,
+                    headline: headline,
+                    location: location
+                }
             }
-        })
+        };
+        
+        const mockContactData = {
+            'data': {
+                data: {
+                    // Contact info structure (if needed)
+                }
+            }
+        };
+
+        scrapedData.push({
+            main: mockProfileData,
+            contact: mockContactData,
+            connectId: connectionId
+        });
+
+        $('#displayGetConnectInfoStatus').empty()
+        displayLi = `
+            <li>Connection: <b>${name}</b></li>
+            <li>Total scraped: <b>${x +1}</b></li>
+        `;
+        $('#displayGetConnectInfoStatus').append(displayLi)
+
+        // update automation count done and time remained
+        $('#gci-numbered').text(`${x +1}/${dataToScrape.length}`)
+        $('#gci-remained-time').text(`${remainedTime(gciDelay, dataToScrape.length - (x +1))}`)
+
+        x++;
 
         await sleep(gciDelay*1000)
     }
@@ -485,14 +541,18 @@ const gciSetExportData = (scrapedData) => {
     var dataToExport = [];
 
     $.each(scrapedData, function(i,item){
-        var mainPath = item.main['data'];
-        var contactInfoPath = item.contact['data'].data;
-        var skillPath = mainPath.skillView.elements,
-            languagePath = mainPath.languageView.elements,
-            certificationPath = mainPath.certificationView.elements,
-            coursesPath = mainPath.courseView.elements,
-            educationPath = mainPath.educationView.elements,
-            positionPath = mainPath.positionView.elements;
+        var mainPath = item.main && item.main['data'] ? item.main['data'] : {};
+        var contactInfoPath = item.contact && item.contact['data'] && item.contact['data'].data ? item.contact['data'].data : {};
+        
+        // Check if this is PhantomBuster data (simpler structure) or Voyager data (full structure)
+        const isPhantomBusterData = !mainPath.skillView && !mainPath.languageView && mainPath.profile;
+        
+        var skillPath = mainPath.skillView && mainPath.skillView.elements ? mainPath.skillView.elements : [],
+            languagePath = mainPath.languageView && mainPath.languageView.elements ? mainPath.languageView.elements : [],
+            certificationPath = mainPath.certificationView && mainPath.certificationView.elements ? mainPath.certificationView.elements : [],
+            coursesPath = mainPath.courseView && mainPath.courseView.elements ? mainPath.courseView.elements : [],
+            educationPath = mainPath.educationView && mainPath.educationView.elements ? mainPath.educationView.elements : [],
+            positionPath = mainPath.positionView && mainPath.positionView.elements ? mainPath.positionView.elements : [];
 
         var timePeriodPath, startDate, endDate, period;
         var description, companyName, companySize, companyIndustry, companyLocation;
@@ -641,20 +701,27 @@ const gciSetExportData = (scrapedData) => {
             }
         }
         
+        // Safely extract profile data (handles both PhantomBuster and Voyager formats)
+        const profile = mainPath.profile || {};
+        const profileLocation = profile.location || {};
+        const basicLocation = profileLocation.basicLocation || {};
+        const contactPhoneNumbers = contactInfoPath.phoneNumbers || [];
+        const contactTwitterHandles = contactInfoPath.twitterHandles || [];
+        
         dataToExport.push({
-            firstName: mainPath.profile.firstName,
-            lastName: mainPath.profile.lastName,
-            Email: contactInfoPath.emailAddress != null ? contactInfoPath.emailAddress : null,
-            Phone: contactInfoPath.phoneNumbers != null ? contactInfoPath.phoneNumbers[0].number : null,
-            Twitter: contactInfoPath.twitterHandles.length > 0 ? contactInfoPath.twitterHandles[0].name : null,
-            headLine: mainPath.profile.headline,
-            industry: mainPath.profile.industryName,
+            firstName: profile.firstName || '',
+            lastName: profile.lastName || '',
+            Email: contactInfoPath.emailAddress || null,
+            Phone: contactPhoneNumbers.length > 0 && contactPhoneNumbers[0] ? contactPhoneNumbers[0].number : null,
+            Twitter: contactTwitterHandles.length > 0 && contactTwitterHandles[0] ? contactTwitterHandles[0].name : null,
+            headLine: profile.headline || '',
+            industry: profile.industryName || null,
             skills: skills !='' ? skills : null,
-            locationName: mainPath.profile.locationName,
-            countryCode: mainPath.profile.location.basicLocation.countryCode,
+            locationName: profile.locationName || null,
+            countryCode: basicLocation.countryCode || null,
             linkedUrl: `${LINKEDIN_URL}/in/${item.connectId}`,
             language: language !='' ? language: null,
-            summary: mainPath.profile.summary ? mainPath.profile.summary : null,
+            summary: profile.summary ? profile.summary : null,
             certification: certification !='' ? certification : null,
             courses: courses !='' ? courses : null,
             degreeName01: educationPath[0] ? educationPath[0].degreeName : null,
