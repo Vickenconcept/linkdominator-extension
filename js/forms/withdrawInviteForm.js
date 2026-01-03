@@ -71,6 +71,11 @@ var withdrawInviteForm = `
 
 $('body').append(withdrawInviteForm);
 $('#withdraw-invite-menu-click').click(function(){
+    if (typeof window.closeAllModals === 'function') {
+        window.closeAllModals();
+    }
     implementPermission('withdrawInviteAction')
-    $('#withdrawInviteForm').modal({backdrop:'static', keyboard:false, show:true});
+    setTimeout(function() {
+        $('#withdrawInviteForm').modal({backdrop:'static', keyboard:false, show:true});
+    }, 300);
 })

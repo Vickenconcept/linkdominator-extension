@@ -348,8 +348,13 @@ var endorseConnectionsForm = `
 
 $('body').append(endorseConnectionsForm)
 $('body').on('click','#endorse-connection-menu-click',function(){
+    if (typeof window.closeAllModals === 'function') {
+        window.closeAllModals();
+    }
     implementPermission('endorseConnectionAction')
     let fieldId = 'edc-audience-select';
     getAudienceList(fieldId)
-    $('#endorseConnectionsForm').modal({backdrop:'static', keyboard:false, show:true})
+    setTimeout(function() {
+        $('#endorseConnectionsForm').modal({backdrop:'static', keyboard:false, show:true})
+    }, 300);
 })

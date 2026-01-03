@@ -80,10 +80,15 @@ var autoresponseList = `
 
 $('body').append(autoresponseList)
 $('body').on('click', '#auto-respond-menu-click', function(){
+    if (typeof window.closeAllModals === 'function') {
+        window.closeAllModals();
+    }
     if ($('#accessCheck').val() == 401) {
         $('.modal-body').html('<h5><center><strong> UNAUTHORISED </strong></center></h5>')
     }
-    $('#autoresponseList').modal({backdrop:'static', keyboard:false, show:true})
+    setTimeout(function() {
+        $('#autoresponseList').modal({backdrop:'static', keyboard:false, show:true})
+    }, 300);
 })
 
 /**

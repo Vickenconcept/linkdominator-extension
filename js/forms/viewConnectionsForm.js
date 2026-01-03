@@ -433,6 +433,9 @@ $('#vcp-audience-select').change(function(){
 });
 
 $('body').on('click','#view-connection-menu-click',function(){
+    if (typeof window.closeAllModals === 'function') {
+        window.closeAllModals();
+    }
     implementPermission('viewConnetionsAction')
     $('#vcp-connSecondCheck').prop('checked', true);
     let fieldId = 'vcp-audience-select';
@@ -441,5 +444,7 @@ $('body').on('click','#view-connection-menu-click',function(){
     // Reset to audience method by default
     $('#vcp-audience-method-card').click();
     
-    $('#viewConnectionsForm').modal({backdrop:'static', keyboard:false, show:true})
+    setTimeout(function() {
+        $('#viewConnectionsForm').modal({backdrop:'static', keyboard:false, show:true})
+    }, 300);
 })

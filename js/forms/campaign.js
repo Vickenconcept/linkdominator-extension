@@ -64,13 +64,19 @@ function loadCampaigns() {
 
 $('body').on('click', '#campaign-menu-click', function(){
     console.log('🔍 Campaign menu clicked');
+    if (typeof window.closeAllModals === 'function') {
+        window.closeAllModals();
+    }
     if ($('#accessCheck').val() == 401) {
         $('.modal-body').html('<h5><center><strong> UNAUTHORISED </strong></center></h5>')
         return;
     }
     
+    // Small delay to ensure previous modal closes before opening new one
+    setTimeout(function() {
     // Open modal (campaigns will load via shown.bs.modal event)
     $('#campaignList').modal({backdrop:'static', keyboard:false, show:true});
+    }, 300);
 })
 
 $('body').on('change','.runSwitch',function(ev){

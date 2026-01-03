@@ -345,13 +345,18 @@ var likeOrConnectForm = `
 
 $('body').append(likeOrConnectForm);
 $('#like-connect-menu-click').click(function(){
+    if (typeof window.closeAllModals === 'function') {
+        window.closeAllModals();
+    }
     implementPermission('likeAddConnect')
     $('#loac-connSecondCheck').prop('checked', true);
     $('#loac-likePost').prop('checked', true);
 
     // append AI content to dropdown
     helper.setAIContentToDropdown('loac-aicontent')
-    $('#likeOrConnectForm').modal({backdrop:'static', keyboard:false, show:true});
+    setTimeout(function() {
+        $('#likeOrConnectForm').modal({backdrop:'static', keyboard:false, show:true});
+    }, 300);
 })
 
 $('.loac-pm-btn').click(function(){

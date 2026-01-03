@@ -387,6 +387,9 @@ $(document).on('click', '.toggle-campaign-details', function() {
     }
 });
 $('body').on('click','#message-followup-menu-click',function() {
+    if (typeof window.closeAllModals === 'function') {
+        window.closeAllModals();
+    }
     implementPermission('addFollowUppAction')
     getAudienceList('mfu-selectAudience')
 
@@ -403,7 +406,9 @@ $('body').on('click','#message-followup-menu-click',function() {
         waitdays: '#mfu-waitDays',
     }),
 
-    $('#messageFollowupForm').modal({backdrop:'static', keyboard:false, show:true})
+    setTimeout(function() {
+        $('#messageFollowupForm').modal({backdrop:'static', keyboard:false, show:true})
+    }, 300);
 })
 
 $('body').on('click','.mfu-pm-btn',function(){

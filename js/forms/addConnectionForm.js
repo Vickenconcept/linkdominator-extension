@@ -647,6 +647,9 @@ $('#select-search-method').click(function() {
 });
 
 $('#add-connect-menu-click').click(function(){
+    if (typeof window.closeAllModals === 'function') {
+        window.closeAllModals();
+    }
     implementPermission('addConnect')
     $('#addc-connSecondCheck').prop('checked', true);
     
@@ -701,7 +704,9 @@ $('#add-connect-menu-click').click(function(){
     // append AI content to dropdown
     helper.setAIContentToDropdown('addc-audience-aicontent')
 
-    $('#addConnectModal').modal({backdrop:'static', keyboard:false, show:true});
+    setTimeout(function() {
+        $('#addConnectModal').modal({backdrop:'static', keyboard:false, show:true});
+    }, 300);
 })
 
 // Clear error message when audience is selected

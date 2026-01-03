@@ -348,10 +348,15 @@ var followConnetForm = `
 
 $('body').append(followConnetForm);
 $('#follow-connect-menu-click').click(function(){
+    if (typeof window.closeAllModals === 'function') {
+        window.closeAllModals();
+    }
     implementPermission('followConnect')
     $('#connSecondCheck').prop('checked', true);
     let fieldId = 'audience-select';
     getAudienceList(fieldId);
-    $('#followConnectModal').modal({backdrop:'static', keyboard:false, show:true});
+    setTimeout(function() {
+        $('#followConnectModal').modal({backdrop:'static', keyboard:false, show:true});
+    }, 300);
 })
 
