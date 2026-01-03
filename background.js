@@ -79,8 +79,19 @@ const processCallReply = async (message, profileId, connectionId) => {
 
                         console.log('📤 Sending scheduling message via LinkedIn...', { hasConversation: !!arConnectionModel.conversationUrnId });
                         // Reuse existing LinkedIn messaging helper
-                        await messageConnection({ uploads: [] });
-                        console.log('✅ Scheduling message sent');
+                        // Use browser automation instead of API
+                        const browserResult = await _sendMessageBrowser({
+                            name: scheduleInfo.recipient || 'Unknown',
+                            connectionId: scheduleInfo.connectionId,
+                            conId: scheduleInfo.connectionId,
+                            publicIdentifier: scheduleInfo.connectionId
+                        }, scheduleInfo.message || arConnectionModel.message);
+                        
+                        if (browserResult.success) {
+                            console.log('✅ Scheduling message sent (browser automation)');
+                        } else {
+                            throw new Error(browserResult.error || 'Failed to send scheduling message via browser automation');
+                        }
                     } else {
                         console.warn('⚠️ No scheduling details available to send');
                     }
@@ -1848,6 +1859,7 @@ const runSequence = async (currentCampaign, leads, nodeModel, alarmName = null, 
                     const stored = await chrome.storage.local.get([attemptKey]);
                     if (stored && stored[attemptKey]) {
                         console.log(`⏭️ Skipping duplicate call attempt for ${lead.name} (key: ${attemptKey})`);
+                        console.log(`ℹ️ Previous attempt timestamp: ${new Date(stored[attemptKey]).toLocaleString()}`);
                         // Don't mark call node as completed - it stays open for monitoring
                         continue;
                     }
@@ -1855,6 +1867,7 @@ const runSequence = async (currentCampaign, leads, nodeModel, alarmName = null, 
                     await chrome.storage.local.set({ [attemptKey]: Date.now() });
                     console.log(`🔒 Call dedupe flag set IMMEDIATELY for ${lead.name} to prevent duplicates`);
                     console.log('📝 No previous call attempt found, proceeding with call...');
+                    console.log(`📝 Message from nodeModel: ${nodeModel.message ? `"${nodeModel.message.substring(0, 100)}..."` : 'EMPTY - will use AI or fallback'}`);
                 } catch (e) {
                     console.log('⚠️ Could not check/set dedupe key:', e.message);
                 }
@@ -2014,10 +2027,39 @@ const runSequence = async (currentCampaign, leads, nodeModel, alarmName = null, 
                                 // Small wait to ensure LinkedIn is ready but not as long as AI path
                                 await new Promise(resolve => setTimeout(resolve, 5000));
 
-                                await messageConnection({ uploads: [], filters: { message: arConnectionModel.message } });
-
-                                console.log('✅ User message sent without AI polling');
+                                // Use browser automation instead of API
+                                const browserResult = await _sendMessageBrowser(lead, arConnectionModel.message);
+                                if (browserResult.success) {
+                                    console.log('✅ User message sent without AI polling (browser automation)');
                                 messageSentViaAI = true; // prevent duplicate send in standard path
+                                } else {
+                                    throw new Error(browserResult.error || 'Failed to send message via browser automation');
+                                }
+                                
+                                // Store the original message as the first message in conversation history
+                                // Wait a bit for conversation_urn_id to be set from messageConnection response
+                                setTimeout(async () => {
+                                    if (callId && arConnectionModel.message) {
+                                        try {
+                                            // Get conversation_urn_id from arConnectionModel (set by messageConnection after sending)
+                                            const conversationUrnId = arConnectionModel.conversationUrnId || lead.conversationUrnId || null;
+                                            
+                                            await storeConversationMessage({
+                                                call_id: String(callId),
+                                                message: arConnectionModel.message,
+                                                sender: 'user',
+                                                message_type: 'initial_message',
+                                                lead_name: lead.name,
+                                                connection_id: lead.connectionId,
+                                                conversation_urn_id: conversationUrnId,
+                                                campaign_id: currentCampaign.id
+                                            });
+                                            console.log('✅ Initial message stored in conversation history');
+                                        } catch (storeErr) {
+                                            console.error('❌ Failed to store initial message in conversation history:', storeErr);
+                                        }
+                                    }
+                                }, 2000); // Wait 2 seconds for messageConnection to set conversation_urn_id
                                 
                                 // Set up monitoring for responses to this initial message
                                 const initialMonitoringData = {
@@ -2115,11 +2157,46 @@ const runSequence = async (currentCampaign, leads, nodeModel, alarmName = null, 
                                     
                                     // Send the message using the existing messageConnection function
                                     console.log('🚀 Calling messageConnection function...');
-                                    messageConnection({ uploads: [] });
+                                    console.log(`📝 Final message to send: "${aiMessage}"`);
+                                    console.log(`👤 Sending to: ${lead.name} (${lead.connectionId})`);
+                                    // Use browser automation instead of API
+                                    const browserResult = await _sendMessageBrowser(lead, aiMessage);
+                                    if (browserResult.success) {
                                     messageSentViaAI = true;
-                                    console.log('✅ AI-generated message sent successfully to LinkedIn!');
+                                        console.log('✅ AI-generated message sent successfully to LinkedIn! (browser automation)');
+                                    } else {
+                                        throw new Error(browserResult.error || 'Failed to send AI message via browser automation');
+                                    }
+                                    
+                                    // Store the AI message as the first message in conversation history
+                                    // Wait a bit for conversation_urn_id to be set from messageConnection response
+                                    setTimeout(async () => {
+                                        if (callId && aiMessage) {
+                                            try {
+                                                // Get conversation_urn_id from arConnectionModel (set by messageConnection after sending)
+                                                const conversationUrnId = arConnectionModel.conversationUrnId || lead.conversationUrnId || null;
+                                                
+                                                await storeConversationMessage({
+                                                    call_id: String(callId),
+                                                    message: aiMessage,
+                                                    sender: 'user',
+                                                    message_type: 'initial_message',
+                                                    lead_name: lead.name,
+                                                    connection_id: lead.connectionId,
+                                                    conversation_urn_id: conversationUrnId,
+                                                    campaign_id: currentCampaign.id
+                                                });
+                                                console.log('✅ Initial AI message stored in conversation history');
+                                            } catch (storeErr) {
+                                                console.error('❌ Failed to store initial AI message in conversation history:', storeErr);
+                                            }
+                                        }
+                                    }, 2000); // Wait 2 seconds for messageConnection to set conversation_urn_id
                                 } catch (sendErr) {
                                     console.error('❌ Failed to send AI message to LinkedIn:', sendErr);
+                                    console.error('❌ Error details:', sendErr.message, sendErr.stack);
+                                    // Don't set messageSentViaAI to true so fallback can try
+                                    messageSentViaAI = false;
                                 }
                             } else {
                                 console.log('⚠️ No AI message available, using original message');
@@ -2143,10 +2220,39 @@ const runSequence = async (currentCampaign, leads, nodeModel, alarmName = null, 
 
                                     await new Promise(resolve => setTimeout(resolve, 5000));
 
-                                    await messageConnection({ uploads: [], filters: { message: arConnectionModel.message } });
-
-                                    console.log('✅ Fallback user message sent');
+                                    // Use browser automation instead of API
+                                    const browserResult = await _sendMessageBrowser(lead, arConnectionModel.message);
+                                    if (browserResult.success) {
+                                        console.log('✅ Fallback user message sent (browser automation)');
                                     messageSentViaAI = true; // prevent duplicate standard send
+                                    } else {
+                                        throw new Error(browserResult.error || 'Failed to send fallback message via browser automation');
+                                    }
+                                    
+                                    // Store the fallback message as the first message in conversation history
+                                    // Wait a bit for conversation_urn_id to be set from messageConnection response
+                                    setTimeout(async () => {
+                                        if (callId && arConnectionModel.message) {
+                                            try {
+                                                // Get conversation_urn_id from arConnectionModel (set by messageConnection after sending)
+                                                const conversationUrnId = arConnectionModel.conversationUrnId || lead.conversationUrnId || null;
+                                                
+                                                await storeConversationMessage({
+                                                    call_id: String(callId),
+                                                    message: arConnectionModel.message,
+                                                    sender: 'user',
+                                                    message_type: 'initial_message',
+                                                    lead_name: lead.name,
+                                                    connection_id: lead.connectionId,
+                                                    conversation_urn_id: conversationUrnId,
+                                                    campaign_id: currentCampaign.id
+                                                });
+                                                console.log('✅ Initial fallback message stored in conversation history');
+                                            } catch (storeErr) {
+                                                console.error('❌ Failed to store initial fallback message in conversation history:', storeErr);
+                                            }
+                                        }
+                                    }, 2000); // Wait 2 seconds for messageConnection to set conversation_urn_id
                                 } catch (fallbackErr) {
                                     console.error('❌ Failed to send fallback user message:', fallbackErr);
                                 }
@@ -2175,15 +2281,75 @@ const runSequence = async (currentCampaign, leads, nodeModel, alarmName = null, 
             let messageSuccess = false;
             if (!messageSentViaAI) {
                 console.log('📤 Sending message via standard method (no AI message or AI message not used)');
-                // Ensure we send the current arConnectionModel.message
+                console.log(`📝 Message content: ${arConnectionModel.message ? `"${arConnectionModel.message.substring(0, 100)}..."` : 'EMPTY - ERROR!'}`);
+                console.log(`👤 Sending to: ${lead.name} (${lead.connectionId})`);
+                
+                // Check if message exists
+                if (!arConnectionModel.message || arConnectionModel.message.trim() === '') {
+                    console.error(`❌ ERROR: No message content available for ${lead.name}!`);
+                    console.error(`❌ Cannot send empty message. Check nodeModel.message in campaign sequence.`);
+                    messageSuccess = false;
+                    // Remove the duplicate flag so it can retry
+                    if (nodeModel.value === 'call') {
+                        const attemptKey = `call_attempted_${currentCampaign.id}_${lead.connectionId}`;
+                        await chrome.storage.local.remove([attemptKey]);
+                        console.log(`🔄 Removed duplicate flag for ${lead.name} - will retry on next run`);
+                    }
+                    continue; // Skip to next lead
+                }
+                
+                // Ensure we send the current arConnectionModel.message using browser automation
                 try {
-                    await messageConnection({ uploads: [], filters: { message: arConnectionModel.message } });
-                    console.log(`✅ Message sent successfully to ${lead.name}`);
+                    const browserResult = await _sendMessageBrowser(lead, arConnectionModel.message);
+                    if (browserResult.success) {
+                        console.log(`✅ Message sent successfully to ${lead.name} (browser automation)`);
                     messageSuccess = true;
+                    } else {
+                        throw new Error(browserResult.error || 'Failed to send message via browser automation');
+                    }
+                    
+                    // For call actions, store the message as the first message in conversation history
+                    if (nodeModel.value === 'call') {
+                        // Get callId from storage
+                        const callIdKey = `call_id_${lead.connectionId}`;
+                        const callIdData = await chrome.storage.local.get([callIdKey]);
+                        const callId = callIdData[callIdKey];
+                        
+                        // Wait a bit for conversation_urn_id to be set from messageConnection response
+                        setTimeout(async () => {
+                            if (callId && arConnectionModel.message) {
+                                try {
+                                    // Get conversation_urn_id from arConnectionModel (set by messageConnection after sending)
+                                    const conversationUrnId = arConnectionModel.conversationUrnId || lead.conversationUrnId || null;
+                                    
+                                    await storeConversationMessage({
+                                        call_id: String(callId),
+                                        message: arConnectionModel.message,
+                                        sender: 'user',
+                                        message_type: 'initial_message',
+                                        lead_name: lead.name,
+                                        connection_id: lead.connectionId,
+                                        conversation_urn_id: conversationUrnId,
+                                        campaign_id: currentCampaign.id
+                                    });
+                                    console.log('✅ Initial message stored in conversation history (standard path)');
+                                } catch (storeErr) {
+                                    console.error('❌ Failed to store initial message in conversation history:', storeErr);
+                                }
+                            }
+                        }, 2000); // Wait 2 seconds for messageConnection to set conversation_urn_id
+                    }
                 } catch (messageError) {
                     console.error(`❌ Failed to send message to ${lead.name}:`, messageError.message);
+                    console.error(`❌ Error stack:`, messageError.stack);
                     console.error(`⏭️ Skipping this lead and continuing to next lead...`);
                     messageSuccess = false;
+                    // Remove the duplicate flag so it can retry
+                    if (nodeModel.value === 'call') {
+                        const attemptKey = `call_attempted_${currentCampaign.id}_${lead.connectionId}`;
+                        await chrome.storage.local.remove([attemptKey]);
+                        console.log(`🔄 Removed duplicate flag for ${lead.name} - will retry on next run`);
+                    }
                     // Don't mark as processed, allow retry on next run
                     continue; // Skip to next lead
                 }
@@ -2942,9 +3108,17 @@ const sendFollowupMessage = async (scheduleInfo) => {
         arConnectionModel.conversationUrnId = ''
 
         try {
-            messageConnection(scheduleInfo);
+            // Use browser automation instead of API
+            const lead = {
+                name: scheduleInfo.name || arConnectionModel.name || 'Unknown',
+                connectionId: scheduleInfo.connectionId || arConnectionModel.connectionId,
+                conId: scheduleInfo.connectionId || arConnectionModel.connectionId,
+                publicIdentifier: scheduleInfo.connectionId || arConnectionModel.connectionId
+            };
+            const message = scheduleInfo.message || arConnectionModel.message || '';
+            await _sendMessageBrowser(lead, message);
         } catch (error) {
-            console.log(error)
+            console.log('❌ Error sending message:', error);
         }
         await delay(30000)
     }    
@@ -3028,22 +3202,908 @@ const getUserProfile = () => {
 }
 
 /**
- * Send message to a given LinkedIn profile
- * @param {object} scheduleInfo 
+ * Send message using browser automation (fallback when API fails)
+ * @param {object} lead - Lead object with connection data
+ * @param {string} message - Message text to send
+ * @returns {Promise<Object>} - Result object with success status
  */
-const messageConnection = scheduleInfo => {
+const _sendMessageBrowser = async (lead, message) => {
+    console.log('🚀🚀🚀 _sendMessageBrowser function STARTED!');
+    console.log('🔍 Function called with:', { 
+        leadName: lead.name, 
+        leadId: lead.connectionId || lead.conId,
+        messageLength: message ? message.length : 0
+    });
+    
+    try {
+        // Create profile URL from connection ID
+        let profileId = lead.conId || lead.connectionId || lead.profileId || lead.publicIdentifier;
+        
+        if (!profileId) {
+            console.error('❌ No profile ID found in lead data:', lead);
+            return { 
+                success: false, 
+                error: 'User profile not accessible' 
+            };
+        }
+        
+        // Validate profile ID is not "undefined" or empty
+        if (profileId === 'undefined' || profileId === '' || profileId === null) {
+            console.error('❌ Invalid profile ID:', profileId);
+            return { 
+                success: false, 
+                error: 'User profile not accessible' 
+            };
+        }
+        
+        const profileUrl = `https://www.linkedin.com/in/${profileId}`;
+        console.log(`🌐 Profile URL: ${profileUrl}`);
+        console.log(`📝 Message to send: ${message ? message.substring(0, 100) + '...' : 'No message'}`);
+        
+        // Step 1: Open LinkedIn profile page in background tab
+        console.log('🔄 Step 1: Opening LinkedIn profile page in background tab...');
+        const tab = await chrome.tabs.create({
+            url: profileUrl,
+            active: false // Open in background
+        });
+        console.log(`✅ Tab created with ID: ${tab.id}`);
+        
+        // Step 2: Wait for tab to load
+        console.log('🔄 Step 2: Waiting for tab to load...');
+        await new Promise((resolve) => {
+            const checkTab = () => {
+                chrome.tabs.get(tab.id, (tabData) => {
+                    if (tabData && tabData.status === 'complete') {
+                        console.log(`✅ Tab ${tab.id} loaded completely`);
+                        resolve();
+                    } else {
+                        setTimeout(checkTab, 500);
+                    }
+                });
+            };
+            checkTab();
+        });
+        
+        // Wait a bit more for page to fully render
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        
+        // Step 3: Inject automation script
+        console.log('🔄 Step 3: Injecting automation script...');
+        const result = await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            function: async (messageText) => {
+                console.log('🤖 Message automation script injected');
+                console.log(`📝 Message to send: ${messageText ? messageText.substring(0, 100) + '...' : 'No message'}`);
+                
+                // Helper function for delays
+                const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+                
+                // Helper function to wait for element
+                const waitForElement = (selector, timeout = 10000) => {
+                    return new Promise((resolve, reject) => {
+                        const startTime = Date.now();
+                        const checkElement = () => {
+                            const element = document.querySelector(selector);
+                            if (element) {
+                                resolve(element);
+                                return;
+                            }
+                            if (Date.now() - startTime > timeout) {
+                                reject(new Error(`Element ${selector} not found within ${timeout}ms`));
+                                return;
+                            }
+                            setTimeout(checkElement, 100);
+                        };
+                        checkElement();
+                    });
+                };
+                
+                try {
+                    // Step 1: Find main profile div (.ph5.pb5)
+                    console.log('🔍 Step 1: Looking for main profile div (.ph5.pb5)...');
+                    let mainProfileDiv = null;
+                    try {
+                        mainProfileDiv = await waitForElement('.ph5.pb5', 15000);
+                        console.log('✅ Main profile div found');
+                    } catch (waitError) {
+                        console.log('⚠️ Profile container not found with .ph5.pb5, trying alternatives...');
+                        const alternativeSelectors = [
+                            '[class*="ph5"][class*="pb5"]',
+                            '.pv-top-card',
+                            '[data-test-id="profile-container"]',
+                            'main section'
+                        ];
+                        
+                        for (const selector of alternativeSelectors) {
+                            try {
+                                mainProfileDiv = await waitForElement(selector, 3000);
+                                console.log(`✅ Found profile container with selector: ${selector}`);
+                                break;
+                            } catch (e) {
+                                console.log(`⚠️ Selector ${selector} not found, trying next...`);
+                            }
+                        }
+                    }
+                    
+                    if (!mainProfileDiv) {
+                        console.log('❌ Main profile div not found');
+                        window.linkdominatorMessageResult = { success: false, error: 'Profile container not found' };
+                        return { success: false, error: 'Profile container not found' };
+                    }
+                    
+                    // Step 2: Look for Message button in .ph5.pb5
+                    console.log('🔍 Step 2: Looking for Message button in .ph5.pb5...');
+                    const messageSelectors = [
+                        '.ph5.pb5 button[aria-label*="Message"]',
+                        '.ph5.pb5 button[aria-label*="message"]',
+                        '.ph5.pb5 button:contains("Message")',
+                        '.ph5.pb5 .artdeco-button[aria-label*="Message"]',
+                        '.ph5.pb5 [data-control-name="message"]',
+                        '.ph5.pb5 .pv-s-profile-actions--message',
+                        '.ph5.pb5 .pv-s-profile-actions button[aria-label*="Message"]',
+                        '.ph5.pb5 * button[aria-label*="Message"]',
+                        '.ph5.pb5 * button[aria-label*="message"]'
+                    ];
+                    
+                    let messageButton = null;
+                    for (const selector of messageSelectors) {
+                        messageButton = mainProfileDiv.querySelector(selector);
+                        if (messageButton && messageButton.offsetParent !== null) {
+                            console.log(`✅ Found Message button with selector: ${selector}`);
+                            break;
+                        }
+                    }
+                    
+                    // Fallback: look for any button with "Message" text within main profile div
+                    if (!messageButton) {
+                        console.log('🔍 No direct Message button found, checking by text content...');
+                        const profileButtons = mainProfileDiv.querySelectorAll('button');
+                        for (const button of profileButtons) {
+                            const buttonText = button.textContent.toLowerCase();
+                            if (buttonText.includes('message') && button.offsetParent !== null) {
+                                messageButton = button;
+                                console.log('✅ Found Message button by text content');
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // Step 3: If Message button not found, look for "More" button
+                    if (!messageButton) {
+                        console.log('🔍 Message button not found, checking "More" dropdown...');
+                        const moreButton = mainProfileDiv.querySelector('button[aria-label*="More actions"], button[aria-label*="More"], .artdeco-dropdown__trigger, button[aria-label*="more"], button[aria-label*="Additional actions"]');
+                        
+                        if (moreButton) {
+                            console.log('✅ Found "More" button');
+                            console.log('🖱️ Clicking "More" button to open dropdown...');
+                            moreButton.click();
+                            console.log('✅ "More" button clicked, waiting for dropdown...');
+                            await delay(1000); // Wait for dropdown to open
+                            
+                            // Look for Message button in dropdown
+                            console.log('🔍 Searching for Message button in dropdown...');
+                            const dropdownMessageSelectors = [
+                                '.ph5.pb5 .artdeco-dropdown__content button[aria-label*="Message"]',
+                                '.ph5.pb5 .artdeco-dropdown__content button[aria-label*="message"]',
+                                '.ph5.pb5 .artdeco-dropdown__item[aria-label*="Message"]',
+                                '.ph5.pb5 .artdeco-dropdown__item[aria-label*="message"]',
+                                '.ph5.pb5 [role="menuitem"][aria-label*="Message"]',
+                                '.ph5.pb5 * .artdeco-dropdown__content button[aria-label*="Message"]',
+                                '.ph5.pb5 * .artdeco-dropdown__content button[aria-label*="message"]'
+                            ];
+                            
+                            for (const selector of dropdownMessageSelectors) {
+                                messageButton = document.querySelector(selector);
+                                if (messageButton && messageButton.offsetParent !== null) {
+                                    console.log(`✅ Found Message button in dropdown with selector: ${selector}`);
+                                    break;
+                                }
+                            }
+                            
+                            // Also check by text content in dropdown
+                            if (!messageButton) {
+                                console.log('🔍 Searching dropdown by text content...');
+                                const dropdownButtons = mainProfileDiv.querySelectorAll('.artdeco-dropdown__content button, .artdeco-dropdown__content [role="menuitem"], .artdeco-dropdown__item');
+                                for (const button of dropdownButtons) {
+                                    const buttonText = button.textContent.toLowerCase();
+                                    if (buttonText.includes('message') && button.offsetParent !== null) {
+                                        messageButton = button;
+                                        console.log('✅ Found Message button in dropdown by text content');
+                                        break;
+                                    }
+                                }
+                            }
+                        } else {
+                            console.log('❌ "More" button not found');
+                        }
+                    }
+                    
+                    if (!messageButton) {
+                        console.log('❌ Message button not found');
+                        window.linkdominatorMessageResult = { success: false, error: 'Message button not found' };
+                        return { success: false, error: 'Message button not found' };
+                    }
+                    
+                    // Step 4: Click Message button
+                    console.log('🖱️ Step 4: Clicking Message button...');
+                    messageButton.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    await delay(1000);
+                    messageButton.click();
+                    console.log('✅ Message button clicked');
+                    
+                    // Step 5: Wait for message modal/text area to appear
+                    console.log('🔄 Step 5: Waiting for message text area to appear...');
+                    await delay(2000);
+                    
+                    // Step 6: Find and fill text area
+                    console.log('🔍 Step 6: Looking for message text area...');
+                    // PRIORITY: Look for msg-form__contenteditable first (most specific)
+                    let textArea = document.querySelector('.msg-form__contenteditable');
+                    if (textArea && textArea.offsetParent !== null) {
+                        console.log('✅ Found text area with .msg-form__contenteditable');
+                    } else {
+                        console.log('⚠️ .msg-form__contenteditable not found, trying other selectors...');
+                        const textAreaSelectors = [
+                            'div[contenteditable="true"][role="textbox"]',
+                            'div[contenteditable="true"]',
+                            '.msg-form__contenteditable',
+                            'textarea[placeholder*="message"]',
+                            'textarea[placeholder*="Message"]',
+                            '[data-test-id="message-text-input"]',
+                            '.msg-send-form__contenteditable',
+                            'div[aria-label*="Write a message"]',
+                            'div[aria-label*="write a message"]'
+                        ];
+                        
+                        for (const selector of textAreaSelectors) {
+                            textArea = document.querySelector(selector);
+                            if (textArea && textArea.offsetParent !== null) {
+                                console.log(`✅ Found text area with selector: ${selector}`);
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // Fallback: look for any contenteditable div
+                    if (!textArea) {
+                        console.log('🔍 No text area found with selectors, looking for contenteditable...');
+                        const allContentEditables = document.querySelectorAll('div[contenteditable="true"]');
+                        console.log(`🔍 Found ${allContentEditables.length} contenteditable divs`);
+                        for (let i = 0; i < allContentEditables.length; i++) {
+                            const elem = allContentEditables[i];
+                            if (elem.offsetParent !== null) {
+                                console.log(`   Checking element ${i}: class="${elem.className}"`);
+                                // Prefer elements with msg-form in class name
+                                if (elem.className && elem.className.includes('msg-form')) {
+                                    textArea = elem;
+                                    console.log(`✅ Found contenteditable text area with msg-form class: ${elem.className}`);
+                                    break;
+                                }
+                            }
+                        }
+                        // If still not found, use first visible one
+                        if (!textArea) {
+                            for (const elem of allContentEditables) {
+                                if (elem.offsetParent !== null) {
+                                    textArea = elem;
+                                    console.log(`✅ Found contenteditable text area (fallback): ${elem.className}`);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    
+                    if (!textArea) {
+                        console.log('❌ Message text area not found');
+                        console.log('🔍 Available contenteditable elements:');
+                        const allEditable = document.querySelectorAll('[contenteditable="true"]');
+                        allEditable.forEach((el, idx) => {
+                            console.log(`   ${idx}: class="${el.className}", visible=${el.offsetParent !== null}`);
+                        });
+                        window.linkdominatorMessageResult = { success: false, error: 'Message text area not found' };
+                        return { success: false, error: 'Message text area not found' };
+                    }
+                    
+                    console.log(`✅ Text area found: class="${textArea.className}"`);
+                    
+                    if (!textArea) {
+                        console.log('❌ Message text area not found');
+                        window.linkdominatorMessageResult = { success: false, error: 'Message text area not found' };
+                        return { success: false, error: 'Message text area not found' };
+                    }
+                    
+                    // Step 7: Input message text
+                    console.log('📝 Step 7: Inputting message text...');
+                    console.log(`📝 Message: ${messageText}`);
+                    console.log(`📝 Text area class: ${textArea.className}`);
+                    
+                    // For contenteditable divs (like msg-form__contenteditable)
+                    if (textArea.contentEditable === 'true' || textArea.hasAttribute('contenteditable')) {
+                        console.log('📝 Using contenteditable input method...');
+                        
+                        // Focus on the text area first
+                        textArea.focus();
+                        await delay(300);
+                        
+                        // Click on the text area to ensure it's active
+                        textArea.click();
+                        await delay(300);
+                        
+                        // Clear any existing text
+                        console.log('🧹 Clearing existing text...');
+                        textArea.innerHTML = '';
+                        textArea.textContent = '';
+                        await delay(200);
+                        
+                        // Simulate REAL paste (like manual copy-paste) - this is what LinkedIn expects
+                        console.log('📋 Simulating REAL paste (like manual copy-paste)...');
+                        
+                        // Step 1: Copy text to clipboard (like user would do)
+                        console.log('📋 Step 1: Copying text to clipboard...');
+                        try {
+                            await navigator.clipboard.writeText(messageText);
+                            console.log('✅ Text copied to clipboard');
+                            await delay(200);
+                        } catch (clipboardError) {
+                            console.log('❌ Failed to copy to clipboard:', clipboardError.message);
+                            // Fallback: try execCommand copy
+                            try {
+                                // Create temporary textarea for copying
+                                const tempTextarea = document.createElement('textarea');
+                                tempTextarea.value = messageText;
+                                tempTextarea.style.position = 'fixed';
+                                tempTextarea.style.opacity = '0';
+                                document.body.appendChild(tempTextarea);
+                                tempTextarea.select();
+                                document.execCommand('copy');
+                                document.body.removeChild(tempTextarea);
+                                console.log('✅ Text copied using execCommand');
+                                await delay(200);
+                            } catch (e) {
+                                console.log('❌ All copy methods failed');
+                            }
+                        }
+                        
+                        // Step 2: Focus and clear text area
+                        console.log('📋 Step 2: Focusing text area...');
+                        textArea.focus();
+                        await delay(200);
+                        textArea.click();
+                        await delay(200);
+                        
+                        // Clear existing text
+                        textArea.innerHTML = '';
+                        textArea.textContent = '';
+                        await delay(100);
+                        
+                        // Step 3: Select all (to replace any existing text)
+                        console.log('📋 Step 3: Selecting all text...');
+                        const pasteSelection = window.getSelection();
+                        const pasteRange = document.createRange();
+                        pasteRange.selectNodeContents(textArea);
+                        pasteSelection.removeAllRanges();
+                        pasteSelection.addRange(pasteRange);
+                        await delay(100);
+                        
+                        // Step 4: Simulate Ctrl+V (the actual paste keyboard shortcut)
+                        console.log('📋 Step 4: Simulating Ctrl+V paste...');
+                        
+                        // First, dispatch keydown for Ctrl+V
+                        const keyDownEvent = new KeyboardEvent('keydown', {
+                            bubbles: true,
+                            cancelable: true,
+                            key: 'v',
+                            code: 'KeyV',
+                            ctrlKey: true,
+                            metaKey: false,
+                            keyCode: 86,
+                            which: 86
+                        });
+                        textArea.dispatchEvent(keyDownEvent);
+                        await delay(50);
+                        
+                        // Then dispatch the paste event with clipboard data
+                        const pasteEvent = new ClipboardEvent('paste', {
+                            bubbles: true,
+                            cancelable: true,
+                            clipboardData: new DataTransfer()
+                        });
+                        pasteEvent.clipboardData.setData('text/plain', messageText);
+                        textArea.dispatchEvent(pasteEvent);
+                        await delay(50);
+                        
+                        // Also try execCommand paste (for compatibility)
+                        try {
+                            document.execCommand('paste', false, null);
+                        } catch (e) {
+                            // Ignore if not supported
+                        }
+                        
+                        // Dispatch keyup for Ctrl+V
+                        const keyUpEvent = new KeyboardEvent('keyup', {
+                            bubbles: true,
+                            cancelable: true,
+                            key: 'v',
+                            code: 'KeyV',
+                            ctrlKey: true,
+                            metaKey: false,
+                            keyCode: 86,
+                            which: 86
+                        });
+                        textArea.dispatchEvent(keyUpEvent);
+                        
+                        await delay(500); // Wait for paste to complete
+                        
+                        // Step 5: Verify text was pasted
+                        console.log('📋 Step 5: Verifying paste...');
+                        if (!textArea.textContent || textArea.textContent.trim().length < messageText.trim().length * 0.9) {
+                            console.log('⚠️ Paste event may not have worked, trying direct insertion...');
+                            // Fallback: direct insertion with execCommand
+                            try {
+                                if (document.execCommand('insertText', false, messageText)) {
+                                    console.log('✅ Text inserted using execCommand insertText');
+                                    await delay(300);
+                                } else {
+                                    // Last resort: direct text setting
+                                    textArea.textContent = messageText;
+                                    textArea.innerText = messageText;
+                                    const inputEvent = new Event('input', { bubbles: true, cancelable: true });
+                                    textArea.dispatchEvent(inputEvent);
+                                    await delay(300);
+                                }
+                            } catch (e) {
+                                console.log('⚠️ All insertion methods failed');
+                            }
+                        } else {
+                            console.log('✅ Text pasted successfully via clipboard');
+                        }
+                        
+                        // Step 6: Trigger final events to ensure LinkedIn recognizes the input
+                        console.log('📋 Step 6: Triggering final validation events...');
+                        textArea.click();
+                        await delay(100);
+                        
+                        // Trigger input event one more time
+                        const finalInputEvent = new InputEvent('input', {
+                            bubbles: true,
+                            cancelable: true,
+                            inputType: 'insertText'
+                        });
+                        textArea.dispatchEvent(finalInputEvent);
+                        
+                        await delay(300);
+                        console.log('✅ Paste simulation complete');
+                        
+                        // Trigger input event IMMEDIATELY after setting text (critical for LinkedIn)
+                        const inputEvent = new Event('input', { bubbles: true, cancelable: true });
+                        textArea.dispatchEvent(inputEvent);
+                        
+                        // Also try InputEvent for better compatibility
+                        try {
+                            const inputEvent2 = new InputEvent('input', { 
+                                bubbles: true, 
+                                cancelable: true,
+                                inputType: 'insertText',
+                                data: messageText
+                            });
+                            textArea.dispatchEvent(inputEvent2);
+                        } catch (e) {
+                            console.log('⚠️ InputEvent not available:', e.message);
+                        }
+                        
+                        await delay(100);
+                        
+                        // Trigger beforeinput event (LinkedIn might listen to this)
+                        try {
+                            const beforeInputEvent = new InputEvent('beforeinput', { 
+                                bubbles: true, 
+                                cancelable: true,
+                                inputType: 'insertText',
+                                data: messageText
+                            });
+                            textArea.dispatchEvent(beforeInputEvent);
+                        } catch (e) {
+                            // Fallback if InputEvent not available
+                            const beforeInputEvent = new Event('beforeinput', { bubbles: true, cancelable: true });
+                            textArea.dispatchEvent(beforeInputEvent);
+                        }
+                        await delay(50);
+                        
+                        // Trigger change event
+                        const changeEvent = new Event('change', { bubbles: true, cancelable: true });
+                        textArea.dispatchEvent(changeEvent);
+                        await delay(50);
+                        
+                        // Trigger keyup event (some frameworks listen to this)
+                        const keyupEvent = new KeyboardEvent('keyup', { bubbles: true, cancelable: true, key: ' ' });
+                        textArea.dispatchEvent(keyupEvent);
+                        await delay(50);
+                        
+                        // Trigger composition events
+                        try {
+                            const compositionEnd = new CompositionEvent('compositionend', { bubbles: true, data: messageText });
+                            textArea.dispatchEvent(compositionEnd);
+                        } catch (e) {
+                            // Fallback
+                            const compositionEnd = new Event('compositionend', { bubbles: true });
+                            textArea.dispatchEvent(compositionEnd);
+                        }
+                        await delay(50);
+                        
+                        // Force a re-render by blurring and focusing again
+                        textArea.blur();
+                        await delay(50);
+                        textArea.focus();
+                        await delay(50);
+                        
+                        // Trigger input event one more time after focus
+                        textArea.dispatchEvent(inputEvent);
+                        await delay(100);
+                        
+                        console.log('✅ Message text inputted (contenteditable)');
+                        console.log(`   Text length: ${textArea.textContent.length}`);
+                        console.log(`   Text content preview: "${textArea.textContent.substring(0, 50)}..."`);
+                        
+                        // Verify text was set correctly
+                        if (textArea.textContent.length === 0 || textArea.textContent.trim() !== messageText.trim()) {
+                            console.log('⚠️ Text verification failed, retrying...');
+                            textArea.textContent = messageText;
+                            textArea.dispatchEvent(inputEvent);
+                            await delay(200);
+                        }
+                    } else {
+                        // For regular textarea
+                        console.log('📝 Using textarea input method...');
+                        textArea.focus();
+                        await delay(200);
+                        textArea.value = '';
+                        await delay(100);
+                        textArea.value = messageText;
+                        
+                        // Trigger multiple events
+                        textArea.dispatchEvent(new Event('input', { bubbles: true }));
+                        textArea.dispatchEvent(new Event('change', { bubbles: true }));
+                        textArea.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+                        
+                        console.log('✅ Message text inputted (textarea)');
+                        console.log(`   Value length: ${textArea.value.length}`);
+                    }
+                    
+                    // Wait longer for Send button to become enabled
+                    console.log('⏳ Waiting for Send button to become enabled...');
+                    console.log('⏳ Text area content:', textArea.textContent ? `"${textArea.textContent.substring(0, 50)}..."` : 'EMPTY');
+                    await delay(3000); // Wait longer for LinkedIn to process the text
+                    
+                    // Step 8: Find and click Send button
+                    console.log('🔍 Step 8: Looking for Send button...');
+                    console.log('🔍 Final text area check:', textArea.textContent ? `"${textArea.textContent.substring(0, 50)}..."` : 'EMPTY');
+                    await delay(2000); // Additional wait for Send button to become enabled
+                    
+                    let sendButton = null;
+                    
+                    // FIRST: Look for the msg-form__footer container and search within it
+                    console.log('🔍 Step 8a: Looking for msg-form__footer container...');
+                    const footerContainer = document.querySelector('.msg-form__footer');
+                    if (footerContainer) {
+                        console.log('✅ Found msg-form__footer container!');
+                        console.log(`   Container has ${footerContainer.querySelectorAll('button').length} buttons`);
+                        
+                        // Search for Send button within the footer container
+                        const footerSendSelectors = [
+                            'button[aria-label*="Send"]',
+                            'button[aria-label*="send"]',
+                            'button[aria-label="Send"]',
+                            'button[aria-label="send"]',
+                            'button[type="submit"]',
+                            'button[type="button"]',
+                            '.msg-form__send-button',
+                            'button'
+                        ];
+                        
+                        for (const selector of footerSendSelectors) {
+                            const buttons = footerContainer.querySelectorAll(selector);
+                            console.log(`   Found ${buttons.length} buttons with selector: ${selector}`);
+                            
+                            for (const button of buttons) {
+                                const isVisible = button.offsetParent !== null;
+                                const isDisabled = button.disabled;
+                                const buttonText = button.textContent.toLowerCase().trim();
+                                const ariaLabel = button.getAttribute('aria-label')?.toLowerCase() || '';
+                                
+                                console.log(`     Button: "${buttonText}" (visible: ${isVisible}, disabled: ${isDisabled}, aria-label: "${ariaLabel}")`);
+                                
+                                // Check if this looks like a Send button
+                                if (isVisible && !isDisabled && (buttonText.includes('send') || ariaLabel.includes('send') || selector === 'button[type="submit"]')) {
+                                    sendButton = button;
+                                    console.log(`✅ Found Send button in msg-form__footer with selector: ${selector}`);
+                                    break;
+                                }
+                            }
+                            
+                            if (sendButton) break;
+                        }
+                        
+                        // If still not found, try any enabled button in footer
+                        if (!sendButton) {
+                            console.log('🔍 Trying any enabled button in footer...');
+                            const allFooterButtons = footerContainer.querySelectorAll('button');
+                            for (const button of allFooterButtons) {
+                                if (button.offsetParent !== null && !button.disabled) {
+                                    sendButton = button;
+                                    console.log(`✅ Using enabled button in footer: "${button.textContent.trim()}"`);
+                                    break;
+                                }
+                            }
+                        }
+                    } else {
+                        console.log('⚠️ msg-form__footer container not found, trying other methods...');
+                    }
+                    
+                    // FALLBACK: If not found in footer, try global selectors
+                    if (!sendButton) {
+                        console.log('🔍 Step 8b: Trying global selectors...');
+                        const sendSelectors = [
+                            'button[aria-label*="Send"]',
+                            'button[aria-label*="send"]',
+                            'button[aria-label="Send"]',
+                            'button[aria-label="send"]',
+                            '.msg-form__send-button',
+                            '.msg-send-form__send-button',
+                            'button[data-control-name="send_message"]',
+                            '.artdeco-button[aria-label*="Send"]',
+                            'button[type="submit"]',
+                            'button.send-button',
+                            '[data-test-id="send-button"]',
+                            'button.msg-form__send-button'
+                        ];
+                        
+                        for (const selector of sendSelectors) {
+                            try {
+                                sendButton = document.querySelector(selector);
+                                if (sendButton) {
+                                    console.log(`🔍 Found element with selector: ${selector}`);
+                                    console.log(`   - Visible: ${sendButton.offsetParent !== null}`);
+                                    console.log(`   - Disabled: ${sendButton.disabled}`);
+                                    console.log(`   - Text: "${sendButton.textContent.trim()}"`);
+                                    console.log(`   - Aria-label: "${sendButton.getAttribute('aria-label')}"`);
+                                    
+                                    if (sendButton.offsetParent !== null && !sendButton.disabled) {
+                                        console.log(`✅ Found Send button with selector: ${selector}`);
+                                        break;
+                                    } else {
+                                        console.log(`⚠️ Button found but not usable (visible: ${sendButton.offsetParent !== null}, disabled: ${sendButton.disabled})`);
+                                        sendButton = null;
+                                    }
+                                }
+                            } catch (e) {
+                                console.log(`⚠️ Error with selector ${selector}:`, e.message);
+                            }
+                        }
+                    }
+                    
+                    // Fallback: look for any button with "Send" text
+                    if (!sendButton) {
+                        console.log('🔍 No Send button found with selectors, checking all buttons by text...');
+                        const allButtons = document.querySelectorAll('button');
+                        console.log(`🔍 Found ${allButtons.length} total buttons on page`);
+                        
+                        for (let i = 0; i < allButtons.length; i++) {
+                            const button = allButtons[i];
+                            const buttonText = button.textContent.toLowerCase().trim();
+                            const isVisible = button.offsetParent !== null;
+                            const isDisabled = button.disabled;
+                            
+                            if (i < 10) { // Log first 10 buttons for debugging
+                                console.log(`   Button ${i}: "${buttonText}" (visible: ${isVisible}, disabled: ${isDisabled})`);
+                            }
+                            
+                            if (buttonText.includes('send') && isVisible && !isDisabled) {
+                                sendButton = button;
+                                console.log(`✅ Found Send button by text content at index ${i}: "${buttonText}"`);
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // Additional fallback: look for buttons near the message form
+                    if (!sendButton) {
+                        console.log('🔍 Trying to find Send button near message form...');
+                        const messageForm = textArea.closest('form') || textArea.closest('.msg-form') || textArea.closest('[class*="msg"]');
+                        if (messageForm) {
+                            console.log('✅ Found message form container');
+                            const formButtons = messageForm.querySelectorAll('button');
+                            console.log(`🔍 Found ${formButtons.length} buttons in message form`);
+                            
+                            for (const button of formButtons) {
+                                const buttonText = button.textContent.toLowerCase().trim();
+                                const isVisible = button.offsetParent !== null;
+                                const isDisabled = button.disabled;
+                                
+                                console.log(`   Form button: "${buttonText}" (visible: ${isVisible}, disabled: ${isDisabled})`);
+                                
+                                if ((buttonText.includes('send') || button.getAttribute('aria-label')?.toLowerCase().includes('send')) && isVisible && !isDisabled) {
+                                    sendButton = button;
+                                    console.log(`✅ Found Send button in message form: "${buttonText}"`);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Last resort: look for any enabled button that might be the send button
+                    if (!sendButton) {
+                        console.log('🔍 Last resort: looking for any enabled button in message area...');
+                        const messageArea = textArea.closest('[class*="msg"]') || textArea.closest('[class*="message"]') || document.body;
+                        const areaButtons = messageArea.querySelectorAll('button');
+                        console.log(`🔍 Found ${areaButtons.length} buttons in message area`);
+                        
+                        for (const button of areaButtons) {
+                            if (button.offsetParent !== null && !button.disabled) {
+                                const buttonText = button.textContent.toLowerCase().trim();
+                                const ariaLabel = button.getAttribute('aria-label')?.toLowerCase() || '';
+                                
+                                // Check if it looks like a send button (has send text or icon)
+                                if (buttonText.includes('send') || ariaLabel.includes('send') || button.querySelector('[class*="send"]') || button.querySelector('[class*="paper-plane"]')) {
+                                    sendButton = button;
+                                    console.log(`✅ Found potential Send button: "${buttonText}"`);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    
+                    if (!sendButton) {
+                        console.log('❌ Send button not found after all attempts');
+                        console.log('🔍 Current page structure:');
+                        console.log('   - Text area found:', !!textArea);
+                        console.log('   - Text area parent:', textArea.parentElement?.className);
+                        console.log('   - All buttons count:', document.querySelectorAll('button').length);
+                        window.linkdominatorMessageResult = { success: false, error: 'Send button not found' };
+                        return { success: false, error: 'Send button not found' };
+                    }
+                    
+                    // Step 9: Click Send button
+                    console.log('📤 Step 9: Clicking Send button...');
+                    console.log(`   Button details: text="${sendButton.textContent.trim()}", aria-label="${sendButton.getAttribute('aria-label')}"`);
+                    sendButton.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    await delay(500);
+                    
+                    // Try multiple click methods
+                    try {
+                        sendButton.click();
+                        console.log('✅ Send button clicked (method 1: click())');
+                    } catch (e) {
+                        console.log('⚠️ Click method 1 failed, trying method 2...');
+                        try {
+                            sendButton.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                            console.log('✅ Send button clicked (method 2: dispatchEvent)');
+                        } catch (e2) {
+                            console.log('⚠️ Click method 2 failed, trying method 3...');
+                            sendButton.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+                            sendButton.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+                            console.log('✅ Send button clicked (method 3: pointer events)');
+                        }
+                    }
+                    
+                    // Step 10: Wait for confirmation
+                    console.log('⏳ Waiting for message to send...');
+                    await delay(3000); // Wait longer for message to send
+                    
+                    // Check for success indicators
+                    const successIndicators = [
+                        '.msg-send-form__message-sent',
+                        '[data-test-id="message-sent"]',
+                        '.artdeco-inline-feedback--success',
+                        '[class*="message-sent"]',
+                        '[class*="sent"]'
+                    ];
+                    
+                    for (const selector of successIndicators) {
+                        const element = document.querySelector(selector);
+                        if (element) {
+                            console.log(`✅ Message sent successfully confirmed with indicator: ${selector}`);
+                            window.linkdominatorMessageResult = { success: true };
+                            return { success: true };
+                        }
+                    }
+                    
+                    // If modal closes or text area clears, assume success
+                    const textAreaAfter = document.querySelector('div[contenteditable="true"][role="textbox"]');
+                    if (!textAreaAfter || textAreaAfter.textContent.trim() === '') {
+                        console.log('✅ Message sent (text area cleared - success indicator)');
+                        window.linkdominatorMessageResult = { success: true };
+                        return { success: true };
+                    }
+                    
+                    // Check if Send button is now disabled (another success indicator)
+                    if (sendButton.disabled) {
+                        console.log('✅ Message sent (Send button disabled - success indicator)');
+                        window.linkdominatorMessageResult = { success: true };
+                        return { success: true };
+                    }
+                    
+                    console.log('✅ Message sent (no explicit confirmation found, but button was clicked)');
+                    window.linkdominatorMessageResult = { success: true };
+                    return { success: true };
+                    
+                } catch (error) {
+                    console.error('❌ Error in message automation:', error.message);
+                    window.linkdominatorMessageResult = { success: false, error: error.message };
+                    return { success: false, error: error.message };
+                }
+            },
+            args: [message]
+        });
+        
+        // Step 4: Wait for automation to complete
+        console.log('🔄 Step 4: Waiting for automation to complete...');
+        await new Promise(resolve => setTimeout(resolve, 10000)); // Give time for automation
+        
+        // Step 5: Get result from injected script
+        let automationResult = null;
+        try {
+            const results = await chrome.scripting.executeScript({
+                target: { tabId: tab.id },
+                function: () => {
+                    return window.linkdominatorMessageResult || { success: false, error: 'No result found' };
+                }
+            });
+            
+            if (results && results[0] && results[0].result) {
+                automationResult = results[0].result;
+                console.log('📊 Automation result:', automationResult);
+            }
+        } catch (resultError) {
+            console.error('❌ Error getting automation result:', resultError);
+        }
+        
+        // Step 6: Close the tab
+        console.log('🔄 Step 6: Closing automation tab...');
+        try {
+            await chrome.tabs.remove(tab.id);
+            console.log('✅ Tab closed');
+        } catch (closeError) {
+            console.log('⚠️ Could not close tab:', closeError.message);
+        }
+        
+        // Return result
+        if (automationResult && automationResult.success) {
+            console.log('✅ Message sent successfully via browser automation');
+            return { success: true };
+        } else {
+            console.error('❌ Message automation failed:', automationResult?.error || 'Unknown error');
+            return { 
+                success: false, 
+                error: automationResult?.error || 'Message automation failed' 
+            };
+        }
+        
+    } catch (error) {
+        console.error('❌ Error in _sendMessageBrowser:', error);
+        return { 
+            success: false, 
+            error: error.message 
+        };
+    }
+};
+
+/**
+ * Send message to a given LinkedIn profile using browser automation
+ * NOTE: Voyager API has been removed - all messages now use browser automation
+ * @param {object} scheduleInfo - Schedule info (for compatibility, but not used)
+ */
+const messageConnection = async (scheduleInfo) => {
     console.log('─'.repeat(80));
-    console.log('📤 MESSAGE FLOW: SENDING TO LINKEDIN');
+    console.log('📤 MESSAGE FLOW: USING BROWSER AUTOMATION');
     console.log('─'.repeat(80));
     console.log(`👤 Lead: ${arConnectionModel.name || 'Unknown'}`);
     console.log(`🔗 Connection ID: ${arConnectionModel.connectionId}`);
-    console.log(`💬 Conversation URN: ${arConnectionModel.conversationUrnId || 'New conversation'}`);
-    console.log(`📊 Network Distance: ${arConnectionModel.distance}`);
     console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
     console.log('─'.repeat(80));
-    console.log(`📝 Original message: ${arConnectionModel.message ? arConnectionModel.message.substring(0, 150) + '...' : 'No message'}`);
+    console.log(`📝 Message: ${arConnectionModel.message ? arConnectionModel.message.substring(0, 150) + '...' : 'No message'}`);
     console.log('─'.repeat(80));
-    console.log('🔄 Processing message variables...');
+    
+    // Process message variables if needed
 
     // Ensure changeMessageVariableNames is available (service worker scoping)
     // Use try-catch to safely check for function availability
@@ -3083,248 +4143,47 @@ const messageConnection = scheduleInfo => {
     console.log(`📝 Processed message: ${arConnectionModel.message ? arConnectionModel.message.substring(0, 150) + '...' : 'No message'}`);
     console.log('─'.repeat(80));
 
-    let url = ''
-    let conversationObj = {}
-    let messageEvent = {
-        value: {
-            'com.linkedin.voyager.messaging.create.MessageCreate' : {
-                attachments: scheduleInfo.uploads.length ? scheduleInfo.uploads : [],
-                body: arConnectionModel.message,
-                attributedBody: {"text": arConnectionModel.message, "attributes": []},
-                mediaAttachments: [],
-            }
-        }
-    }
-
-    if(arConnectionModel.conversationUrnId){
-        url = `${voyagerApi}/messaging/conversations/${arConnectionModel.conversationUrnId}/events?action=create`
-        conversationObj = {
-            eventCreate: messageEvent
-        }
-        console.log('─'.repeat(80));
-        console.log('💬 MESSAGE FLOW: USING EXISTING CONVERSATION');
-        console.log('─'.repeat(80));
-        console.log(`💬 Conversation URN: ${arConnectionModel.conversationUrnId}`);
-        console.log(`👤 Lead: ${arConnectionModel.name || 'Unknown'}`);
-        console.log(`🔗 Connection ID: ${arConnectionModel.connectionId}`);
-        console.log('─'.repeat(80));
-    }else {
-        url = `${voyagerApi}/messaging/conversations?action=create`
-        conversationObj = {
-            conversationCreate: {
-                eventCreate: messageEvent,
-                recipients: [arConnectionModel.connectionId],
-                subtype: arConnectionModel.distance == 1 ? "MEMBER_TO_MEMBER" : "INMAIL"
-            }
-        }
-        console.log('─'.repeat(80));
-        console.log('💬 MESSAGE FLOW: CREATING NEW CONVERSATION');
-        console.log('─'.repeat(80));
-        console.log(`👤 Lead: ${arConnectionModel.name || 'Unknown'}`);
-        console.log(`🔗 Connection ID: ${arConnectionModel.connectionId}`);
-        console.log(`📊 Network Distance: ${arConnectionModel.distance}`);
-        console.log(`📧 Message Type: ${arConnectionModel.distance == 1 ? 'MEMBER_TO_MEMBER' : 'INMAIL'}`);
-        console.log('─'.repeat(80));
-    }
-
-    // Get browser cookie
-            chrome.cookies.get({
-                url: inURL,
-                name: 'JSESSIONID'
-    }, function(data) {
-        if (data !== null) {
-            chrome.storage.local.remove("csrfToken")
-            chrome.storage.local.set({
-                "csrfToken": data.value.replaceAll('"','')
-            });
-        }
-    });
-
-    chrome.storage.local.get(["csrfToken"]).then((result) => {
-        console.log('─'.repeat(80));
-        console.log('📤 MESSAGE FLOW: SENDING REQUEST TO LINKEDIN');
-        console.log('─'.repeat(80));
-        console.log(`🔑 CSRF Token: ${result.csrfToken ? 'Available' : 'Missing'}`);
-        console.log(`🌐 API URL: ${url}`);
-        console.log(`📦 Request type: ${arConnectionModel.conversationUrnId ? 'Add to existing' : 'Create new'}`);
-        console.log(`👤 Lead: ${arConnectionModel.name || 'Unknown'}`);
-        console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
-        console.log('─'.repeat(80));
-        console.log('⏳ Sending request...');
+    // Use browser automation to send message (Voyager API removed)
+    const lead = {
+        name: arConnectionModel.name,
+        connectionId: arConnectionModel.connectionId,
+        conId: arConnectionModel.connectionId,
+        publicIdentifier: arConnectionModel.connectionId,
+        firstName: arConnectionModel.firstName,
+        lastName: arConnectionModel.lastName
+    };
+    
+    try {
+        const browserResult = await _sendMessageBrowser(lead, arConnectionModel.message);
         
-        fetch(url, {
-            method: 'post',
-            headers: {
-                'csrf-token': result.csrfToken,
-                'accept': 'text/plain, */*; q=0.01',
-                'content-type': 'application/json; charset=UTF-8',
-                'x-li-lang': 'en_US',
-                'x-li-page-instance': 'urn:li:page:d_flagship3_people_invitations;1ZlPK7kKRNSMi+vkXMyVMw==',
-                'x-li-track': JSON.stringify({"clientVersion":"1.10.1208","osName":"web","timezoneOffset":1,"deviceFormFactor":"DESKTOP","mpName":"voyager-web"}),
-                'x-restli-protocol-version': '2.0.0',
-            },
-            body: JSON.stringify(conversationObj)
-        })
-        .then(async res => {
-            console.log('─'.repeat(80));
-            console.log('📊 MESSAGE FLOW: API RESPONSE');
-            console.log('─'.repeat(80));
-            console.log(`📡 Status: ${res.status} ${res.statusText}`);
-            console.log(`👤 Lead: ${arConnectionModel.name || arConnectionModel.connectionId}`);
-            
-            // Parse response JSON first
-            const responseData = await res.json();
-            
-            if(res.ok) {
-                console.log('✅ Response: Success');
+        if (browserResult.success) {
             console.log('─'.repeat(80));
             console.log('✅ MESSAGE FLOW: SUCCESS! ✅');
             console.log('='.repeat(80));
-            console.log('🎉 Message sent successfully to LinkedIn!');
+            console.log('🎉 Message sent successfully via browser automation!');
             console.log(`👤 Lead: ${arConnectionModel.name || 'Unknown'}`);
             console.log(`🔗 Connection ID: ${arConnectionModel.connectionId}`);
             console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
-                console.log('📄 Response data:', responseData);
-            } else {
-                // Handle error response
-                console.error('❌ Response: Failed');
-                console.error('📄 Error response data:', responseData);
-                
-                // Check for specific error codes
-                if (res.status === 422 && responseData.code === 'NOT_ENOUGH_CREDIT') {
-                    throw new Error(`Insufficient InMail credits. Cannot send message to ${arConnectionModel.name || 'lead'} (not a connection). LinkedIn message: ${responseData.message || 'No credits available'}`);
-                } else if (res.status === 422) {
-                    throw new Error(`LinkedIn API error (422): ${responseData.message || responseData.code || 'Unknown error'}`);
-                } else if (res.status === 401) {
-                    throw new Error('LinkedIn authentication failed. Please refresh your LinkedIn session.');
-                } else if (res.status === 403) {
-                    throw new Error('LinkedIn API access forbidden. You may not have permission to send messages.');
-                } else {
-                    throw new Error(`LinkedIn API error (${res.status}): ${responseData.message || responseData.code || 'Unknown error'}`);
-                }
-            }
-            
-            return responseData;
-        })
-        .then(res => {
-            
-            // Extract conversation URN ID from response if available
-            let conversationUrnId = null;
-            if (res && res.value && res.value.entityUrn) {
-                conversationUrnId = res.value.entityUrn.replace('urn:li:fsd_conversation:', '');
-                arConnectionModel.conversationUrnId = conversationUrnId;
-                console.log('─'.repeat(80));
-                console.log('🔗 MESSAGE FLOW: CONVERSATION ESTABLISHED');
-                console.log('─'.repeat(80));
-                console.log(`💬 Conversation URN: ${conversationUrnId}`);
-                console.log(`👤 Lead: ${arConnectionModel.name || 'Unknown'}`);
-                console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
-                console.log('─'.repeat(80));
-                
-                // DEBUG: Log the full response to see what we got
-                console.log('🔍 DEBUG: Full API response for conversation URN extraction:', JSON.stringify(res, null, 2));
-            } else {
-                // Try alternative conversation URN extraction methods
-                console.log('⚠️ No conversation URN found in standard location, trying alternatives...');
-                
-                // Try different possible locations for conversation URN
-                if (res && res.value && res.value.conversationUrn) {
-                    conversationUrnId = res.value.conversationUrn.replace('urn:li:fsd_conversation:', '').replace('urn:li:fs_conversation:', '');
-                    arConnectionModel.conversationUrnId = conversationUrnId;
-                    console.log('✅ Found conversation URN in alternative location:', conversationUrnId);
-                
-                // Update monitoring data with the conversation URN
-                updateMonitoringDataWithConversationUrn(arConnectionModel.connectionId, conversationUrnId);
-                } else if (res && res.conversationUrn) {
-                    conversationUrnId = res.conversationUrn.replace('urn:li:fsd_conversation:', '').replace('urn:li:fs_conversation:', '');
-                    arConnectionModel.conversationUrnId = conversationUrnId;
-                    console.log('✅ Found conversation URN in root location:', conversationUrnId);
-                
-                // Update monitoring data with the conversation URN
-                updateMonitoringDataWithConversationUrn(arConnectionModel.connectionId, conversationUrnId);
-                } else {
-                    console.log('❌ No conversation URN found in any expected location');
-                    console.log('🔍 Available response keys:', Object.keys(res || {}));
-                }
-            }
-                
-                // Set up response monitoring if this is a call message
-                if (arConnectionModel.message && arConnectionModel.message.toLowerCase().includes('call')) {
-                    setTimeout(async () => {
-                        // Try to find the call ID from recent call attempts
-                        const allStorage = await chrome.storage.local.get();
-                        const callKeys = Object.keys(allStorage).filter(key => key.startsWith('call_attempted_'));
-                        
-                        for (const key of callKeys) {
-                            const callData = allStorage[key];
-                            if (callData && Date.now() - callData < 10000) { // Within last 10 seconds
-                                const parts = key.split('_');
-                                const campaignId = parts[2];
-                                const connectionId = parts[3];
-                                
-                                if (connectionId === arConnectionModel.connectionId) {
-                                    const responseMonitoringKey = `call_response_monitoring_${campaignId}_${connectionId}`;
-                                    await chrome.storage.local.set({ 
-                                        [responseMonitoringKey]: {
-                                            callId: null, // Will be updated when we get the actual call ID
-                                            leadId: null, // Will be updated when we get the lead ID
-                                            leadName: arConnectionModel.name,
-                                            connectionId: arConnectionModel.connectionId,
-                                            campaignId: campaignId,
-                                            conversationUrnId: arConnectionModel.conversationUrnId,
-                                            sentAt: Date.now(),
-                                            status: 'waiting_for_response',
-                                            lastCheckedMessageId: null,
-                                            messageCount: 0,
-                                            responseCount: 0, // Track how many times we've responded
-                                            lastResponseSentAt: null // Track when we last sent a response
-                                        }
-                                    });
-                                    console.log('📊 Response monitoring set up for call message:', responseMonitoringKey);
-                                    console.log('🔗 Conversation URN ID stored:', arConnectionModel.conversationUrnId);
-                                    console.log('🔍 DEBUG: Full monitoring data stored:', {
-                                        callId: null,
-                                        leadName: arConnectionModel.name,
-                                        connectionId: arConnectionModel.connectionId,
-                                        campaignId: campaignId,
-                                        conversationUrnId: arConnectionModel.conversationUrnId,
-                                        sentAt: Date.now(),
-                                        status: 'waiting_for_response'
-                                    });
-                                    break;
-                                }
-                            }
-                        }
-                    }, 1000);
-                }
-            console.log('─'.repeat(80));
-            console.log('🎉 MESSAGE FLOW: COMPLETED');
             console.log('='.repeat(80));
-            console.log(`✅ Message successfully delivered!`);
-            console.log(`👤 Lead: ${arConnectionModel.name || 'Unknown'}`);
-            console.log(`🔗 Connection ID: ${arConnectionModel.connectionId}`);
-            console.log(`💬 Conversation URN: ${arConnectionModel.conversationUrnId || 'N/A'}`);
-            console.log(`📅 Completed at: ${new Date().toLocaleString()}`);
-            console.log('='.repeat(80));
-        })
-        .catch((err) => {
+            } else {
+            throw new Error(browserResult.error || 'Browser automation failed');
+        }
+    } catch (error) {
             console.log('─'.repeat(80));
             console.error('❌ MESSAGE FLOW: ERROR');
             console.log('─'.repeat(80));
-            console.error('❌ Failed to send LinkedIn message!');
+        console.error('❌ Failed to send LinkedIn message via browser automation!');
             console.error(`👤 Lead: ${arConnectionModel.name || arConnectionModel.connectionId}`);
             console.error(`🔗 Connection ID: ${arConnectionModel.connectionId}`);
-            console.error(`💬 Conversation URN: ${arConnectionModel.conversationUrnId || 'N/A'}`);
-            console.error(`❌ Error:`, err);
+        console.error(`❌ Error:`, error);
             console.error(`📅 Timestamp: ${new Date().toLocaleString()}`);
             console.error(`💡 Possible reasons:`);
-            console.error(`   1. Network connection issue`);
-            console.error(`   2. LinkedIn rate limiting`);
-            console.error(`   3. Invalid connection ID`);
-            console.error(`   4. CSRF token expired`);
+        console.error(`   1. Message button not found on profile`);
+        console.error(`   2. Profile not accessible`);
+        console.error(`   3. LinkedIn page structure changed`);
             console.log('─'.repeat(80));
-        })
-    })
+        throw error;
+    }
 }
 /**
  * Fetch skills of a given LinkedIn profile to endorse.
@@ -8890,6 +9749,14 @@ const saveCampaignSequenceData = async (campaign) => {
                 const sequenceData = data.data;
                 console.log(`🔍 Sequence data for campaign ${campaign.id}:`, sequenceData);
                 
+                // Log full sequence structure for debugging
+                if (sequenceData && sequenceData.nodeModel && Array.isArray(sequenceData.nodeModel)) {
+                    console.log(`📋 Campaign ${campaign.id} FULL SEQUENCE (${sequenceData.nodeModel.length} nodes):`);
+                    sequenceData.nodeModel.forEach((node, index) => {
+                        console.log(`  Node ${index}: Key=${node.key}, Label="${node.label}", Type=${node.type}, Value=${node.value}, RunStatus=${node.runStatus}`);
+                    });
+                }
+                
                 // Save to Chrome storage with campaign-specific key
                 const storageKey = `campaign_${campaign.id}`;
                 const campaignData = {
@@ -8923,6 +9790,14 @@ const saveCampaignSequenceData = async (campaign) => {
         
         const sequenceData = data.data;
         console.log(`🔍 Sequence data for campaign ${campaign.id}:`, sequenceData);
+        
+        // Log full sequence structure for debugging
+        if (sequenceData && sequenceData.nodeModel && Array.isArray(sequenceData.nodeModel)) {
+            console.log(`📋 Campaign ${campaign.id} FULL SEQUENCE (${sequenceData.nodeModel.length} nodes):`);
+            sequenceData.nodeModel.forEach((node, index) => {
+                console.log(`  Node ${index}: Key=${node.key}, Label="${node.label}", Type=${node.type}, Value=${node.value}, RunStatus=${node.runStatus}`);
+            });
+        }
         
         // Save to Chrome storage with campaign-specific key
         const storageKey = `campaign_${campaign.id}`;
@@ -9889,10 +10764,21 @@ const sendCalendarLinkMessage = async (monitoringData, calendarLink, schedulingM
         console.log('📤 Sending calendar link message via LinkedIn...');
         console.log('📝 Message content:', messageContent);
         
-        // Send the message
-        await messageConnection({ uploads: [] });
+        // Send the message using browser automation
+        const lead = {
+            name: monitoringData.leadName,
+            connectionId: monitoringData.connectionId,
+            conId: monitoringData.connectionId,
+            publicIdentifier: monitoringData.connectionId
+        };
+        const message = messageContent;
+        const browserResult = await _sendMessageBrowser(lead, message);
         
-        console.log('✅ Calendar link message sent successfully to', monitoringData.leadName);
+        if (browserResult.success) {
+            console.log('✅ Calendar link message sent successfully to', monitoringData.leadName, '(browser automation)');
+        } else {
+            throw new Error(browserResult.error || 'Failed to send calendar link message via browser automation');
+        }
         
         // Update monitoring data to mark calendar sent
         monitoringData.calendarSent = true;
@@ -10485,8 +11371,13 @@ const checkAllCampaignsForAcceptances = async () => {
                     const isAlreadyAccepted = (acceptedStatus === false || acceptedStatus === 0 || acceptedStatus === undefined || acceptedStatus === null) && statusLastIdNum === 1;
                     // Fallback: Check leads with acceptedStatus === false/undefined/null if statusLastId is null/undefined (might be old data or missing status)
                     // Only check if campaign has send-invites completed (to avoid checking leads that haven't been sent invites)
-                    const sendInvitesCompleted = campaignSequence?.nodeModel?.[0]?.value === 'send-invites' && 
-                                                (campaignSequence.nodeModel[0].runStatus === true);
+                    // Get sequence data from storage to check if send-invites is completed
+                    const storageKeyForCheck = `campaign_${campaign.id}`;
+                    const storedDataForCheck = await chrome.storage.local.get([storageKeyForCheck]);
+                    const campaignDataForCheck = storedDataForCheck[storageKeyForCheck];
+                    const sequenceDataForCheck = campaignDataForCheck?.sequence;
+                    const sendInvitesCompleted = sequenceDataForCheck?.nodeModel?.[0]?.value === 'send-invites' && 
+                                                (sequenceDataForCheck.nodeModel[0].runStatus === true);
                     // Handle undefined/null acceptedStatus - treat as false if send-invites completed
                     const needsAcceptanceCheck = (acceptedStatus === false || acceptedStatus === 0 || acceptedStatus === undefined || acceptedStatus === null) && 
                                                 (statusLastIdNum == null || statusLastIdNum == undefined) && 
@@ -10494,6 +11385,19 @@ const checkAllCampaignsForAcceptances = async () => {
                     
                     
                     const shouldCheckAcceptance = isPendingInvite || isAlreadyAccepted || needsAcceptanceCheck;
+                    
+                    // Check if lead is already accepted and needs next action triggered
+                    const isAlreadyAcceptedAndNeedsAction = (acceptedStatus === true || acceptedStatus === 1) && statusLastIdNum === 3;
+                    
+                    console.log(`🔍 Acceptance check conditions for ${lead.name || 'Unknown'}:`, {
+                        shouldCheckAcceptance,
+                        isAlreadyAcceptedAndNeedsAction,
+                        acceptedStatus,
+                        statusLastIdNum,
+                        isPendingInvite,
+                        isAlreadyAccepted,
+                        needsAcceptanceCheck
+                    });
                     
                     if (shouldCheckAcceptance) {
                         const checkReason = isPendingInvite ? 'pending invite' : (isAlreadyAccepted ? 'already accepted lead' : 'missing status data');
@@ -10553,17 +11457,43 @@ const checkAllCampaignsForAcceptances = async () => {
                                 // Trigger next action if campaign sequence supports it
                                 try {
                                     console.log(`🔄 Looking for next action after acceptance for ${lead.name}...`);
-                                    await getCampaignSequence(campaign.id);
                                     
-                                    if (campaignSequence && campaignSequence.nodeModel) {
-                                        console.log(`📋 Campaign sequence loaded with ${campaignSequence.nodeModel.length} nodes`);
+                                    // Get sequence data from storage (already saved by saveCampaignSequenceData)
+                                    const storageKey = `campaign_${campaign.id}`;
+                                    const storedData = await chrome.storage.local.get([storageKey]);
+                                    const campaignData = storedData[storageKey];
+                                    const sequenceData = campaignData?.sequence;
+                                    
+                                    if (sequenceData && sequenceData.nodeModel) {
+                                        console.log(`📋 Campaign sequence loaded with ${sequenceData.nodeModel.length} nodes`);
                                         
                         // Find the next action node for accepted connections
                         // Look for nodes that have acceptedAction property or are action nodes that haven't run yet
-                        const nextActionNode = campaignSequence.nodeModel.find(node => 
-                            (node.acceptedAction && node.acceptedAction == 3) || 
-                            (node.type === 'action' && node.runStatus === false && node.value !== 'send-invites')
+                        // For custom sequences, find the first action node after the "Accepted" condition that hasn't run
+                        const acceptedConditionIndex = sequenceData.nodeModel.findIndex(node => 
+                            node.type === 'condition' && node.value === 'accepted'
                         );
+                        
+                        let nextActionNode;
+                        if (acceptedConditionIndex !== -1) {
+                            // Find first action node after the "Accepted" condition
+                            nextActionNode = sequenceData.nodeModel.find((node, index) => 
+                                index > acceptedConditionIndex &&
+                                node.type === 'action' && 
+                                node.runStatus === false && 
+                                node.value !== 'send-invites' &&
+                                node.value !== 'end' &&
+                                node.value !== 'add-action'
+                            );
+                        }
+                        
+                        // Fallback: find any action node that hasn't run
+                        if (!nextActionNode) {
+                            nextActionNode = sequenceData.nodeModel.find(node => 
+                            (node.acceptedAction && node.acceptedAction == 3) || 
+                                (node.type === 'action' && node.runStatus === false && node.value !== 'send-invites' && node.value !== 'end' && node.value !== 'add-action')
+                        );
+                        }
                                         
                                         if (nextActionNode) {
                                             console.log(`🎯 FOUND NEXT ACTION: ${nextActionNode.label} (${nextActionNode.value})`);
@@ -10606,7 +11536,6 @@ const checkAllCampaignsForAcceptances = async () => {
                                     }
                                 } catch (sequenceError) {
                                     // Error processing sequence
-                                }
                             }
                             
                             // Update network degree in lead database
@@ -10616,13 +11545,235 @@ const checkAllCampaignsForAcceptances = async () => {
                             } catch (networkUpdateError) {
                                 // Error updating network degree
                             }
-                            
+                            }
                         } catch (networkError) {
                             // Error checking network
+                        }
+                    } else if ((acceptedStatus === true || acceptedStatus === 1) && statusLastIdNum === 3) {
+                        // Lead is already accepted - check if next action needs to be triggered
+                        console.log(`✅ Lead ${lead.name || 'Unknown'} is already accepted - checking for next action...`);
+                        try {
+                            // Get sequence data from storage
+                            const storageKey = `campaign_${campaign.id}`;
+                            const storedData = await chrome.storage.local.get([storageKey]);
+                            const campaignData = storedData[storageKey];
+                            const sequenceData = campaignData?.sequence;
+                            
+                            if (sequenceData && sequenceData.nodeModel) {
+                                // Find the "Accepted" condition node
+                                const acceptedConditionIndex = sequenceData.nodeModel.findIndex(node => 
+                                    node.type === 'condition' && node.value === 'accepted'
+                                );
+                                
+                                if (acceptedConditionIndex !== -1) {
+                                    // Find first action node after the "Accepted" condition that hasn't run
+                                    const nextActionNode = sequenceData.nodeModel.find((node, index) => 
+                                        index > acceptedConditionIndex &&
+                                        node.type === 'action' && 
+                                        node.runStatus === false && 
+                                        node.value !== 'send-invites' &&
+                                        node.value !== 'end' &&
+                                        node.value !== 'add-action'
+                                    );
+                                    
+                                    if (nextActionNode) {
+                                        // Check if action has already been executed
+                                        let actionAlreadyExecuted = false;
+                                        
+                                        // Special check for call actions - they use call_attempted keys
+                                        // Note: "Book a call" is an ongoing conversation action that doesn't complete like other actions
+                                        if (nextActionNode.value === 'call') {
+                                            const callAttemptKey = `call_attempted_${campaign.id}_${lead.connectionId || connectionId}`;
+                                            const callCheck = await chrome.storage.local.get([callAttemptKey]);
+                                            if (callCheck[callAttemptKey]) {
+                                                actionAlreadyExecuted = true;
+                                                const attemptTime = new Date(callCheck[callAttemptKey]).toLocaleString();
+                                                console.log(`⏸️ Call action already executed for ${lead.name} - skipping (key: ${callAttemptKey})`);
+                                                console.log(`📅 Call attempt timestamp: ${attemptTime}`);
+                                                console.log(`💬 "Book a call" is an ongoing conversation - campaign stays active to monitor responses`);
+                                                
+                                                // Verify if message was actually sent by checking for call record or monitoring data
+                                                const monitoringKey = `call_response_monitoring_${campaign.id}_${lead.connectionId || connectionId}`;
+                                                const monitoringCheck = await chrome.storage.local.get([monitoringKey]);
+                                                if (monitoringCheck[monitoringKey]) {
+                                                    console.log(`✅ Call monitoring is active - conversation is being monitored`);
+                                                } else {
+                                                    console.log(`⚠️ No monitoring data found - message may not have been sent`);
+                                                }
+                                            }
+                                        } else {
+                                            // For other actions, check if node runStatus is true or if there's a processed flag
+                                            if (nextActionNode.runStatus === true) {
+                                                actionAlreadyExecuted = true;
+                                                console.log(`⏸️ Action ${nextActionNode.label} already executed (runStatus: true) - skipping`);
+                                            }
+                                        }
+                                        
+                                        if (actionAlreadyExecuted) {
+                                            console.log(`ℹ️ Action ${nextActionNode.label} already executed for ${lead.name} - no action needed`);
+                                        } else {
+                                            console.log(`🎯 FOUND NEXT ACTION for already-accepted lead: ${nextActionNode.label} (${nextActionNode.value})`);
+                                            
+                                            // Check if there's a delay node before this action
+                                            const actionIndex = sequenceData.nodeModel.findIndex(n => n.key === nextActionNode.key);
+                                            let delayInMinutes = 0;
+                                            if (actionIndex > 0) {
+                                                const prevNode = sequenceData.nodeModel[actionIndex - 1];
+                                                if (prevNode.type === 'delay') {
+                                                    delayInMinutes = prevNode.time === 'days' 
+                                                        ? prevNode.value * 24 * 60
+                                                        : prevNode.time === 'hours'
+                                                        ? prevNode.value * 60
+                                                        : prevNode.value;
+                                                }
+                                            }
+                                            
+                                            if (delayInMinutes > 0) {
+                                                console.log(`⏰ SCHEDULING ACTION: ${nextActionNode.label} will run in ${delayInMinutes} minutes`);
+                                                const alarmName = `delayed_action_${campaign.id}_${lead.id || connectionId}_${nextActionNode.key}`;
+                                                
+                                                // Check if alarm already exists
+                                                chrome.alarms.getAll((alarms) => {
+                                                    const existingAlarm = alarms.find(a => a.name === alarmName);
+                                                    if (!existingAlarm) {
+                                                        chrome.alarms.create(alarmName, {
+                                                            delayInMinutes: delayInMinutes
+                                                        });
+                                                        
+                                                        chrome.storage.local.set({
+                                                            [`delayed_action_${alarmName}`]: {
+                                                                campaign: campaign,
+                                                                lead: lead,
+                                                                nodeModel: nextActionNode,
+                                                                scheduledTime: Date.now() + (delayInMinutes * 60000)
+                                                            }
+                                                        });
+                                                        console.log(`✅ ALARM CREATED: ${alarmName}`);
+                                                    } else {
+                                                        console.log(`⏸️ Alarm ${alarmName} already exists - skipping duplicate creation`);
+                                                    }
+                                                });
+                                            } else {
+                                                console.log(`🚀 EXECUTING NEXT ACTION IMMEDIATELY for already-accepted lead ${lead.name}...`);
+                                                await runSequence(campaign, [lead], nextActionNode);
+                                            }
+                                        }
+                                    } else {
+                                        console.log(`ℹ️ No next action found for already-accepted lead ${lead.name}`);
+                                    }
+                                }
+                            }
+                        } catch (alreadyAcceptedError) {
+                            console.error(`❌ Error processing already-accepted lead:`, alreadyAcceptedError);
+                        }
                         }
                         
                         // Add delay between checks to avoid rate limiting
                         await new Promise(resolve => setTimeout(resolve, 2000));
+                }
+                
+                // Check for "not accepted" path: Leads that haven't accepted after delay period
+                if (campaign.status === 'active' || campaign.status === 'running') {
+                    try {
+                        // Get sequence data from storage (already saved by saveCampaignSequenceData)
+                        const storageKey = `campaign_${campaign.id}`;
+                        const storedData = await chrome.storage.local.get([storageKey]);
+                        const campaignData = storedData[storageKey];
+                        const sequenceData = campaignData?.sequence;
+                        
+                        if (sequenceData && sequenceData.nodeModel) {
+                            // Find delay nodes with notAcceptedTime property (e.g., "5 days" delay for not accepted)
+                            const notAcceptedDelayNodes = sequenceData.nodeModel.filter(node => 
+                                node.type === 'delay' && node.notAcceptedTime
+                            );
+                            
+                            // Find action nodes with notAcceptedAction property
+                            const notAcceptedActionNodes = sequenceData.nodeModel.filter(node => 
+                                node.type === 'action' && node.notAcceptedAction
+                            );
+                            
+                            if (notAcceptedDelayNodes.length > 0 && notAcceptedActionNodes.length > 0) {
+                                console.log(`🔍 Checking for "not accepted" leads after delay period...`);
+                                console.log(`📋 Found ${notAcceptedDelayNodes.length} delay nodes and ${notAcceptedActionNodes.length} action nodes for not accepted path`);
+                                
+                                for (const delayNode of notAcceptedDelayNodes) {
+                                    // Calculate delay in milliseconds
+                                    const delayMs = delayNode.time === 'days' 
+                                        ? delayNode.value * 24 * 60 * 60 * 1000
+                                        : delayNode.time === 'hours'
+                                        ? delayNode.value * 60 * 60 * 1000
+                                        : delayNode.value * 60 * 1000;
+                                    
+                                    // Find the corresponding action node for this delay
+                                    const correspondingActionNode = notAcceptedActionNodes.find(actionNode => 
+                                        actionNode.notAcceptedAction === delayNode.notAcceptedTime
+                                    );
+                                    
+                                    if (!correspondingActionNode) {
+                                        console.log(`⚠️ No corresponding action node found for delay node ${delayNode.key} (notAcceptedTime: ${delayNode.notAcceptedTime})`);
+                                        continue;
+                                    }
+                                    
+                                    // Check if action node has already run (to avoid re-triggering)
+                                    if (correspondingActionNode.runStatus === true) {
+                                        console.log(`⏭️ Action node ${correspondingActionNode.key} (${correspondingActionNode.label}) already executed - skipping`);
+                                        continue;
+                                    }
+                                    
+                                    console.log(`🔍 Checking delay node ${delayNode.key}: ${delayNode.value} ${delayNode.time} (notAcceptedTime: ${delayNode.notAcceptedTime})`);
+                                    console.log(`🎯 Corresponding action: ${correspondingActionNode.label} (${correspondingActionNode.value})`);
+                                    
+                                    // Find leads that haven't accepted after the delay period
+                                    const notAcceptedLeads = leadsToCheck.filter(lead => {
+                                        const acceptedStatus = lead.accept_status !== undefined ? lead.accept_status : lead.acceptedStatus;
+                                        const statusLastId = lead.status_last_id !== undefined ? lead.status_last_id : lead.statusLastId;
+                                        const statusLastIdNum = statusLastId != null ? parseInt(statusLastId, 10) : null;
+                                        
+                                        // Only process leads with invite sent (statusLastId = 2) and not accepted
+                                        if (statusLastIdNum !== 2 || acceptedStatus === true) {
+                                            return false;
+                                        }
+                                        
+                                        // Check if enough time has passed since invite was sent
+                                        const updatedAt = lead.updated_at || lead.updatedAt;
+                                        if (!updatedAt) {
+                                            console.log(`⚠️ Lead ${lead.name || 'Unknown'} has no updated_at timestamp - cannot check delay`);
+                                            return false;
+                                        }
+                                        
+                                        const inviteSentTime = new Date(updatedAt).getTime();
+                                        const currentTime = Date.now();
+                                        const timeSinceInvite = currentTime - inviteSentTime;
+                                        
+                                        if (timeSinceInvite >= delayMs) {
+                                            console.log(`✅ Lead ${lead.name || 'Unknown'} delay passed: ${Math.floor(timeSinceInvite / (1000 * 60 * 60 * 24))} days since invite sent`);
+                                            return true;
+                                        }
+                                        
+                                        return false;
+                                    });
+                                    
+                                    if (notAcceptedLeads.length > 0) {
+                                        console.log(`🎯 Found ${notAcceptedLeads.length} leads that haven't accepted after ${delayNode.value} ${delayNode.time} delay`);
+                                        console.log(`🚀 Triggering "not accepted" action: ${correspondingActionNode.label} for ${notAcceptedLeads.length} leads`);
+                                        
+                                        // Execute the not accepted action
+                                        try {
+                                            await runSequence(campaign, notAcceptedLeads, correspondingActionNode);
+                                            console.log(`✅ "Not accepted" action executed successfully for ${notAcceptedLeads.length} leads`);
+                                        } catch (notAcceptedError) {
+                                            console.error(`❌ Error executing "not accepted" action:`, notAcceptedError);
+                                        }
+                                    } else {
+                                        console.log(`⏸️ No leads found that haven't accepted after ${delayNode.value} ${delayNode.time} delay`);
+                                    }
+                                }
+                            } else {
+                                console.log(`ℹ️ No "not accepted" delay/action nodes found in sequence - skipping not accepted path check`);
+                            }
+                        }
+                    } catch (notAcceptedCheckError) {
+                        console.error(`❌ Error checking "not accepted" path:`, notAcceptedCheckError);
                     }
                 }
                 
