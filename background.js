@@ -2031,20 +2031,30 @@ const runSequence = async (currentCampaign, leads, nodeModel, alarmName = null, 
                                 const browserResult = await _sendMessageBrowser(lead, arConnectionModel.message);
                                 if (browserResult.success) {
                                     console.log('✅ User message sent without AI polling (browser automation)');
+                                    
+                                    // Use conversation URN from browser automation if available
+                                    const extractedConversationUrnId = browserResult.conversationUrnId || null;
+                                    if (extractedConversationUrnId) {
+                                        console.log(`✅ Extracted conversation URN from browser: ${extractedConversationUrnId}`);
+                                        arConnectionModel.conversationUrnId = extractedConversationUrnId;
+                                        lead.conversationUrnId = extractedConversationUrnId;
+                                    }
+                                    
                                 messageSentViaAI = true; // prevent duplicate send in standard path
                                 } else {
                                     throw new Error(browserResult.error || 'Failed to send message via browser automation');
                                 }
                                 
-                                // Store the original message as the first message in conversation history
+                                // Store in Chrome storage IMMEDIATELY (primary tracking)
+                                const conversationUrnId = arConnectionModel.conversationUrnId || lead.conversationUrnId || null;
+                                await storeSentMessageInChromeStorage(lead.connectionId, arConnectionModel.message, 'user', conversationUrnId);
+                                
                                 // Wait a bit for conversation_urn_id to be set from messageConnection response
                                 setTimeout(async () => {
                                     if (callId && arConnectionModel.message) {
                                         try {
-                                            // Get conversation_urn_id from arConnectionModel (set by messageConnection after sending)
-                                            const conversationUrnId = arConnectionModel.conversationUrnId || lead.conversationUrnId || null;
-                                            
-                                            await storeConversationMessage({
+                                            // Async store to database (fire-and-forget, backup persistence)
+                                            storeConversationMessage({
                                                 call_id: String(callId),
                                                 message: arConnectionModel.message,
                                                 sender: 'user',
@@ -2053,10 +2063,12 @@ const runSequence = async (currentCampaign, leads, nodeModel, alarmName = null, 
                                                 connection_id: lead.connectionId,
                                                 conversation_urn_id: conversationUrnId,
                                                 campaign_id: currentCampaign.id
+                                            }).catch(storeErr => {
+                                                console.error('⚠️ Failed to sync initial message to database (will retry on next poll):', storeErr);
                                             });
-                                            console.log('✅ Initial message stored in conversation history');
+                                            console.log('✅ Initial message stored (Chrome storage + async DB sync)');
                                         } catch (storeErr) {
-                                            console.error('❌ Failed to store initial message in conversation history:', storeErr);
+                                            console.error('❌ Error initiating database sync:', storeErr);
                                         }
                                     }
                                 }, 2000); // Wait 2 seconds for messageConnection to set conversation_urn_id
@@ -2066,7 +2078,7 @@ const runSequence = async (currentCampaign, leads, nodeModel, alarmName = null, 
                                     callId: callId,
                                     campaignId: currentCampaign.id,
                                     connectionId: lead.connectionId,
-                                    conversationUrnId: lead.conversationUrnId,
+                                    conversationUrnId: conversationUrnId, // Use extracted URN if available
                                     leadName: lead.name
                                 };
                                 await setupAIMessageMonitoring(initialMonitoringData);
@@ -2303,7 +2315,26 @@ const runSequence = async (currentCampaign, leads, nodeModel, alarmName = null, 
                     const browserResult = await _sendMessageBrowser(lead, arConnectionModel.message);
                     if (browserResult.success) {
                         console.log(`✅ Message sent successfully to ${lead.name} (browser automation)`);
-                    messageSuccess = true;
+                        messageSuccess = true;
+                        
+                        // Extract and store conversation URN from browser automation result
+                        if (browserResult.conversationUrnId) {
+                            console.log(`🔗 Extracted conversation URN from browser: ${browserResult.conversationUrnId}`);
+                            // Store in arConnectionModel and lead for later use
+                            arConnectionModel.conversationUrnId = browserResult.conversationUrnId;
+                            lead.conversationUrnId = browserResult.conversationUrnId;
+                            
+                            // Update monitoring data with conversation URN (for both call and message actions)
+                            const monitoringKey = `call_response_monitoring_${currentCampaign.id}_${lead.connectionId}`;
+                            const existingMonitoring = await chrome.storage.local.get([monitoringKey]);
+                            if (existingMonitoring[monitoringKey]) {
+                                existingMonitoring[monitoringKey].conversationUrnId = browserResult.conversationUrnId;
+                                await chrome.storage.local.set({ [monitoringKey]: existingMonitoring[monitoringKey] });
+                                console.log(`✅ Updated monitoring data with conversation URN: ${browserResult.conversationUrnId}`);
+                            }
+                        } else {
+                            console.log('⚠️ No conversation URN extracted from browser automation');
+                        }
                     } else {
                         throw new Error(browserResult.error || 'Failed to send message via browser automation');
                     }
@@ -2315,12 +2346,12 @@ const runSequence = async (currentCampaign, leads, nodeModel, alarmName = null, 
                         const callIdData = await chrome.storage.local.get([callIdKey]);
                         const callId = callIdData[callIdKey];
                         
-                        // Wait a bit for conversation_urn_id to be set from messageConnection response
+                        // Store conversation message with extracted URN
                         setTimeout(async () => {
                             if (callId && arConnectionModel.message) {
                                 try {
-                                    // Get conversation_urn_id from arConnectionModel (set by messageConnection after sending)
-                                    const conversationUrnId = arConnectionModel.conversationUrnId || lead.conversationUrnId || null;
+                                    // Use conversation URN from browser result (already stored in arConnectionModel)
+                                    const conversationUrnId = arConnectionModel.conversationUrnId || lead.conversationUrnId || browserResult.conversationUrnId || null;
                                     
                                     await storeConversationMessage({
                                         call_id: String(callId),
@@ -2332,12 +2363,70 @@ const runSequence = async (currentCampaign, leads, nodeModel, alarmName = null, 
                                         conversation_urn_id: conversationUrnId,
                                         campaign_id: currentCampaign.id
                                     });
-                                    console.log('✅ Initial message stored in conversation history (standard path)');
+                                    console.log('✅ Initial message stored in conversation history with URN:', conversationUrnId);
                                 } catch (storeErr) {
                                     console.error('❌ Failed to store initial message in conversation history:', storeErr);
                                 }
                             }
-                        }, 2000); // Wait 2 seconds for messageConnection to set conversation_urn_id
+                        }, 1000); // Reduced wait time since we already have the URN from browser result
+                    }
+                    
+                    // For message actions, also store the conversation message and set up monitoring
+                    if (nodeModel.value === 'message') {
+                        // Store the message in conversation history
+                        setTimeout(async () => {
+                            try {
+                                const conversationUrnId = arConnectionModel.conversationUrnId || lead.conversationUrnId || browserResult.conversationUrnId || null;
+                                
+                                // Try to get callId from monitoring data (if it exists from a previous call action)
+                                const monitoringKey = `call_response_monitoring_${currentCampaign.id}_${lead.connectionId}`;
+                                const monitoringData = await chrome.storage.local.get([monitoringKey]);
+                                const callId = monitoringData[monitoringKey]?.callId || null;
+                                
+                                if (callId) {
+                                    await storeConversationMessage({
+                                        call_id: String(callId),
+                                        message: arConnectionModel.message,
+                                        sender: 'user',
+                                        message_type: 'user_message',
+                                        lead_name: lead.name,
+                                        connection_id: lead.connectionId,
+                                        conversation_urn_id: conversationUrnId,
+                                        campaign_id: currentCampaign.id
+                                    });
+                                    console.log('✅ Message stored in conversation history with URN:', conversationUrnId);
+                                } else {
+                                    console.log('⚠️ No callId found for message action - message not stored in conversation history');
+                                }
+                                
+                                // Set up or update monitoring data with conversation URN
+                                const existingMonitoring = await chrome.storage.local.get([monitoringKey]);
+                                if (existingMonitoring[monitoringKey]) {
+                                    // Update existing monitoring
+                                    existingMonitoring[monitoringKey].conversationUrnId = conversationUrnId;
+                                    await chrome.storage.local.set({ [monitoringKey]: existingMonitoring[monitoringKey] });
+                                    console.log(`✅ Updated monitoring data with conversation URN for message action`);
+                                } else {
+                                    // Create new monitoring entry for message action
+                                    await chrome.storage.local.set({
+                                        [monitoringKey]: {
+                                            callId: null,
+                                            campaignId: currentCampaign.id,
+                                            connectionId: lead.connectionId,
+                                            conversationUrnId: conversationUrnId,
+                                            leadName: lead.name,
+                                            lastCheckedMessageId: null,
+                                            sentAt: Date.now(),
+                                            status: 'waiting_for_response',
+                                            messageCount: 0
+                                        }
+                                    });
+                                    console.log(`✅ Created monitoring data for message action with conversation URN`);
+                                }
+                            } catch (storeErr) {
+                                console.error('❌ Failed to store message in conversation history:', storeErr);
+                            }
+                        }, 1000);
                     }
                 } catch (messageError) {
                     console.error(`❌ Failed to send message to ${lead.name}:`, messageError.message);
@@ -3163,9 +3252,50 @@ const getUserProfile = () => {
             lastName = res.miniProfile.lastName
             console.log('LinkedIn ID set to:', linkedinId);
             console.log('User profile loaded:', firstName, lastName);
+            console.log('🔍 Full profile response structure:', JSON.stringify(res, null, 2).substring(0, 1000));
             
-            // Store LinkedIn ID in storage
-            chrome.storage.local.set({ linkedinId: linkedinId });
+            // Extract entity URN from multiple possible locations
+            let entityUrn = null;
+            
+            // Try different locations in the response
+            if (res.miniProfile?.entityUrn) {
+                entityUrn = res.miniProfile.entityUrn;
+                console.log('✅ Found entity URN in res.miniProfile.entityUrn:', entityUrn);
+            } else if (res.entityUrn) {
+                entityUrn = res.entityUrn;
+                console.log('✅ Found entity URN in res.entityUrn:', entityUrn);
+            } else if (res.miniProfile?.objectUrn) {
+                entityUrn = res.miniProfile.objectUrn;
+                console.log('✅ Found entity URN in res.miniProfile.objectUrn:', entityUrn);
+            } else if (plainId) {
+                // Construct entity URN from plainId (format: urn:li:fs_miniProfile:{plainId})
+                entityUrn = `urn:li:fs_miniProfile:${plainId}`;
+                console.log('✅ Constructed entity URN from plainId:', entityUrn);
+            } else if (linkedinId) {
+                // Try to construct from public identifier (less reliable)
+                // Format might be: urn:li:member:{linkedinId}
+                entityUrn = `urn:li:member:${linkedinId}`;
+                console.log('⚠️ Constructed entity URN from publicIdentifier (may not be accurate):', entityUrn);
+            }
+            
+            if (!entityUrn) {
+                console.error('❌ Could not extract or construct entity URN from profile response');
+                console.log('📋 Available fields in res:', Object.keys(res));
+                console.log('📋 Available fields in res.miniProfile:', res.miniProfile ? Object.keys(res.miniProfile) : 'null');
+            }
+            
+            // Store LinkedIn ID and profile info (including entity URN for reliable sender detection)
+            chrome.storage.local.set({ 
+                linkedinId: linkedinId,
+                linkedinProfile: {
+                    entityUrn: entityUrn,
+                    publicIdentifier: linkedinId,
+                    firstName: firstName,
+                    lastName: lastName,
+                    plainId: plainId
+                }
+            });
+            console.log('✅ Stored LinkedIn profile with entity URN:', entityUrn);
             
             // Trigger campaign check now that LinkedIn ID is available
             setTimeout(async () => {
@@ -3240,16 +3370,16 @@ const _sendMessageBrowser = async (lead, message) => {
         console.log(`🌐 Profile URL: ${profileUrl}`);
         console.log(`📝 Message to send: ${message ? message.substring(0, 100) + '...' : 'No message'}`);
         
-        // Step 1: Open LinkedIn profile page in background tab
-        console.log('🔄 Step 1: Opening LinkedIn profile page in background tab...');
+        // Step 1: Open LinkedIn profile page in background (like send invite)
+        console.log('🔄 Step 1: Opening LinkedIn profile page in background...');
         const tab = await chrome.tabs.create({
             url: profileUrl,
-            active: false // Open in background
+            active: false // Open in background, don't interfere with user's other tabs
         });
-        console.log(`✅ Tab created with ID: ${tab.id}`);
+        console.log(`✅ Tab created with ID: ${tab.id} (background tab)`);
         
-        // Step 2: Wait for tab to load
-        console.log('🔄 Step 2: Waiting for tab to load...');
+        // Step 2: Wait for tab to load and ensure it's ready
+        console.log('🔄 Step 2: Waiting for tab to load completely...');
         await new Promise((resolve) => {
             const checkTab = () => {
                 chrome.tabs.get(tab.id, (tabData) => {
@@ -3985,9 +4115,75 @@ const _sendMessageBrowser = async (lead, message) => {
                         }
                     }
                     
-                    // Step 10: Wait for confirmation
+                    // Step 10: Wait for confirmation and extract conversation URN
                     console.log('⏳ Waiting for message to send...');
                     await delay(3000); // Wait longer for message to send
+                    
+                    // Try to extract conversation URN from the page
+                    let conversationUrnId = null;
+                    console.log('🔍 Attempting to extract conversation URN from page...');
+                    
+                    // Method 1: Check if URL changed to messaging thread
+                    const currentUrl = window.location.href;
+                    console.log(`🔍 Current URL: ${currentUrl}`);
+                    if (currentUrl.includes('/messaging/thread/')) {
+                        const threadMatch = currentUrl.match(/\/messaging\/thread\/([^\/\?]+)/);
+                        if (threadMatch) {
+                            conversationUrnId = threadMatch[1];
+                            console.log(`✅ Extracted conversation URN from URL: ${conversationUrnId}`);
+                        }
+                    }
+                    
+                    // Method 2: Try to find conversation URN in React state/data attributes
+                    if (!conversationUrnId) {
+                        console.log('🔍 Trying to extract from React state/data attributes...');
+                        // Look for data attributes that might contain conversation info
+                        const messageForm = document.querySelector('.msg-form, [class*="msg-form"]');
+                        if (messageForm) {
+                            // Check data attributes
+                            const dataAttrs = ['data-conversation-id', 'data-conversation-urn', 'data-thread-id', 'data-conversation'];
+                            for (const attr of dataAttrs) {
+                                const value = messageForm.getAttribute(attr);
+                                if (value) {
+                                    conversationUrnId = value;
+                                    console.log(`✅ Found conversation URN in ${attr}: ${conversationUrnId}`);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Method 3: Try to extract from window.__INITIAL_STATE__ or similar
+                    if (!conversationUrnId) {
+                        try {
+                            // LinkedIn might store conversation data in window state
+                            const windowState = window.__INITIAL_STATE__ || window.__APP_STATE__ || window.__REACT_QUERY_STATE__;
+                            if (windowState) {
+                                const stateStr = JSON.stringify(windowState);
+                                // Look for conversation URN patterns
+                                const urnMatch = stateStr.match(/urn:li:fsd_conversation:([A-Za-z0-9_-]+)/);
+                                if (urnMatch) {
+                                    conversationUrnId = urnMatch[1];
+                                    console.log(`✅ Extracted conversation URN from window state: ${conversationUrnId}`);
+                                }
+                            }
+                        } catch (e) {
+                            console.log('⚠️ Could not access window state:', e.message);
+                        }
+                    }
+                    
+                    // Method 4: Check if we're redirected to messaging page
+                    if (!conversationUrnId) {
+                        await delay(2000); // Wait a bit more for potential redirect
+                        const newUrl = window.location.href;
+                        if (newUrl !== currentUrl && newUrl.includes('/messaging/thread/')) {
+                            const threadMatch = newUrl.match(/\/messaging\/thread\/([^\/\?]+)/);
+                            if (threadMatch) {
+                                conversationUrnId = threadMatch[1];
+                                console.log(`✅ Extracted conversation URN from redirect URL: ${conversationUrnId}`);
+                            }
+                        }
+                    }
                     
                     // Check for success indicators
                     const successIndicators = [
@@ -3998,33 +4194,45 @@ const _sendMessageBrowser = async (lead, message) => {
                         '[class*="sent"]'
                     ];
                     
+                    let messageSent = false;
                     for (const selector of successIndicators) {
                         const element = document.querySelector(selector);
                         if (element) {
                             console.log(`✅ Message sent successfully confirmed with indicator: ${selector}`);
-                            window.linkdominatorMessageResult = { success: true };
-                            return { success: true };
+                            messageSent = true;
+                            break;
                         }
                     }
                     
                     // If modal closes or text area clears, assume success
-                    const textAreaAfter = document.querySelector('div[contenteditable="true"][role="textbox"]');
-                    if (!textAreaAfter || textAreaAfter.textContent.trim() === '') {
-                        console.log('✅ Message sent (text area cleared - success indicator)');
-                        window.linkdominatorMessageResult = { success: true };
-                        return { success: true };
+                    if (!messageSent) {
+                        const textAreaAfter = document.querySelector('div[contenteditable="true"][role="textbox"]');
+                        if (!textAreaAfter || textAreaAfter.textContent.trim() === '') {
+                            console.log('✅ Message sent (text area cleared - success indicator)');
+                            messageSent = true;
+                        }
                     }
                     
                     // Check if Send button is now disabled (another success indicator)
-                    if (sendButton.disabled) {
+                    if (!messageSent && sendButton.disabled) {
                         console.log('✅ Message sent (Send button disabled - success indicator)');
-                        window.linkdominatorMessageResult = { success: true };
-                        return { success: true };
+                        messageSent = true;
                     }
                     
-                    console.log('✅ Message sent (no explicit confirmation found, but button was clicked)');
-                    window.linkdominatorMessageResult = { success: true };
-                    return { success: true };
+                    if (!messageSent) {
+                        console.log('✅ Message sent (no explicit confirmation found, but button was clicked)');
+                        messageSent = true;
+                    }
+                    
+                    console.log(`📊 Message send result: success=${messageSent}, conversationUrnId=${conversationUrnId || 'not found'}`);
+                    window.linkdominatorMessageResult = { 
+                        success: messageSent, 
+                        conversationUrnId: conversationUrnId 
+                    };
+                    return { 
+                        success: messageSent, 
+                        conversationUrnId: conversationUrnId 
+                    };
                     
                 } catch (error) {
                     console.error('❌ Error in message automation:', error.message);
@@ -7853,7 +8061,12 @@ self.createCallResponsePipeline = async () => {
             
             try {
                 // Step 1: Get conversations using the improved function
-                const conversationData = await fetchLinkedInConversation(monitoringData.connectionId, monitoringData.lastCheckedMessageId);
+                // Pass conversation URN from monitoring data if available
+                const conversationData = await fetchLinkedInConversation(
+                    monitoringData.connectionId, 
+                    monitoringData.lastCheckedMessageId,
+                    monitoringData.conversationUrnId || null
+                );
                 
                 if (!conversationData) {
                     console.log(`❌ No conversation data for ${monitoringData.leadName}`);
@@ -8465,21 +8678,29 @@ const checkForCallResponses = async () => {
         }
         
         // Process each unique monitoring entry using consolidated flow
+        console.log(`🔍 CALL FLOW: Processing ${uniqueMonitoringEntries.length} monitoring entries...`);
         for (const { key, monitoringData } of uniqueMonitoringEntries) {
-                            
+            console.log(`🔍 CALL FLOW: Processing ${monitoringData.leadName} (${monitoringData.connectionId})...`);
             // Use consolidated call flow processor
             await processCallFlow(monitoringData, key);
-                                                }
+        }
+        console.log(`✅ CALL FLOW: Finished processing all monitoring entries`);
                                             } catch (error) {
         console.error('❌ CALL FLOW: Error checking call responses:', error);
     }
 };
 /**
  * Fetch LinkedIn conversation messages for a specific connection
+ * @param {string} connectionId - Connection ID (e.g., 'eleazarnzerem')
+ * @param {string|null} lastMessageId - Last processed message ID
+ * @param {string|null} conversationUrnId - Optional conversation URN ID (prioritized if provided)
  */
-const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => {
+const fetchLinkedInConversation = async (connectionId, lastMessageId = null, conversationUrnId = null) => {
     try {
         console.log('📡 Fetching LinkedIn conversation for connection:', connectionId);
+        if (conversationUrnId) {
+            console.log('🔗 Using provided conversation URN:', conversationUrnId);
+        }
         
         // Get CSRF token
         const tokenResult = await chrome.storage.local.get(["csrfToken"]);
@@ -8508,26 +8729,48 @@ const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => 
         if (conversationsResponse.ok) {
             const conversationsData = await conversationsResponse.json();
             conversations = conversationsData.elements || [];
+            console.log(`📊 FETCH CONVERSATION: Found ${conversations.length} conversations from LinkedIn API`);
+        } else {
+            console.log(`⚠️ FETCH CONVERSATION: Conversations API returned status ${conversationsResponse.status}`);
         }
         
         // If no conversations found via API, try direct conversation access
         if (conversations.length === 0) {
-            // Try to get the actual conversation URN from monitoring data first
-            const allStorage = await chrome.storage.local.get();
-            const monitoringEntries = Object.keys(allStorage).filter(key => key.startsWith('call_response_monitoring_'));
+            console.log('🔄 No conversations in list - trying direct conversation access...');
             
-            let knownConversationIds = [connectionId]; // Start with connection ID as fallback
+            // Build list of conversation IDs to try, prioritizing provided URN
+            let knownConversationIds = [];
             
-            // Look for monitoring data that might have the conversation URN
-            for (const key of monitoringEntries) {
-                const monitoringData = allStorage[key];
-                if (monitoringData.connectionId === connectionId && monitoringData.conversationUrnId) {
-                    knownConversationIds.unshift(monitoringData.conversationUrnId); // Put it first
+            // Priority 1: Use provided conversation URN if available
+            if (conversationUrnId) {
+                knownConversationIds.push(conversationUrnId);
+                console.log(`🔗 Priority 1: Using provided conversation URN: ${conversationUrnId}`);
+            } else {
+                // Priority 2: Try to get the actual conversation URN from monitoring data
+                const allStorage = await chrome.storage.local.get();
+                const monitoringEntries = Object.keys(allStorage).filter(key => key.startsWith('call_response_monitoring_'));
+                
+                for (const key of monitoringEntries) {
+                    const monitoringData = allStorage[key];
+                    if (monitoringData.connectionId === connectionId && monitoringData.conversationUrnId) {
+                        knownConversationIds.push(monitoringData.conversationUrnId);
+                        console.log(`🔍 Found conversation URN in monitoring data: ${monitoringData.conversationUrnId}`);
+                        break; // Use first found URN
+                    }
                 }
             }
             
+            // Priority 3: Fallback to connection ID (but this often doesn't work)
+            if (knownConversationIds.length === 0) {
+                knownConversationIds.push(connectionId);
+                console.log(`⚠️ No conversation URN found, falling back to connection ID: ${connectionId}`);
+            }
+            
+            console.log(`🔄 Will try ${knownConversationIds.length} conversation ID(s) for direct access:`, knownConversationIds);
+            
             for (const conversationId of knownConversationIds) {
                 try {
+                    console.log(`🔄 Direct access: Trying conversation ID: ${conversationId}`);
                     // Try to get messages directly from this conversation using the WORKING headers
                     const directMessagesResponse = await fetch(`${voyagerApi}/messaging/conversations/${conversationId}/events`, {
                         method: 'GET',
@@ -8537,6 +8780,8 @@ const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => 
                             'x-restli-protocol-version': '2.0.0'
                         }
                     });
+                    
+                    console.log(`📡 Direct access response status for ${conversationId}: ${directMessagesResponse.status}`);
                     
                     if (directMessagesResponse.ok) {
                         const messagesData = await directMessagesResponse.json();
@@ -8614,24 +8859,18 @@ const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => 
                                 const ourEntityUrn = ourProfile.linkedinProfile?.entityUrn;
                                 const ourPublicIdentifier = ourProfile.linkedinProfile?.publicIdentifier;
                                 
-                                // Determine if message is from extension using reliable identifiers
-                                if (ourEntityUrn && senderEntityUrn) {
-                                    isFromExtension = senderEntityUrn === ourEntityUrn;
-                                } else if (ourPublicIdentifier && sender) {
-                                    // Fallback to name matching if URNs not available
-                                    isFromExtension = sender.toLowerCase().includes('william') || 
-                                                   sender.toLowerCase().includes('victor') ||
-                                                   sender.toLowerCase().includes('vicken-concept');
+                                // Check if message is from us using hybrid system (Chrome storage primary + DB fallback)
+                                if (text && connectionId) {
+                                    const checkResult = await checkIfMessageIsFromUs(connectionId, text, msg.createdAt);
+                                    isFromExtension = checkResult.isFromUs;
+                                    if (isFromExtension) {
+                                        console.log(`✅ Message identified as from us (sender: ${checkResult.sender})`);
+                                    } else {
+                                        console.log('✅ Message identified as from lead');
+                                    }
                                 } else {
-                                    // Last resort: text pattern matching for AI-generated messages
-                                    isFromExtension = text.includes('[Your Name]') ||
-                                                   text.includes('Thank you for your response') ||
-                                                   text.includes('Thank you for letting me know') ||
-                                                   text.includes('Let\'s schedule a call') ||
-                                                   text.includes('I hope this message finds you well') ||
-                                                   text.includes('Hi Eleazar, I\'d like to schedule a call') ||
-                                                   text.includes('I can share some insights about lead generation') ||
-                                                   text.includes('Are you available for a brief conversation');
+                                    // No connectionId or text - default to lead
+                                    isFromExtension = false;
                                 }
                                 
                                 // Use the reliable isFromExtension detection
@@ -8769,14 +9008,21 @@ const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => 
                                 rawResponse: messagesData
                             };
                         } else {
-                            console.log(`📭 No messages found in conversation ${conversationId}`);
+                            console.log(`📭 Direct access: No messages found in conversation ${conversationId}`);
                             // console.log('🔍 Full API response structure:', JSON.stringify(messagesData, null, 2));
                         }
+                    } else {
+                        const errorText = await directMessagesResponse.text().catch(() => 'Could not read error response');
+                        console.log(`⚠️ Direct access failed for ${conversationId}: Status ${directMessagesResponse.status}`);
+                        console.log(`📄 Error response preview: ${errorText.substring(0, 300)}`);
                     }
                 } catch (error) {
-                    // Silently continue to next conversation ID
+                    console.log(`❌ Direct access error for ${conversationId}:`, error.message);
+                    // Continue to next conversation ID
                 }
             }
+            
+            console.log('⚠️ Direct access: All conversation IDs tried, none returned messages');
         }
         
         if (conversations.length === 0) {
@@ -8814,26 +9060,82 @@ const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => 
         }
         
         if (!targetConversation) {
-        console.log('📭 No conversation found with connection:', connectionId);
-        console.log('🔍 Available conversations:', conversations.map(c => ({
-            entityUrn: c.entityUrn,
-            participants: c.participants?.elements?.map(p => ({
-                entityUrn: p.entityUrn,
-                name: `${p.com?.linkedin?.voyager?.messaging?.MessagingMember?.miniProfile?.firstName} ${p.com?.linkedin?.voyager?.messaging?.MessagingMember?.miniProfile?.lastName}`,
-                publicIdentifier: p.com?.linkedin?.voyager?.messaging?.MessagingMember?.miniProfile?.publicIdentifier
-            }))
-        })));
-        return null;
+            console.log('📭 No conversation found with connection:', connectionId);
+            console.log(`📊 Total conversations found: ${conversations.length}`);
+            if (conversations.length > 0) {
+                console.log('🔍 Available conversations:', conversations.slice(0, 5).map(c => ({
+                    entityUrn: c.entityUrn,
+                    participants: c.participants?.elements?.map(p => ({
+                        entityUrn: p.entityUrn,
+                        name: `${p.com?.linkedin?.voyager?.messaging?.MessagingMember?.miniProfile?.firstName} ${p.com?.linkedin?.voyager?.messaging?.MessagingMember?.miniProfile?.lastName}`,
+                        publicIdentifier: p.com?.linkedin?.voyager?.messaging?.MessagingMember?.miniProfile?.publicIdentifier
+                    }))
+                })));
+            } else {
+                console.log('⚠️ No conversations returned from LinkedIn API');
+            }
+            
+            // Try direct conversation access as fallback when conversation not found in list
+            console.log('🔄 Conversation not found in list - trying direct conversation access...');
+            const allStorage = await chrome.storage.local.get();
+            const monitoringEntries = Object.keys(allStorage).filter(key => key.startsWith('call_response_monitoring_'));
+            
+            let knownConversationIds = [connectionId]; // Start with connection ID as fallback
+            
+            // Look for monitoring data that might have the conversation URN
+            for (const key of monitoringEntries) {
+                const monitoringData = allStorage[key];
+                if (monitoringData.connectionId === connectionId && monitoringData.conversationUrnId) {
+                    knownConversationIds.unshift(monitoringData.conversationUrnId); // Put it first
+                    console.log('🔍 Found stored conversation URN in monitoring data:', monitoringData.conversationUrnId);
+                }
+            }
+            
+            // Try direct conversation access as fallback when conversation not found in list
+            // (Conversation might be newly created via browser automation and not yet in the list)
+            console.log('🔄 Conversation not in list - trying direct access fallback...');
+            
+            for (const conversationId of knownConversationIds) {
+                try {
+                    console.log(`🔄 Direct access fallback: Trying conversation ID: ${conversationId}`);
+                    const directMessagesResponse = await fetch(`${voyagerApi}/messaging/conversations/${conversationId}/events`, {
+                        method: 'GET',
+                        headers: {
+                            'csrf-token': tokenResult.csrfToken,
+                            'accept': 'application/json',
+                            'x-restli-protocol-version': '2.0.0'
+                        }
+                    });
+                    
+                    if (directMessagesResponse.ok) {
+                        const messagesData = await directMessagesResponse.json();
+                        const messages = messagesData.elements || [];
+                        
+                        if (messages.length > 0) {
+                            console.log(`✅ Direct access fallback: Found ${messages.length} messages, but conversation URN may be needed for proper access`);
+                            console.log(`⚠️ NOTE: When using browser automation, conversations may not appear in LinkedIn's API immediately`);
+                            console.log(`💡 Suggestion: Wait 1-2 minutes after sending a message before checking for replies`);
+                            // Don't return here - let it fall through to return null
+                            // The conversation might not be accessible via direct ID when created via browser automation
+                        }
+                    }
+                } catch (error) {
+                    console.log(`⚠️ Direct access fallback error for ${conversationId}:`, error.message);
+                }
+            }
+            
+            console.log('❌ FETCH CONVERSATION: Returning null - no conversation found (tried list + direct access)');
+            return null;
         }
         
         console.log('✅ Found conversation:', targetConversation.entityUrn);
         
-        // Extract conversation URN ID
-        const conversationUrnId = targetConversation.entityUrn.replace('urn:li:fsd_conversation:', '');
+        // Extract conversation URN ID from API response (use parameter if not provided, otherwise extract from API)
+        const extractedConversationUrnId = conversationUrnId || targetConversation.entityUrn.replace('urn:li:fsd_conversation:', '');
         
         // Fetch messages from this conversation
-        console.log('📡 Fetching messages from LinkedIn conversation:', conversationUrnId);
-        const messagesResponse = await fetch(`${voyagerApi}/messaging/conversations/${conversationUrnId}/events`, {
+        console.log('📡 Fetching messages from LinkedIn conversation:', extractedConversationUrnId);
+        const messagesResponse = await fetch(`${voyagerApi}/messaging/conversations/${extractedConversationUrnId}/events`, {
             method: 'GET',
             headers: {
                 'csrf-token': tokenResult.csrfToken,
@@ -8947,7 +9249,14 @@ const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => 
                             }).filter(msg => msg.text && msg.text.trim().length > 0);
         
         console.log(`📊 Processed ${processedMessages.length} new messages`);
-        return processedMessages;
+        
+        // Return object with messages and conversationUrnId (expected by processCallFlow)
+        // Use extractedConversationUrnId if we have it, otherwise fall back to parameter
+        const finalConversationUrnId = extractedConversationUrnId || conversationUrnId;
+        return {
+            messages: processedMessages,
+            conversationUrnId: finalConversationUrnId
+        };
         
     } catch (error) {
         console.error('❌ Error fetching LinkedIn conversation:', error);
@@ -8961,61 +9270,160 @@ const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => 
  */
 const processCallFlow = async (monitoringData, key) => {
     try {
+        console.log(`🔍 CALL FLOW: Starting for ${monitoringData.leadName} (${monitoringData.connectionId})`);
+        
         // Step 1: Check if we should process (avoid unnecessary work)
         if (monitoringData.status === 'pending_review') {
+            console.log(`⏸️ CALL FLOW: Skipping ${monitoringData.leadName} - status is pending_review`);
             return;
         }
         
-        // Step 2: Fetch conversation (single call)
-        const conversationData = await fetchLinkedInConversation(monitoringData.connectionId, monitoringData.lastCheckedMessageId);
+        // Step 2: Get last processed message from Chrome storage (rock-solid duplicate prevention)
+        const lastProcessedKey = `lastProcessed_${monitoringData.connectionId}`;
+        const lastProcessedData = await chrome.storage.local.get([lastProcessedKey]);
+        const lastProcessed = lastProcessedData[lastProcessedKey] || {
+            lastMessageId: monitoringData.lastCheckedMessageId || null,
+            lastTimestamp: 0,
+            lastSender: null
+        };
+        console.log(`📋 CALL FLOW: Last processed for ${monitoringData.leadName}:`, {
+            lastMessageId: lastProcessed.lastMessageId,
+            lastTimestamp: lastProcessed.lastTimestamp ? new Date(lastProcessed.lastTimestamp).toLocaleString() : 'none',
+            lastSender: lastProcessed.lastSender
+        });
+        
+        // Step 3: Fetch conversation from LinkedIn
+        console.log(`📡 CALL FLOW: Fetching conversation for ${monitoringData.leadName}...`);
+        const conversationData = await fetchLinkedInConversation(monitoringData.connectionId, lastProcessed.lastMessageId);
         if (!conversationData || !conversationData.messages || conversationData.messages.length === 0) {
+            console.log(`⏸️ CALL FLOW: No conversation data or messages for ${monitoringData.leadName}`);
+            return;
+        }
+        console.log(`📨 CALL FLOW: Fetched ${conversationData.messages.length} total messages for ${monitoringData.leadName}`);
+        
+        // Step 4: Filter out already processed messages (duplicate prevention using timestamp)
+        console.log(`🔍 CALL FLOW: Filtering messages for ${monitoringData.leadName}...`);
+        const newMessages = conversationData.messages.filter(msg => {
+            const msgTimestamp = msg.timestamp || 0;
+            // Skip if timestamp is older or equal to last processed
+            if (lastProcessed.lastTimestamp && msgTimestamp <= lastProcessed.lastTimestamp) {
+                console.log(`⏭️ CALL FLOW: Skipping message (timestamp ${msgTimestamp} <= last processed ${lastProcessed.lastTimestamp})`);
+                return false;
+            }
+            // Skip if message ID matches last processed
+            if (msg.id && lastProcessed.lastMessageId && msg.id === lastProcessed.lastMessageId) {
+                console.log(`⏭️ CALL FLOW: Skipping message (ID matches last processed)`);
+                return false;
+            }
+            return true;
+        });
+        
+        console.log(`📊 CALL FLOW: After filtering, ${newMessages.length} new messages for ${monitoringData.leadName}`);
+        if (newMessages.length === 0) {
+            console.log(`⏭️ CALL FLOW: No new messages for ${monitoringData.leadName} (all already processed)`);
             return;
         }
         
-        // Step 3: Find latest message from lead
-        const latestMessage = conversationData.messages[conversationData.messages.length - 1];
-        if (!latestMessage || !latestMessage.isFromLead) {
+        // Step 5: Identify which messages are from lead (check Chrome storage for our messages)
+        console.log(`🔍 CALL FLOW: Checking sender for ${newMessages.length} messages...`);
+        const messagesFromLead = [];
+        for (const msg of newMessages) {
+            console.log(`🔍 CALL FLOW: Checking message: "${msg.text?.substring(0, 50)}..." (timestamp: ${msg.timestamp})`);
+            const checkResult = await checkIfMessageIsFromUs(monitoringData.connectionId, msg.text, msg.timestamp);
+            console.log(`📊 CALL FLOW: Sender check result:`, checkResult);
+            if (!checkResult.isFromUs) {
+                console.log(`✅ CALL FLOW: Message is from lead - adding to messagesFromLead`);
+                messagesFromLead.push(msg);
+            } else {
+                console.log(`⏭️ CALL FLOW: Message is from us (${checkResult.sender}) - marking as processed`);
+                // Update last processed for our messages (mark as processed)
+                await chrome.storage.local.set({
+                    [lastProcessedKey]: {
+                        lastMessageId: msg.id || lastProcessed.lastMessageId,
+                        lastTimestamp: msg.timestamp || lastProcessed.lastTimestamp,
+                        lastSender: checkResult.sender || 'user'
+                    }
+                });
+            }
+        }
+        
+        console.log(`📊 CALL FLOW: Found ${messagesFromLead.length} messages from lead for ${monitoringData.leadName}`);
+        if (messagesFromLead.length === 0) {
+            console.log(`⏭️ CALL FLOW: No new messages from lead for ${monitoringData.leadName} (all new messages are from us)`);
             return;
         }
         
-        console.log(`💬 New message from ${monitoringData.leadName}: "${latestMessage.text.substring(0, 50)}..."`);
+        console.log(`💬 Found ${messagesFromLead.length} new message(s) from ${monitoringData.leadName}`);
         
-        // Step 4: Update monitoring data with conversation URN ID if available
+        // Step 6: Update monitoring data with conversation URN ID if available
         if (conversationData.conversationUrnId && !monitoringData.conversationUrnId) {
             monitoringData.conversationUrnId = conversationData.conversationUrnId;
             await chrome.storage.local.set({ [key]: monitoringData });
         }
         
-        // Step 5: Store conversation and update monitoring
-        await storeConversationMessage({
-            call_id: String(monitoringData.callId),
-            message: latestMessage.text,
-            sender: 'lead',
-            message_type: 'lead_response',
-            lead_name: monitoringData.leadName,
-            connection_id: monitoringData.connectionId,
-            conversation_urn_id: monitoringData.conversationUrnId
-        });
+        // Step 7: Store all new messages from lead in database (async/fire-and-forget)
+        for (const leadMessage of messagesFromLead) {
+            storeConversationMessage({
+                call_id: String(monitoringData.callId),
+                message: leadMessage.text,
+                sender: 'lead',
+                message_type: 'lead_response',
+                lead_name: monitoringData.leadName,
+                connection_id: monitoringData.connectionId,
+                conversation_urn_id: monitoringData.conversationUrnId
+            }).catch(err => {
+                console.error('⚠️ Failed to store lead message to database:', err);
+            });
+        }
         
-        // Step 6: Check if we should analyze (avoid unnecessary AI calls)
+        // Step 8: Process the latest message from lead (most recent one)
+        const latestMessage = messagesFromLead[messagesFromLead.length - 1];
+        
+        // Step 9: Check if we should analyze (avoid unnecessary AI calls)
         const shouldAnalyze = await shouldAnalyzeMessage(monitoringData, latestMessage);
         if (!shouldAnalyze) {
+            // Update last processed even if not analyzing
+            await chrome.storage.local.set({
+                [lastProcessedKey]: {
+                    lastMessageId: latestMessage.id || lastProcessed.lastMessageId,
+                    lastTimestamp: latestMessage.timestamp || lastProcessed.lastTimestamp,
+                    lastSender: 'lead'
+                }
+            });
             await updateAllMonitoringEntriesForConnection(monitoringData.connectionId, latestMessage.id);
             return;
         }
         
-        // Step 7: AI Analysis (only when needed)
+        // Step 10: AI Analysis (only when needed)
         const analysisResponse = await processCallReplyWithAI(monitoringData.callId, latestMessage.text, monitoringData.leadName);
         
         if (!analysisResponse || (!analysisResponse.success && !analysisResponse.hasResponse)) {
             console.error(`❌ Analysis failed for ${monitoringData.leadName}`);
+            // Update last processed even on analysis failure
+            await chrome.storage.local.set({
+                [lastProcessedKey]: {
+                    lastMessageId: latestMessage.id || lastProcessed.lastMessageId,
+                    lastTimestamp: latestMessage.timestamp || lastProcessed.lastTimestamp,
+                    lastSender: 'lead'
+                }
+            });
+            await updateAllMonitoringEntriesForConnection(monitoringData.connectionId, latestMessage.id);
             return;
         }
         
-        // Step 8: Process response based on analysis
+        // Step 11: Process response based on analysis
         await processAnalysisResponse(monitoringData, analysisResponse, latestMessage, key);
         
-        // Step 9: Update all monitoring entries for this connection to mark message as processed
+        // Step 12: Update last processed tracker in Chrome storage (rock-solid duplicate prevention)
+        await chrome.storage.local.set({
+            [lastProcessedKey]: {
+                lastMessageId: latestMessage.id || lastProcessed.lastMessageId,
+                lastTimestamp: latestMessage.timestamp || lastProcessed.lastTimestamp,
+                lastSender: 'lead'
+            }
+        });
+        
+        // Also update monitoring data for backward compatibility
         await updateAllMonitoringEntriesForConnection(monitoringData.connectionId, latestMessage.id);
         
     } catch (error) {
@@ -10589,35 +10997,33 @@ const sendAIMessage = async (monitoringData, message, skipStorage = false) => {
         await sendLinkedInMessage(monitoringData, message);
         console.log('✅ AI message sent successfully to', monitoringData.leadName);
         
-        // Store the AI response in conversation history (unless skipped for pending messages)
+        // Store in Chrome storage IMMEDIATELY (primary tracking)
+        await storeSentMessageInChromeStorage(monitoringData.connectionId, message, 'ai', monitoringData.conversationUrnId);
+        
+        // Store the AI response in conversation history (unless skipped for pending messages) - async/fire-and-forget
         if (!skipStorage) {
-            console.log('🔍 DEBUG: Storing AI response in conversation history');
             if (monitoringData.callId) {
-            const result = await storeConversationMessage({
+                storeConversationMessage({
                     call_id: String(monitoringData.callId),
-                message: message,
-                sender: 'ai',
-                message_type: 'ai_response',
-                lead_name: monitoringData.leadName,
-                connection_id: monitoringData.connectionId,
-                conversation_urn_id: monitoringData.conversationUrnId
-            });
-            
-            if (!result) {
-                console.error('❌ Failed to store AI response in conversation history');
+                    message: message,
+                    sender: 'ai',
+                    message_type: 'ai_response',
+                    lead_name: monitoringData.leadName,
+                    connection_id: monitoringData.connectionId,
+                    conversation_urn_id: monitoringData.conversationUrnId
+                }).then(result => {
+                    if (result && result.call_id && result.call_id !== monitoringData.callId) {
+                        console.log('🔄 Database returned updated call_id:', result.call_id);
+                    }
+                    console.log('✅ AI message synced to database');
+                }).catch(err => {
+                    console.error('⚠️ Failed to sync AI message to database (will retry on next poll):', err);
+                });
             } else {
-                // Update monitoring data with the real call_id from server response
-                if (result.call_id && result.call_id !== monitoringData.callId) {
-                    console.log('🔄 Updating monitoring data with real call_id from AI response:', result.call_id);
-                    monitoringData.callId = result.call_id;
-                    // Note: We can't update storage here as we don't have the key, but the next lead message will update it
-                }
-                }
-            } else {
-                console.log('⚠️ No call_id available for AI response, skipping conversation storage');
+                console.log('⚠️ No call_id available for AI response, skipping database sync');
             }
         } else {
-            console.log('⏭️ Skipping conversation storage for pending message (already stored)');
+            console.log('⏭️ Skipping database sync for pending message (already stored)');
         }
         
         // Set up monitoring for responses to this AI message
@@ -12515,6 +12921,114 @@ async function clearCampaignDedupeFlags(campaignId) {
 
 // Clear dedupe flags for campaign 100 to allow retry (for testing)
 // clearCampaignDedupeFlags(100);
+
+/**
+ * Store sent message in Chrome storage (IMMEDIATE - Primary tracking method)
+ * This is called immediately when sending messages for fast, reliable tracking
+ */
+const storeSentMessageInChromeStorage = async (connectionId, message, sender, backendUrn = null) => {
+    try {
+        const messageTimestamp = Date.now();
+        const messageId = `msg_${messageTimestamp}`;
+        const storageKey = `sentMessages_${connectionId}`;
+        
+        // Get existing messages array
+        const storageData = await chrome.storage.local.get([storageKey]);
+        const messagesArray = storageData[storageKey] || [];
+        
+        // Add new message to array
+        messagesArray.push({
+            messageId: messageId,
+            text: message,
+            timestamp: messageTimestamp,
+            sender: sender, // 'user' or 'ai'
+            backendUrn: backendUrn
+        });
+        
+        // Update last processed tracker
+        const lastProcessedKey = `lastProcessed_${connectionId}`;
+        await chrome.storage.local.set({
+            [storageKey]: messagesArray,
+            [lastProcessedKey]: {
+                lastMessageId: messageId,
+                lastTimestamp: messageTimestamp,
+                lastSender: sender
+            }
+        });
+        
+        console.log(`✅ Message stored in Chrome storage (${sender}): ${messageId}`);
+        return true;
+    } catch (error) {
+        console.error('❌ Error storing message in Chrome storage:', error);
+        return false;
+    }
+};
+
+/**
+ * Check if a message was sent by us (checks Chrome storage first, then database fallback)
+ * Returns: { isFromUs: boolean, sender: 'user' | 'ai' | null }
+ */
+const checkIfMessageIsFromUs = async (connectionId, messageText, messageTimestamp) => {
+    try {
+        // METHOD 1: Check Chrome storage array (fastest, most reliable)
+        const storageKey = `sentMessages_${connectionId}`;
+        const storageData = await chrome.storage.local.get([storageKey]);
+        const sentMessages = storageData[storageKey] || [];
+        
+        const text = (messageText || '').trim();
+        const timestamp = messageTimestamp || Date.now();
+        
+        // Check each sent message for match
+        for (const sentMsg of sentMessages) {
+            const sentText = (sentMsg.text || '').trim();
+            
+            // Match by text (first 50 chars) AND timestamp (within 10 seconds)
+            const textMatch = sentText.substring(0, 50) === text.substring(0, 50) ||
+                           sentText.includes(text.substring(0, 30)) ||
+                           text.includes(sentText.substring(0, 30));
+            const timeMatch = Math.abs(sentMsg.timestamp - timestamp) < 10000; // 10 seconds tolerance
+            
+            if (textMatch && timeMatch) {
+                console.log(`✅ Chrome storage match: Found our ${sentMsg.sender} message`);
+                return { isFromUs: true, sender: sentMsg.sender };
+            }
+        }
+        
+        // METHOD 2: Fallback to database check
+        try {
+            const linkedinIdResult = await chrome.storage.local.get(['linkedinId']);
+            const currentLinkedInId = linkedinIdResult.linkedinId || 'vicken-concept';
+            const tokenResult = await chrome.storage.local.get(['csrfToken']);
+            
+            const checkResponse = await fetch(`${PLATFORM_URL}/api/conversation-messages/check-sent?connection_id=${connectionId}&message_text=${encodeURIComponent(text.substring(0, 100))}&timestamp=${timestamp}`, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'lk-id': currentLinkedInId,
+                    'csrf-token': tokenResult.csrfToken,
+                    'ngrok-skip-browser-warning': 'true'
+                }
+            });
+            
+            if (checkResponse.ok) {
+                const checkResult = await checkResponse.json();
+                if (checkResult.isOurMessage) {
+                    return { isFromUs: true, sender: checkResult.sender || 'user' };
+                }
+            }
+        } catch (dbError) {
+            console.log('⚠️ Database check failed:', dbError.message);
+        }
+        
+        // Not found - message is from lead
+        return { isFromUs: false, sender: null };
+    } catch (error) {
+        console.error('❌ Error checking if message is from us:', error);
+        return { isFromUs: false, sender: null };
+    }
+};
 
 // Function to store conversation message in call_status table
 async function storeConversationMessage(messageData) {
