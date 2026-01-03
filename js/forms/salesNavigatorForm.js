@@ -86,11 +86,16 @@ var salesNavigatorForm = `
 
 $('body').append(salesNavigatorForm)
 $('body').on('click','#sales-navigator-menu-click',function(){
+    if (typeof window.closeAllModals === 'function') {
+        window.closeAllModals();
+    }
     implementPermission('salesNavigatorAction')
     // $('#vcp-connSecondCheck').prop('checked', true);
     // let fieldId = 'vcp-audience-select';
     // getAudienceList(fieldId)
+    setTimeout(function() {
     $('#salesNavigatorForm').modal({backdrop:'static', keyboard:false, show:true})
+    }, 300);
 })
 
 $('.sn-new-list').click(function() {

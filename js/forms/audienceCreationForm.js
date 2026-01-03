@@ -32,6 +32,7 @@ var audienceCreationForm = `
                                     </div>
                                 </a>
                             </li>
+                            <!-- My Network tab commented out
                             <li class="nav-item">
                                 <a class="nav-link" id="nav-link-network" data-toggle="pill" href="#fnetwork">
                                     
@@ -43,6 +44,7 @@ var audienceCreationForm = `
                                     </div>
                                 </a>
                             </li>
+                            -->
                             <li class="nav-item">
                                 <a class="nav-link" id="nav-link-fpost" data-toggle="pill" href="#fpost">
                                     
@@ -54,6 +56,7 @@ var audienceCreationForm = `
                                     </div>
                                 </a>
                             </li>
+                            <!-- Event tab commented out
                             <li class="nav-item">
                                 <a class="nav-link" id="nav-link-fevent" data-toggle="pill" href="#fevent">
                                     
@@ -65,6 +68,8 @@ var audienceCreationForm = `
                                     </div>
                                 </a>
                             </li>
+                            -->
+                            <!-- Group tab commented out    
                             <li class="nav-item">
                                 <a class="nav-link" id="nav-link-fgroup" data-toggle="pill" href="#fgroup">
                                     
@@ -76,7 +81,7 @@ var audienceCreationForm = `
                                     </div>
                                 </a>
                             </li>
-                            
+                                -->        
                         </ul>
 
                         <div class="tab-content">
@@ -399,6 +404,7 @@ var audienceCreationForm = `
                                     </div>
                                 </div>
                             </div>
+                            <!-- My Network tab content commented out
                             <div id="fnetwork" class="container tab-pane">
                                 <p class="mb-2">Use this feature to collect your 1st degree connections. Sort order is <b>Recently added</b>, 
                                     which means start position 0 is the most recently added connection.
@@ -408,6 +414,7 @@ var audienceCreationForm = `
                                     number of users to be added to your audience list.
                                 </p>
                             </div>
+                            -->
                         </div>
                     </div>
                 </div>

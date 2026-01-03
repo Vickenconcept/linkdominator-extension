@@ -135,17 +135,54 @@ $('.messageTargetUserAction').click(async function() {
 
         // Process based on audience selection
         if (!form.audience.val()) {
-            console.log('🔍 No audience selected, using connection search...');
+            console.log('🔍 No audience selected, using PhantomBuster search...');
             
-            let query;
-            if (form.searchTerm.val()) {
-                query = `(keywords:${encodeURIComponent(form.searchTerm.val())},flagshipSearchIntent:SEARCH_SRP,queryParameters:(${queryParams}resultType:List(PEOPLE)),includeFiltersInResponse:false)`;
-            } else {
-                query = `(flagshipSearchIntent:SEARCH_SRP,queryParameters:(${queryParams}resultType:List(PEOPLE)),includeFiltersInResponse:false)`;
+            // Get keywords (search term or fallback)
+            const keywords = form.searchTerm.val() ? form.searchTerm.val().trim() : '';
+            
+            if (!keywords) {
+                $('#mtu-error-notice').html(`
+                    <div class="alert alert-danger">
+                        <i class="fas fa-exclamation-circle"></i> Please enter search keywords
+                    </div>
+                `);
+                $('.messageTargetUserAction').attr('disabled', false);
+                return;
             }
             
+            // Map connection degrees - default to all if not specified
+            // Check if there are connection degree checkboxes (similar to audience creation)
+            const degreeMap = {
+                'F': '1',
+                'S': '2',
+                'O': '3+'
+            };
+            let connectionDegrees = [];
+            
+            // Check for connection degree checkboxes (if they exist in UI)
+            if ($('#mtu-connFirstCheck').length && $('#mtu-connFirstCheck').prop('checked')) {
+                connectionDegrees.push('1');
+            }
+            if ($('#mtu-connSecondCheck').length && $('#mtu-connSecondCheck').prop('checked')) {
+                connectionDegrees.push('2');
+            }
+            if ($('#mtu-connThirdCheck').length && $('#mtu-connThirdCheck').prop('checked')) {
+                connectionDegrees.push('3+');
+            }
+            
+            // If no connection degrees selected, default to all (2nd and 3rd+)
+            if (connectionDegrees.length === 0) {
+                connectionDegrees = ['2', '3+'];
+            }
+            
+            // Build LinkedIn search URL using reusable function
+            const searchUrl = window.buildLinkedInSearchUrl ? 
+                window.buildLinkedInSearchUrl(keywords, 'mtu-', ['S', 'O']) : '';
+            
             await mtuGetConnections(
-                query,
+                searchUrl,
+                keywords,
+                connectionDegrees,
                 processedValues.startPosition,
                 processedValues.total,
                 processedValues.delay,
@@ -173,71 +210,88 @@ $('.messageTargetUserAction').click(async function() {
     }
 });
 
-const mtuGetConnections = async (queryParams,mtuStartP,mtuTotal,mtuDelay,mtuMessage,mtuConnectionIds) => {
+const mtuGetConnections = async (searchUrl, keywords, connectionDegrees, mtuStartP, mtuTotal, mtuDelay, mtuMessage, mtuConnectionIds) => {
     $('.message-target-notice').show()
     $('#displayMessageTargetStatus').empty()
     $('#displayMessageTargetStatus').html('Scanning. Please wait...')
     let messageItems = [], totalResultCount = 0;
 
-    let getConnectionsLooper = () => {
-        setTimeout(async () => {
-            await $.ajax({
-                method: 'get',
-                beforeSend: function(request) {
-                    request.setRequestHeader('csrf-token', jsession);
-                    request.setRequestHeader('accept', 'application/vnd.linkedin.normalized+json+2.1');
-                    request.setRequestHeader('content-type', contentType);
-                    request.setRequestHeader('x-li-lang', xLiLang);
-                    request.setRequestHeader('x-li-page-instance', 'urn:li:page:d_flagship3_search_srp_people;QazGJ/pNTwuq6OTtMClfPw==');
-                    request.setRequestHeader('x-li-track', JSON.stringify({"clientVersion":"1.10.1335","osName":"web","timezoneOffset":1,"deviceFormFactor":"DESKTOP","mpName":"voyager-web"}));
-                    request.setRequestHeader('x-restli-protocol-version', xRestliProtocolVersion);
-                },
-                url: `${voyagerBlockSearchUrl}&query=${queryParams}&start=${mtuStartP}`,
-                success: function(data) {
-                    let res = {'data': data}
-                    let elements = res['data'].data.elements
+    let getConnectionsLooper = async () => {
+        try {
+            // Use PhantomBuster instead of Voyager API
+            const response = await window.fetchPhantomSearchResults({
+                searchUrl: searchUrl || null,
+                keywords: keywords,
+                connectionDegrees: connectionDegrees,
+                limit: mtuTotal,
+                startPosition: mtuStartP
+            });
 
-                    if(elements.length) {
-                        if(totalResultCount == 0)
-                            totalResultCount = res['data'].data.metadata.totalResultCount
+            // Response format: { data: { elements: [...], included: [...] }, included: [...] }
+            let elements = response.data?.elements || response.elements || [];
+            let included = response.included || [];
 
-                        if(elements[1].items.length) {
-                            for(let item of elements[1].items) {
-                                messageItems.push(item)
-                            }
-
-                            if(messageItems.length < mtuTotal) {
-                                mtuStartP = parseInt(mtuStartP) + 11
-                                $('#mtu-startPosition').val(mtuStartP)
-                                getConnectionsLooper()
-                            }else {
-                                mtuCleanConnectionsData(messageItems,totalResultCount,mtuDelay,mtuMessage,mtuConnectionIds)
-                            }
-                        }else if(!elements[1].items.length && !messageItems.length) {
-                            $('#displayMessageTargetStatus').html('No result found, change your search criteria and try again!')
-                            $('.messageTargetUserAction').attr('disabled', false)
-                        }else if(!elements[1].items.length && messageItems.length) {
-                            $('#displayMessageTargetStatus').html(`Found ${messageItems.length}. Messaging...`)
-                            mtuCleanConnectionsData(messageItems,totalResultCount,mtuDelay,mtuMessage,mtuConnectionIds)
-                        }
-
-                    }else if(messageItems.length) {
-                        $('#displayMessageTargetStatus').html(`Found ${messageItems.length}. Messaging...`)
-                        mtuCleanConnectionsData(messageItems,totalResultCount,mtuDelay,mtuMessage,mtuConnectionIds)
-                    }else {
-                        $('#displayMessageTargetStatus').html('No result found, change your search criteria and try again!')
-                        $('.messageTargetUserAction').attr('disabled', false)
-                    }
-                },
-                error: function(error){
-                    console.log(error)
-                    $('#displayMessageTargetStatus').html('Something went wrong while trying to get connections!')
-                    $('.messageTargetUserAction').attr('disabled', false)
+            // Find the element that contains the search results
+            let searchResultElement = null;
+            for(let i = 0; i < elements.length; i++) {
+                if(elements[i] && elements[i].items && elements[i].items.length > 0) {
+                    searchResultElement = elements[i];
+                    break;
                 }
-            })
-        },10000)
+            }
+
+            if(searchResultElement && searchResultElement.items && searchResultElement.items.length > 0) {
+                // Add items from elements
+                for(let item of searchResultElement.items) {
+                    messageItems.push(item);
+                }
+
+                // Also add items from included array
+                for(let item of included) {
+                    if(item.title && item.title.text && !item.title.text.includes('LinkedIn Member')) {
+                        // Check if already added (avoid duplicates)
+                        const alreadyAdded = messageItems.some(m => 
+                            m.trackingId === item.trackingId || 
+                            m.navigationUrl === item.navigationUrl
+                        );
+                        if(!alreadyAdded) {
+                            messageItems.push(item);
+                        }
+                    }
+                }
+
+                if(totalResultCount == 0) {
+                    totalResultCount = response.data?.metadata?.totalResultCount || messageItems.length;
+                }
+
+                if(messageItems.length < mtuTotal) {
+                    // Continue pagination
+                    mtuStartP = parseInt(mtuStartP) + messageItems.length;
+                    $('#mtu-startPosition').val(mtuStartP);
+                    setTimeout(() => {
+                        getConnectionsLooper();
+                    }, 10000);
+                } else {
+                    // Got enough results
+                    mtuCleanConnectionsData(messageItems, totalResultCount, mtuDelay, mtuMessage, mtuConnectionIds);
+                }
+            } else if(messageItems.length > 0) {
+                // No more results but we have some
+                $('#displayMessageTargetStatus').html(`Found ${messageItems.length}. Messaging...`);
+                mtuCleanConnectionsData(messageItems, totalResultCount, mtuDelay, mtuMessage, mtuConnectionIds);
+            } else {
+                // No results found
+                $('#displayMessageTargetStatus').html('No result found, change your search criteria and try again!');
+                $('.messageTargetUserAction').attr('disabled', false);
+            }
+        } catch(error) {
+            console.error('Error fetching connections:', error);
+            $('#displayMessageTargetStatus').html(`Error: ${error.message || 'Something went wrong while trying to get connections!'}`);
+            $('.messageTargetUserAction').attr('disabled', false);
+        }
     }
-    getConnectionsLooper()
+    
+    getConnectionsLooper();
 }
 
 const mtuCleanConnectionsData = (messageItems, totalResultCount, mtuDelay, mtuMessage, mtuConnectionIds) => {
@@ -273,17 +327,84 @@ const mtuCleanConnectionsData = (messageItems, totalResultCount, mtuDelay, mtuMe
         localStorage.setItem('lkm-mtu', JSON.stringify(getMtuStore));
 
         for (let item of messageItems) {
-            profileUrn = item.itemUnion['*entityResult'];
-            if (profileUrn.includes('urn:li:fsd_entityResultViewModel:(urn:li:fsd_profile:') && 
-                profileUrn.includes(',SEARCH_SRP,DEFAULT)')) {
+            let publicIdentifier = null;
+            let fullName = '';
+            let firstName = '';
+            let lastName = '';
+            let netDistance = 2; // Default to 2nd degree
+            
+            // Extract name from PhantomBuster/LinkedIn API format
+            if (item.title && item.title.text) {
+                fullName = item.title.text.trim();
+                // Try to split name into first and last
+                const nameParts = fullName.split(' ');
+                firstName = nameParts[0] || '';
+                lastName = nameParts.slice(1).join(' ') || '';
+            }
+            
+            // Extract connection distance from PhantomBuster data
+            if (item.entityCustomTrackingInfo && item.entityCustomTrackingInfo.memberDistance) {
+                const distanceStr = item.entityCustomTrackingInfo.memberDistance;
+                if (distanceStr.includes('DISTANCE_1') || distanceStr === '1') {
+                    netDistance = 1;
+                } else if (distanceStr.includes('DISTANCE_2') || distanceStr === '2') {
+                    netDistance = 2;
+                } else {
+                    netDistance = 3;
+                }
+            }
+            
+            // Handle PhantomBuster/LinkedIn API format (new format)
+            if (item.entityUrn) {
+                // Extract from entityUrn: "urn:li:fsd_entityResultViewModel:(urn:li:fsd_profile:username,SEARCH_SRP,DEFAULT)"
+                const match = item.entityUrn.match(/urn:li:fsd_profile:([^,]+)/);
+                if (match && match[1]) {
+                    publicIdentifier = match[1];
+                }
+            } 
+            
+            if (!publicIdentifier && item.navigationUrl) {
+                // Extract from navigationUrl: "https://www.linkedin.com/in/username"
+                const match = item.navigationUrl.match(/\/in\/([^\/\?]+)/);
+                if (match && match[1]) {
+                    publicIdentifier = match[1];
+                }
+            } 
+            
+            if (!publicIdentifier && item.trackingUrn) {
+                // Extract from trackingUrn: "urn:li:member:username"
+                const match = item.trackingUrn.match(/urn:li:member:(.+)/);
+                if (match && match[1]) {
+                    publicIdentifier = match[1];
+                }
+            }
+            
+            // Handle old Voyager API format (legacy format)
+            if (!publicIdentifier && item.itemUnion && item.itemUnion['*entityResult']) {
+                profileUrn = item.itemUnion['*entityResult'];
+                if (profileUrn && profileUrn.includes('urn:li:fsd_entityResultViewModel:(urn:li:fsd_profile:') && 
+                    profileUrn.includes(',SEARCH_SRP,DEFAULT)')) {
+                    profileUrn = profileUrn.replace('urn:li:fsd_entityResultViewModel:(urn:li:fsd_profile:', '');
+                    profileUrn = profileUrn.replace(',SEARCH_SRP,DEFAULT)', '');
+                    publicIdentifier = profileUrn;
+                }
+            }
 
-                profileUrn = profileUrn.replace('urn:li:fsd_entityResultViewModel:(urn:li:fsd_profile:', '');
-                profileUrn = profileUrn.replace(',SEARCH_SRP,DEFAULT)', '');
-
+            if (publicIdentifier) {
                 conArr.push({
-                    conId: profileUrn,
-                    totalResultCount: totalResultCount
+                    conId: publicIdentifier,
+                    name: fullName || `${firstName} ${lastName}`.trim() || 'LinkedIn Member',
+                    firstName: firstName,
+                    lastName: lastName,
+                    netDistance: netDistance,
+                    totalResultCount: totalResultCount,
+                    // Include additional data for reference
+                    navigationUrl: item.navigationUrl || null,
+                    trackingUrn: item.trackingUrn || null,
+                    title: item.primarySubtitle?.text || null
                 });
+            } else {
+                console.warn('⚠️ Could not extract public identifier from item:', item);
             }
         }
 
@@ -307,7 +428,20 @@ const mtuCleanConnectionsData = (messageItems, totalResultCount, mtuDelay, mtuMe
         }
 
         console.log(`✅ Found ${totalMessage.length} connections to message`);
-        mtuGetProfileInfo(mtuMessage, mtuDelay, totalMessage);
+        
+        // Build profile info array with data we already have from PhantomBuster
+        // No need to call deprecated Voyager API endpoints
+        const profileInfos = totalMessage.map(conn => ({
+            name: conn.name || `${conn.firstName} ${conn.lastName}`.trim() || 'LinkedIn Member',
+            firstName: conn.firstName || '',
+            lastName: conn.lastName || '',
+            conId: conn.conId,
+            netDistance: conn.netDistance || 2
+        }));
+        
+        console.log('📋 Profile info prepared from PhantomBuster data:', profileInfos);
+        // Call send message function directly with profile info
+        mtuSendMessageToConnection(mtuMessage, mtuDelay, profileInfos);
 
     } catch (error) {
         console.error('❌ Error in mtuCleanConnectionsData:', error);
@@ -443,70 +577,8 @@ const mtuGetAudienceData = async (mtuMessage, mtuDelay, audience) => {
     }
 };
 
-const mtuGetProfileInfo = (mtuMessage, mtuDelay, totalMessage) => {
-    $('#displayMessageTargetStatus').html('Getting connection info. Please wait...')
-    let profileInfos = [], i = 0;
-
-    let gciLooper = () => {
-        setTimeout(async () => {
-            await $.ajax({
-                method: 'get',
-                beforeSend: function(request) {
-                    request.setRequestHeader('csrf-token', jsession);
-                    request.setRequestHeader('accept', acceptVnd);
-                    request.setRequestHeader('content-type', contentType);
-                    request.setRequestHeader('x-li-lang', xLiLang);
-                    request.setRequestHeader('x-li-page-instance', 'urn:li:page:d_flagship3_feed;kk0zM9LQRYi/in3qM6Bi5w==');
-                    request.setRequestHeader('x-li-track', JSON.stringify({"clientVersion":"1.10.3070","osName":"web","timezoneOffset":1,"deviceFormFactor":"DESKTOP","mpName":"voyager-web"}));
-                    request.setRequestHeader('x-restli-protocol-version', xRestliProtocolVersion);
-                },
-                url: `${voyagerApi}/identity/profiles/${totalMessage[i].conId}/profileContactInfo`,
-                success: function(data) {
-                    var resp = {'data': data};
-                    var distance = 2
-
-                    if (resp['data'].data) {
-                        if(resp['data'].data.hasOwnProperty('connectedAt') && resp['data'].data.connectedAt)
-                            distance = 1
-                        else
-                            distance = 2
-                        
-                        let profileViewCall = async () => {
-                            await $.ajax({
-                                method: 'get',
-                                async: false,
-                                beforeSend: function(request) {
-                                    request.setRequestHeader('csrf-token', jsession);
-                                },
-                                url: `${voyagerApi}/identity/profiles/${totalMessage[i].conId}/profileView`,
-                                success: function(data) {
-                                    var res = {'data': data}
-
-                                    if(res['data'].profile.entityUrn) {
-                                        profileInfos.push({
-                                            name: res['data'].profile.firstName +' '+  res['data'].profile.lastName,
-                                            firstName: res['data'].profile.firstName,
-                                            lastName: res['data'].profile.lastName,
-                                            conId: totalMessage[i].conId,
-                                            netDistance: distance,
-                                        })
-                                    }
-                                }
-                            })
-                        }
-                        profileViewCall()
-                    }
-                }
-            })
-            i++;
-            if(i < totalMessage.length) 
-                gciLooper();
-            else 
-                mtuSendMessageToConnection(mtuMessage, mtuDelay, profileInfos);
-        }, 30000)
-    }
-    gciLooper()
-}
+// Removed mtuGetProfileInfo - functionality now integrated into mtuCleanConnectionsData
+// Profile data is already extracted from PhantomBuster response, no need for Voyager API calls
 
 // var timeOutMsgTargetUsers;
 // const mtuSendMessage = async (mtuMessage, mtuDelay, totalMessage) => {

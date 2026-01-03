@@ -450,6 +450,9 @@ $('#gci-audience-select').change(function(){
 });
 
 $('#connection-info-menu-click').click(function(){
+    if (typeof window.closeAllModals === 'function') {
+        window.closeAllModals();
+    }
     implementPermission('connectionInfoAction')
     let fieldId = 'gci-audience-select';
     getAudienceList(fieldId)
@@ -458,5 +461,7 @@ $('#connection-info-menu-click').click(function(){
     // Reset to audience method by default
     $('#gci-audience-method-card').click();
     
-    $('#connectionInfoForm').modal({backdrop:'static', keyboard:false, show:true})
+    setTimeout(function() {
+        $('#connectionInfoForm').modal({backdrop:'static', keyboard:false, show:true})
+    }, 300);
 })

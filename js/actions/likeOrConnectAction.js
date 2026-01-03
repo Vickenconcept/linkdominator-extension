@@ -215,7 +215,7 @@ const loacLikePost = async (loacPostArr, loacDelay) => {
                 },
                 error: function(error){
                     console.log(error)
-                    if(error.hasOwnProperty('responseJSON')){
+                    if(error.hasOwnProperty('responseJSON') && error.responseJSON && error.responseJSON.data && error.responseJSON.data.message){
                         $('#loac-displayLikeAddConnectStatus').empty()
                         loacDisplayLi = `
                             <li>${error.responseJSON.data.message}</li>

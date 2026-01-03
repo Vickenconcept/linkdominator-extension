@@ -140,6 +140,9 @@ var newJobCongratsForm = `
 
 $('body').append(newJobCongratsForm)
 $('body').on('click','#new-job-menu-click',function(){
+    if (typeof window.closeAllModals === 'function') {
+        window.closeAllModals();
+    }
     implementPermission('newJobCongratsAction')
 
     // Mount file list if exists
@@ -150,7 +153,9 @@ $('body').on('click','#new-job-menu-click',function(){
         delay: '#njc-delayTime'
     })
 
-    $('#newJobCongratsForm').modal({backdrop:'static', keyboard:false, show:true})
+    setTimeout(function() {
+        $('#newJobCongratsForm').modal({backdrop:'static', keyboard:false, show:true})
+    }, 300);
 })
 $('body').on('click','.njc-pm-btn',function(){
     var pmName = $(this).data('name')

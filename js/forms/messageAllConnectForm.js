@@ -169,6 +169,9 @@ var messageAllConnectForm = `
 
 $('body').append(messageAllConnectForm)
 $('body').on('click','#message-connect-menu-click',function(){
+    if (typeof window.closeAllModals === 'function') {
+        window.closeAllModals();
+    }
     console.log('🔍 Opening Message All Connections modal...');
     
     // Initialize storage if not exists
@@ -234,11 +237,13 @@ $('body').on('click','#message-connect-menu-click',function(){
     }
 
     // Show modal
+    setTimeout(function() {
     $('#messageAllConnectForm').modal({
         backdrop: 'static', 
         keyboard: false, 
         show: true
     });
+    }, 300);
 })
 
 $('body').on('click','.mac-pm-btn',function(){

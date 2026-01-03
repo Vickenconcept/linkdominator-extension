@@ -165,12 +165,32 @@ $('body').on('click', '.addConnect', function(){
             }
             // If search method is selected and no audience, use search parameters
             else if(searchMethodSelected || (!audienceMethodSelected && !searchMethodSelected)) {
-                if($('#addc-search-term').val())
-                    query = `(keywords:${encodeURIComponent($('#addc-search-term').val())},flagshipSearchIntent:SEARCH_SRP,queryParameters:(${queryParams}resultType:List(PEOPLE)),includeFiltersInResponse:false)`
-                else
-                    query = `(flagshipSearchIntent:SEARCH_SRP,queryParameters:(${queryParams}resultType:List(PEOPLE)),includeFiltersInResponse:false)`;
-                console.log('Using search parameters, query:', query);
-                addcGetConnections(addcConnectIdList,query,addcTotalFollow,addcStart,addcDelayFollowTime)
+                // Get keywords (search term or fallback to positive keywords)
+                const keywords = $('#addc-search-term').val() ? $('#addc-search-term').val().trim() : 
+                                ($('#addc-keywordsForConnect').val() ? $('#addc-keywordsForConnect').val().trim() : '');
+                
+                if (!keywords) {
+                    $('#addc-error-notice').html('Please enter search keywords or positive keywords');
+                    $('.addConnect').attr('disabled', false);
+                    return;
+                }
+
+                // Map connection degrees from UI checkboxes (F, S, O) to PhantomBuster format ('1', '2', '3+')
+                const degreeMap = {
+                    'F': '1',
+                    'S': '2',
+                    'O': '3+'
+                };
+                const mappedDegrees = addcDegreeArr.length
+                    ? addcDegreeArr.map(d => degreeMap[d] || d)
+                    : ['2', '3+']; // Default to 2nd and 3rd+ if none selected
+
+                // Build LinkedIn search URL using reusable function
+                const searchUrl = window.buildLinkedInSearchUrl ? 
+                    window.buildLinkedInSearchUrl(keywords, 'addc-', addcDegreeArr.length ? addcDegreeArr : ['S', 'O']) : '';
+
+                console.log('Using PhantomBuster search:', { searchUrl, keywords, connectionDegrees: mappedDegrees });
+                addcGetConnections(addcConnectIdList, searchUrl, keywords, mappedDegrees, addcTotalFollow, addcStart, addcDelayFollowTime)
             }
             // If no method is selected, show error
             else {
@@ -871,7 +891,104 @@ var timeOutGetCon;
 
 // }
 
-const addcGetConnections = (addcConnectIdList,queryParams,addcTotalFollow,addcStart,addcDelayConnectTime) => {
+const addcGetConnections = (addcConnectIdList, searchUrl, keywords, connectionDegrees, addcTotalFollow, addcStart, addcDelayConnectTime) => {
+    console.log('Fetching connections with PhantomBuster:', { searchUrl, keywords, connectionDegrees, total: addcTotalFollow, start: addcStart });
+    $('.add-connect').show()
+    $('#addc-displayConnectStatus').empty()
+    $('#addc-displayConnectStatus').html('Scanning. Please wait...')
+    let connectionItems = [], totalResultCount = 0;
+
+    let getConnectionsLooper = async () => {
+        try {
+            // Use PhantomBuster instead of Voyager API
+            const response = await window.fetchPhantomSearchResults({
+                searchUrl: searchUrl || null,
+                keywords: keywords,
+                connectionDegrees: connectionDegrees,
+                limit: addcTotalFollow,
+                startPosition: addcStart
+            });
+
+            // Response format: { data: { elements: [...], included: [...] }, included: [...] }
+            let elements = response.data?.elements || response.elements || [];
+            let included = response.included || [];
+
+            // Find the element that contains the search results
+            let searchResultElement = null;
+            for(let i = 0; i < elements.length; i++) {
+                if(elements[i] && elements[i].items && elements[i].items.length > 0) {
+                    searchResultElement = elements[i];
+                    break;
+                }
+            }
+
+            if(searchResultElement && searchResultElement.items && searchResultElement.items.length > 0) {
+                if(totalResultCount == 0) {
+                    totalResultCount = response.data?.metadata?.totalResultCount || searchResultElement.items.length;
+                }
+
+                // Process items from included array
+                for(let item of included) {
+                    // Perform checks
+                    if(item.hasOwnProperty('title') && item.hasOwnProperty('primarySubtitle')) {
+                        if(item.title.text && item.primarySubtitle.text && item.title.text.includes('LinkedIn Member') == false) {
+                            // Apply keyword filtering if enabled
+                            if(getAdcConnectParams.positiveKeywords && $('#addc-connectUser').prop('checked') == true) {
+                                const keywords = getAdcConnectParams.positiveKeywords.split(',').map(k => k.trim().toLowerCase());
+                                const matches = keywords.some(text => 
+                                    item.title.text.toLowerCase().includes(text) || 
+                                    item.primarySubtitle.text.toLowerCase().includes(text)
+                                );
+                                if(matches) {
+                                    connectionItems.push(item);
+                                }
+                            } else if(getAdcConnectParams.negativeKeywords && $('#addc-excludeUser').prop('checked') == true) {
+                                const keywords = getAdcConnectParams.negativeKeywords.split(',').map(k => k.trim().toLowerCase());
+                                const matches = keywords.every(text => 
+                                    !item.title.text.toLowerCase().includes(text) && 
+                                    !item.primarySubtitle.text.toLowerCase().includes(text)
+                                );
+                                if(matches) {
+                                    connectionItems.push(item);
+                                }
+                            } else {
+                                connectionItems.push(item);
+                            }
+                        }
+                    }
+                }
+
+                if(connectionItems.length < addcTotalFollow) {
+                    // Continue pagination
+                    addcStart = parseInt(addcStart) + connectionItems.length;
+                    $('#addc-startPosition').val(addcStart);
+                    setTimeout(() => {
+                        getConnectionsLooper();
+                    }, 10000);
+                } else {
+                    // Got enough results
+                    addcCleanConnectionsData(connectionItems, totalResultCount, addcConnectIdList, addcDelayConnectTime);
+                }
+            } else {
+                if(connectionItems.length) {
+                    addcCleanConnectionsData(connectionItems, totalResultCount, addcConnectIdList, addcDelayConnectTime);
+                } else {
+                    $('#addc-displayConnectStatus').html('No result found, change your search criteria and try again!');
+                    $('.addConnect').attr('disabled', false);
+                }
+            }
+        } catch(error) {
+            console.error('Error fetching connections:', error);
+            $('#addc-displayConnectStatus').html(`Error: ${error.message || 'Something went wrong while trying to get connections!'}`);
+            $('.addConnect').attr('disabled', false);
+        }
+    }
+    
+    getConnectionsLooper();
+}
+
+// Old Voyager API implementation (kept for reference but replaced above)
+const addcGetConnections_OLD = (addcConnectIdList,queryParams,addcTotalFollow,addcStart,addcDelayConnectTime) => {
     console.log('Fetching connections with params:', queryParams, 'Total:', addcTotalFollow, 'Start:', addcStart);
     $('.add-connect').show()
     $('#addc-displayConnectStatus').empty()

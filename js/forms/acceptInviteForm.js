@@ -105,8 +105,13 @@ var acceptInviteForm = `
 $('body').append(acceptInviteForm)
 $('#ari-message-block').hide()
 $('#accept-invite-menu-click').click(function(){
+    if (typeof window.closeAllModals === 'function') {
+        window.closeAllModals();
+    }
     implementPermission('acceptInviteAction')
-    $('#acceptInviteForm').modal({backdrop:'static', keyboard:false, show:true});
+    setTimeout(function() {
+        $('#acceptInviteForm').modal({backdrop:'static', keyboard:false, show:true});
+    }, 300);
 })
 $('#ari-activate-pm').change(function(){
     if($(this).prop('checked') == true){

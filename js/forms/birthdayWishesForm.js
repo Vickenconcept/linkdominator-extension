@@ -126,6 +126,9 @@ var birthdayWishForm = `
 
 $('body').append(birthdayWishForm)
 $('body').on('click','#birthday-wish-menu-click',function(){
+    if (typeof window.closeAllModals === 'function') {
+        window.closeAllModals();
+    }
     implementPermission('birthdayWishAction')
 
     // Mount file list if exists
@@ -136,7 +139,9 @@ $('body').on('click','#birthday-wish-menu-click',function(){
         delay: '#bdw-delayTime'
     })
 
-    $('#birthdayWishForm').modal({backdrop:'static', keyboard:false, show:true})
+    setTimeout(function() {
+        $('#birthdayWishForm').modal({backdrop:'static', keyboard:false, show:true})
+    }, 300);
 })
 $('body').on('click','.bdw-pm-btn',function(){
     var pmName = $(this).data('name')

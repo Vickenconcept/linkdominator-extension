@@ -254,12 +254,19 @@ const getAudienceNameList = async () => {
     } catch (error) {
         console.error('❌ Error in getAudienceNameList:', error);
         
+        let errorMessage = error.message || 'Failed to load audiences. Please try again.';
+        
+        // Provide helpful message for ngrok errors
+        if (errorMessage === 'ngrok_warning_page' || errorMessage.includes('ngrok') || errorMessage.includes('DOCTYPE html')) {
+            errorMessage = 'ngrok is blocking API requests. Solutions:\n1. Add "ngrok-skip-browser-warning: true" header (already added)\n2. Upgrade ngrok plan\n3. Use ngrok with --host-header flag\n4. Use a different tunneling solution';
+        }
+        
         // Show error message to user
         $('#audience-name-list').html(`
             <tr>
                 <td colspan="6" class="text-center text-danger">
                     <i class="fas fa-exclamation-triangle"></i> 
-                    Failed to load audiences. ${error.message || 'Please try again.'}
+                    ${errorMessage}
                     <br><small>Check console for details</small>
                 </td>
             </tr>
@@ -284,65 +291,143 @@ $('body').on('click','.get-audience-list', function(){
     var audience_id = $(this).data('audid');
     var displayList = '';
 
-    $.ajax({
-        method: 'get',
-        url: `${filterApi}/audience/list?audienceId=${audience_id}`,
-        success: function(data){
-            if(data && data.audience && data.audience.length > 0){
-                $('.user-list-name').html(audience_name)
-                var userInfo = data.audience;
+    console.log('🔍 Viewing audience list:', {
+        audience_name: audience_name,
+        audience_id: audience_id,
+        audience_id_type: typeof audience_id,
+        api_url: `${filterApi}/audience/list?audienceId=${audience_id}`
+    });
 
-                $('#pager-user-list').pagination({
-                    dataSource: userInfo,
-                    className: 'paginationjs-theme-blue',
-                    pageSize: 5,
-                    callback: function(userInfo, pagination) {
-                        $('#audience-user-list').empty()
-                        
-                        $.each(userInfo, function(i,item){
-                            let distance = item.con_distance == null ? '' : item.con_distance.split('_')[1];
-                            if(distance == '1')
-                                distance = '1st';
-                            else if(distance == '2')
-                                distance = '2nd';
-                            else
-                                distance = '3rd';
-
-                            displayList = `
-                                <tr class="user-list${item.id}" >
-                                    <td>${item.con_first_name}</td>
-                                    <td>${item.con_last_name}</td>
-                                    <td title="${item.con_job_title}">
-                                        ${item.con_job_title != null ? (item.con_job_title).replace(/(.{24})..+/, "$1…") : ''}
-                                    </td>
-                                    <td title="${item.con_location}">
-                                        ${item.con_location != null ? (item.con_location).replace(/(.{15})..+/, "$1…") : ''}
-                                    </td>
-                                    <td>${formatDate(item.created_at)}</td>
-                                    <td>${distance}</td>
-                                    <td>
-                                        <a href="https://www.linkedin.com/in/${item.con_public_identifier}" target="_blank">
-                                            <i class="fas fa-external-link-alt"></i>
-                                        </a>&nbsp;
-                                        <i class="far fa-trash-alt cursorr delete-user" data-rowid="${item.id}"></i>
-                                    </td>
-                                </tr>
-                            `;
-                            $('#audience-user-list').append(displayList)
-                        })
-                    }
-                })
-
-                
-            }else{
-                $('#audience-user-list').empty()
-                $('#audience-user-list').html('No data available!')
+    // Use apiRequest if available (handles ngrok bypass), otherwise fallback to jQuery
+    if (typeof apiRequest !== 'undefined') {
+        console.log('✅ Using enhanced apiRequest for audience list');
+        apiRequest(`${filterApi}/audience/list?audienceId=${audience_id}`, {
+            method: 'GET'
+        })
+        .then(function(response) {
+            const data = response.data || response;
+            handleAudienceListResponse(data, audience_name);
+        })
+        .catch(function(error) {
+            console.error('❌ Error fetching audience list:', error);
+            let errorMessage = 'Failed to load audience list. ';
+            if (error.message === 'ngrok_warning_page' || error.message?.includes('ngrok')) {
+                errorMessage += 'ngrok is blocking the request. Please check your ngrok configuration.';
+            } else {
+                errorMessage += error.message || 'Please try again.';
             }
-        },
-        error: function(error){
-            console.log(error)
+            $('#audience-user-list').empty()
+            $('#audience-user-list').html(`<tr><td colspan="7" class="text-center text-danger">${errorMessage}</td></tr>`)
+        });
+    } else {
+        // Fallback to jQuery AJAX
+        $.ajax({
+            method: 'get',
+            dataType: 'json',
+            headers: {
+                'lk-id': linkedinId,
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+                'ngrok-skip-browser-warning': 'true',
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            url: `${filterApi}/audience/list?audienceId=${audience_id}`,
+            success: function(data){
+                handleAudienceListResponse(data, audience_name);
+            },
+            error: function(xhr, status, error) {
+                console.error('❌ Error fetching audience list:', {
+                    status: status,
+                    error: error,
+                    statusCode: xhr.status,
+                    responseText: xhr.responseText.substring(0, 200)
+                });
+                
+                let errorMessage = 'Failed to load audience list. ';
+                if (xhr.status === 0) {
+                    errorMessage += 'Network error or ngrok connection issue.';
+                } else if (xhr.status >= 500) {
+                    errorMessage += 'Server error. Please try again later.';
+                } else {
+                    errorMessage += 'Please check your connection and try again.';
+                }
+                
+                $('#audience-user-list').empty()
+                $('#audience-user-list').html(`<tr><td colspan="7" class="text-center text-danger">${errorMessage}</td></tr>`)
+            }
+        });
+    }
+
+    // Helper function to handle audience list response
+    function handleAudienceListResponse(data, audience_name) {
+        // Check if response is HTML (error page) instead of JSON
+        if (typeof data === 'string' && data.trim().startsWith('<!DOCTYPE')) {
+            console.error('❌ Received HTML instead of JSON response. This might be an ngrok warning page or error page.');
+            $('#audience-user-list').empty()
+            $('#audience-user-list').html('<tr><td colspan="7" class="text-center text-danger">Error: Received invalid response from server. Please check your ngrok configuration or try again.</td></tr>')
+            return;
         }
-    })
+
+        console.log('✅ Audience list response:', {
+            has_data: !!data,
+            has_audience: !!(data && data.audience),
+            audience_length: data && data.audience ? data.audience.length : 0,
+            full_response: data
+        });
+        
+        if(data && data.audience && data.audience.length > 0){
+            $('.user-list-name').html(audience_name)
+            var userInfo = data.audience;
+
+            $('#pager-user-list').pagination({
+                dataSource: userInfo,
+                className: 'paginationjs-theme-blue',
+                pageSize: 5,
+                callback: function(userInfo, pagination) {
+                    $('#audience-user-list').empty()
+                    
+                    $.each(userInfo, function(i,item){
+                        let distance = item.con_distance == null ? '' : item.con_distance.split('_')[1];
+                        if(distance == '1')
+                            distance = '1st';
+                        else if(distance == '2')
+                            distance = '2nd';
+                        else
+                            distance = '3rd';
+
+                        displayList = `
+                            <tr class="user-list${item.id}" >
+                                <td>${item.con_first_name}</td>
+                                <td>${item.con_last_name}</td>
+                                <td title="${item.con_job_title}">
+                                    ${item.con_job_title != null ? (item.con_job_title).replace(/(.{24})..+/, "$1…") : ''}
+                                </td>
+                                <td title="${item.con_location}">
+                                    ${item.con_location != null ? (item.con_location).replace(/(.{15})..+/, "$1…") : ''}
+                                </td>
+                                <td>${formatDate(item.created_at)}</td>
+                                <td>${distance}</td>
+                                <td>
+                                    <a href="https://www.linkedin.com/in/${item.con_public_identifier}" target="_blank">
+                                        <i class="fas fa-external-link-alt"></i>
+                                    </a>&nbsp;
+                                    <i class="far fa-trash-alt cursorr delete-user" data-rowid="${item.id}"></i>
+                                </td>
+                            </tr>
+                        `;
+                        $('#audience-user-list').append(displayList)
+                    })
+                }
+            })
+        }else{
+            console.warn('⚠️ No users found in audience list', {
+                audience_id: audience_id,
+                response: data
+            });
+            $('#audience-user-list').empty()
+            $('#audience-user-list').html('<tr><td colspan="7" class="text-center">No users found in this audience</td></tr>')
+        }
+    }
 
     $('#manageAudienceList').modal('hide')
     $('#audienceUserList').modal({backdrop:'static', keyboard:false, show:true})

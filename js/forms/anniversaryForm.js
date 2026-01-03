@@ -133,6 +133,9 @@ var anniversaryForm = `
 
 $('body').append(anniversaryForm)
 $('body').on('click', '#anniversary-menu-click', function(){
+    if (typeof window.closeAllModals === 'function') {
+        window.closeAllModals();
+    }
     implementPermission('anniversaryGreetingAction')
 
     // Mount file list if exists
@@ -144,7 +147,9 @@ $('body').on('click', '#anniversary-menu-click', function(){
         period: '#ang-period'
     })
 
-    $('#anniversaryForm').modal({backdrop:'static', keyboard:false, show:true})
+    setTimeout(function() {
+        $('#anniversaryForm').modal({backdrop:'static', keyboard:false, show:true})
+    }, 300);
 })
 $('body').on('click','.ang-pm-btn',function(){
     var pmName = $(this).data('name')

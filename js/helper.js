@@ -112,6 +112,215 @@ const helper = {
     
 }
 
+/**
+ * Build LinkedIn search URL with all filters for PhantomBuster
+ * Works with any filter prefix (afs-, mtu-, addc-, vcp-, etc.)
+ * @param {string} keywords - Search keywords
+ * @param {string} prefix - Filter selector prefix (e.g., 'afs-', 'mtu-', 'addc-', 'vcp-')
+ * @param {Array} connectionDegrees - Connection degrees array (e.g., ['S','O'] or ['F','S','O'])
+ * @returns {string} Complete LinkedIn search URL
+ */
+window.buildLinkedInSearchUrl = (keywords, prefix = 'afs-', connectionDegrees = ['S','O']) => {
+    if (!keywords || !keywords.trim()) return ''; // No keywords, can't build URL
+    
+    const params = [];
+    
+    // Keywords (required)
+    params.push(`keywords=${encodeURIComponent(keywords.trim())}`);
+    
+    // Add origin parameter (LinkedIn uses this for faceted search)
+    params.push(`origin=FACETED_SEARCH`);
+    
+    // Network (connection degrees) - LinkedIn uses JSON array format
+    const networkCodes = connectionDegrees.length ? connectionDegrees : ['S','O'];
+    params.push(`network=${encodeURIComponent(JSON.stringify(networkCodes))}`);
+    
+    // Add location (geoUrn) - LinkedIn uses JSON array format with string IDs
+    const locationSelector = `#${prefix}selectedLocation li`;
+    if ($(locationSelector).length > 0) {
+        const geoUrns = [];
+        $(locationSelector).each(function() {
+            const geoUrn = $(this).data('regionid');
+            if (geoUrn) {
+                geoUrns.push(String(geoUrn)); // Ensure it's a string
+            }
+        });
+        if (geoUrns.length > 0) {
+            params.push(`geoUrn=${encodeURIComponent(JSON.stringify(geoUrns))}`);
+        }
+    }
+    
+    // Add current company - LinkedIn uses JSON array format with string IDs
+    const currCompSelector = `#${prefix}selectedCurrComp li`;
+    if ($(currCompSelector).length > 0) {
+        const companies = [];
+        $(currCompSelector).each(function() {
+            const companyId = $(this).data('currcompid');
+            if (companyId) {
+                companies.push(String(companyId)); // Ensure it's a string
+            }
+        });
+        if (companies.length > 0) {
+            params.push(`currentCompany=${encodeURIComponent(JSON.stringify(companies))}`);
+        }
+    }
+    
+    // Add past company - LinkedIn uses JSON array format with string IDs
+    const pastCompSelector = `#${prefix}selectedPastComp li`;
+    if ($(pastCompSelector).length > 0) {
+        const pastCompanies = [];
+        $(pastCompSelector).each(function() {
+            const pastCompanyId = $(this).data('pastcompid');
+            if (pastCompanyId) {
+                pastCompanies.push(String(pastCompanyId)); // Ensure it's a string
+            }
+        });
+        if (pastCompanies.length > 0) {
+            params.push(`pastCompany=${encodeURIComponent(JSON.stringify(pastCompanies))}`);
+        }
+    }
+    
+    // Add industry - LinkedIn uses JSON array format with string IDs
+    const industrySelector = `#${prefix}selectedIndustry li`;
+    if ($(industrySelector).length > 0) {
+        const industries = [];
+        $(industrySelector).each(function() {
+            const industryId = $(this).data('industryid');
+            if (industryId) {
+                industries.push(String(industryId)); // Ensure it's a string
+            }
+        });
+        if (industries.length > 0) {
+            params.push(`industry=${encodeURIComponent(JSON.stringify(industries))}`);
+        }
+    }
+    
+    // Add school - LinkedIn uses JSON array format with string IDs
+    const schoolSelector = `#${prefix}selectedSchool li`;
+    if ($(schoolSelector).length > 0) {
+        const schools = [];
+        $(schoolSelector).each(function() {
+            const schoolId = $(this).data('schoolid');
+            if (schoolId) {
+                schools.push(String(schoolId)); // Ensure it's a string
+            }
+        });
+        if (schools.length > 0) {
+            params.push(`schoolFilter=${encodeURIComponent(JSON.stringify(schools))}`);
+        }
+    }
+    
+    // Add profile language - LinkedIn uses JSON array format
+    const languageSelector = `#${prefix}selectedLanguage li`;
+    if ($(languageSelector).length > 0) {
+        const languages = [];
+        $(languageSelector).each(function() {
+            const lang = $(this).data('langcode');
+            if (lang) {
+                languages.push(String(lang)); // Ensure it's a string
+            }
+        });
+        if (languages.length > 0) {
+            params.push(`profileLanguage=${encodeURIComponent(JSON.stringify(languages))}`);
+        }
+    }
+    
+    // Add firstName - LinkedIn supports this as a URL parameter
+    const firstNameSelector = `#${prefix}firstName`;
+    if ($(firstNameSelector).length > 0 && $(firstNameSelector).val() && $(firstNameSelector).val().trim()) {
+        params.push(`firstName=${encodeURIComponent($(firstNameSelector).val().trim())}`);
+    }
+    
+    // Add lastName - LinkedIn supports this as a URL parameter
+    const lastNameSelector = `#${prefix}lastName`;
+    if ($(lastNameSelector).length > 0 && $(lastNameSelector).val() && $(lastNameSelector).val().trim()) {
+        params.push(`lastName=${encodeURIComponent($(lastNameSelector).val().trim())}`);
+    }
+    
+    // Add title - LinkedIn supports this as a URL parameter
+    const titleSelector = `#${prefix}title`;
+    if ($(titleSelector).length > 0 && $(titleSelector).val() && $(titleSelector).val().trim()) {
+        params.push(`title=${encodeURIComponent($(titleSelector).val().trim())}`);
+    }
+    
+    const finalUrl = `https://www.linkedin.com/search/results/people/?${params.join('&')}`;
+    return finalUrl;
+};
+
+/**
+ * Fetch search results from PhantomBuster API
+ * @param {Object} options - Search options
+ * @param {string} options.searchUrl - Complete LinkedIn search URL (optional if keywords provided)
+ * @param {string} options.keywords - Search keywords (required if searchUrl not provided)
+ * @param {Array} options.connectionDegrees - Connection degrees array (e.g., ['3+'] or ['2', '3+'])
+ * @param {number} options.limit - Maximum number of results to return
+ * @param {number} options.startPosition - Starting position for pagination (default: 0)
+ * @returns {Promise<Object>} Response in LinkedIn API format with elements and included arrays
+ */
+window.fetchPhantomSearchResults = async (options = {}) => {
+    const {
+        searchUrl = null,
+        keywords = null,
+        connectionDegrees = [],
+        limit = null,
+        startPosition = 0
+    } = options;
+    
+    if (!searchUrl && !keywords) {
+        throw new Error('Either searchUrl or keywords must be provided');
+    }
+    
+    // Get LinkedIn ID from global variable or DOM
+    const linkedinIdValue = (typeof linkedinId !== 'undefined' && linkedinId) 
+        ? linkedinId 
+        : ($('#me-publicIdentifier').val() || $('#me-plainId').val());
+    
+    if (!linkedinIdValue) {
+        throw new Error('LinkedIn ID not available. Please ensure you are logged into LinkedIn.');
+    }
+    
+    // Get API base URL
+    const apiBaseUrl = typeof PLATFORM_URL !== 'undefined' 
+        ? PLATFORM_URL 
+        : (typeof filterApi !== 'undefined' ? filterApi.replace('/api', '') : '');
+    
+    if (!apiBaseUrl) {
+        throw new Error('API base URL not configured');
+    }
+    
+    const response = await fetch(`${apiBaseUrl}/api/audience/search-export`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'lk-id': linkedinIdValue,
+            'ngrok-skip-browser-warning': 'true' // Bypass ngrok warning page
+        },
+        body: JSON.stringify({
+            search_url: searchUrl || null,
+            keywords: keywords || null,
+            connection_degrees: connectionDegrees,
+            limit: limit ? parseInt(limit, 10) : undefined,
+            start_position: startPosition
+        })
+    });
+    
+    if (!response.ok) {
+        const body = await response.text();
+        throw new Error(`Search export failed: ${response.status} ${body}`);
+    }
+    
+    const data = await response.json();
+    
+    // Ensure response has the expected structure
+    if (data && data.data && data.data.data) {
+        return data.data; // Already in correct format
+    } else if (data && data.data) {
+        return data.data; // Wrapped once
+    } else {
+        return data; // Return as-is
+    }
+};
+
 // Unified audience fetching function to avoid duplicates across modules
 window.fetchAudiencesFromAPI = async () => {
     console.log('🔍 fetchAudiencesFromAPI called...');
@@ -134,10 +343,28 @@ window.fetchAudiencesFromAPI = async () => {
     // Use enhanced apiRequest if available, otherwise fallback to jQuery
     if (typeof apiRequest !== 'undefined') {
         console.log('✅ Using enhanced apiRequest function');
-        const response = await apiRequest(`${filterApi}/audience?linkedinId=${publicId}`, {
-            method: 'GET'
-        });
-        return response;
+        try {
+            const response = await apiRequest(`${filterApi}/audience?linkedinId=${publicId}`, {
+                method: 'GET'
+            });
+            // Ensure response has the expected structure
+            if (response && response.data && response.data.audience) {
+                return { success: true, data: response.data };
+            } else if (response && response.audience) {
+                // Fallback for old format
+                return { success: true, data: { audience: response.audience } };
+            } else {
+                return { success: true, data: response };
+            }
+        } catch (error) {
+            // Handle ngrok blocking or other errors
+            if (error.message === 'ngrok_warning_page' || 
+                (error.message && error.message.includes('DOCTYPE html')) ||
+                (error.message && error.message.includes('ngrok'))) {
+                throw new Error('ngrok_warning_page');
+            }
+            throw error;
+        }
     } else {
         console.log('⚠️ Using fallback jQuery AJAX');
         return new Promise((resolve, reject) => {
@@ -166,6 +393,11 @@ window.fetchAudiencesFromAPI = async () => {
                         errorMessage = 'API endpoint not found (404)';
                     } else if (xhr.status === 403) {
                         errorMessage = 'Access forbidden (403)';
+                    }
+                    
+                    // Check if response is ngrok warning page
+                    if (xhr.responseText && (xhr.responseText.includes('ngrok') || xhr.responseText.includes('ERR_NGROK'))) {
+                        errorMessage = 'ngrok_warning_page';
                     }
                     
                     reject(new Error(`${errorMessage}: ${error}`));

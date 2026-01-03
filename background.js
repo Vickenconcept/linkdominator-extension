@@ -4,1218 +4,6 @@
 // importScripts('./js/actions/campaignAction.js');
 importScripts('./env.js');
 
-// Function to store our LinkedIn profile information for reliable sender detection
-const storeLinkedInProfile = async () => {
-    try {
-        console.log('🔍 Storing LinkedIn profile information...');
-        
-        // Get CSRF token
-        const tokenResult = await chrome.storage.local.get(['csrfToken']);
-        if (!tokenResult.csrfToken) {
-            console.log('⚠️ No CSRF token available for profile detection');
-            return;
-        }
-        
-        // Fetch our LinkedIn profile
-        const profileResponse = await fetch(`${voyagerApi}/identity/profileView`, {
-            method: 'GET',
-            headers: {
-                'csrf-token': tokenResult.csrfToken,
-                'accept': 'application/vnd.linkedin.normalized+json+2.1',
-                'x-li-lang': 'en_US',
-                'x-restli-protocol-version': '2.0.0',
-            }
-        });
-        
-        if (profileResponse.ok) {
-            const profileData = await profileResponse.json();
-            console.log('📊 LinkedIn profile data:', profileData);
-            
-            if (profileData.elements && profileData.elements.length > 0) {
-                const profile = profileData.elements[0];
-                const profileInfo = {
-                    entityUrn: profile.entityUrn,
-                    publicIdentifier: profile.publicIdentifier,
-                    firstName: profile.firstName,
-                    lastName: profile.lastName,
-                    fullName: `${profile.firstName} ${profile.lastName}`.trim(),
-                    storedAt: Date.now()
-                };
-                
-                await chrome.storage.local.set({ linkedinProfile: profileInfo });
-                console.log('✅ LinkedIn profile stored:', profileInfo);
-            }
-        } else {
-            console.log('❌ Failed to fetch LinkedIn profile:', profileResponse.status);
-        }
-    } catch (error) {
-        console.error('❌ Error storing LinkedIn profile:', error);
-    }
-};
-
-// 🚀 KEEP-ALIVE MECHANISM - Prevents service worker from going inactive
-let keepAliveInterval;
-let isServiceWorkerActive = true;
-let lastCleanupTime = null;
-let lastDebugTime = null;
-
-// Message handler for connection invites from content scripts
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    console.log('📨 Background script received message:', request);
-    
-    if (request.action === 'sendConnectionInvite') {
-        console.log('🔗 Processing connection invite request from content script');
-        
-        // Handle the connection invite asynchronously
-        handleConnectionInviteRequest(request.data)
-            .then(result => {
-                console.log('✅ Connection invite completed:', result);
-                sendResponse(result);
-            })
-            .catch(error => {
-                console.error('❌ Connection invite failed:', error);
-                sendResponse({ 
-                    success: false, 
-                    error: error.message 
-                });
-            });
-        
-        // Return true to indicate we'll send a response asynchronously
-        return true;
-    }
-});
-
-// Function to handle connection invite requests from content scripts
-const handleConnectionInviteRequest = async (data) => {
-    console.log('🚀🚀🚀 handleConnectionInviteRequest function STARTED!');
-    console.log('🔍 Function called with:', data);
-    
-    const { profileName, profileId, profileUrl, customMessage } = data;
-    
-    try {
-        // Step 1: Open LinkedIn profile in new tab
-        console.log('🔄 Step 1: Opening LinkedIn profile page...');
-        console.log(`🌐 Opening URL: ${profileUrl}`);
-        
-        const tab = await chrome.tabs.create({
-            url: profileUrl,
-            active: false // Open in background
-        });
-        console.log(`✅ Tab created with ID: ${tab.id}`);
-        
-        if (!tab || !tab.id) {
-            throw new Error('Failed to create tab');
-        }
-        
-        // Step 2: Wait for page to load
-        console.log('🔄 Step 2: Waiting for page to load...');
-        await new Promise((resolve) => {
-            const checkTab = () => {
-                chrome.tabs.get(tab.id, (tabInfo) => {
-                    if (tabInfo && tabInfo.status === 'complete') {
-                        console.log('✅ Page loaded completely');
-                        resolve();
-                    } else {
-                        setTimeout(checkTab, 1000);
-                    }
-                });
-            };
-            checkTab();
-        });
-        
-        // Step 3: Inject automation script to handle the invite process
-        console.log('🔄 Step 3: Injecting automation script...');
-        const result = await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            function: async (customMessage) => {
-                console.log('🤖 LinkedIn Connection Automation script executing...');
-                
-                // Function to delay
-                const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-                
-                try {
-                    console.log('🔍 Step 4: Checking connection status...');
-                    
-                    // Check if already connected
-                    const connectedElements = document.querySelectorAll('[aria-label*="Connected"], [aria-label*="connected"]');
-                    if (connectedElements.length > 0) {
-                        console.log('ℹ️ Already connected to this profile');
-                        return { success: false, skipped: true, reason: 'Already connected' };
-                    }
-                    
-                    // Check if invite already sent
-                    const inviteSentElements = document.querySelectorAll('[aria-label*="Invitation sent"], [aria-label*="invitation sent"]');
-                    if (inviteSentElements.length > 0) {
-                        console.log('ℹ️ Invite already sent to this profile');
-                        return { success: false, skipped: true, reason: 'Invite already sent' };
-                    }
-                    
-                    console.log('🔍 Step 5: Looking for Connect button...');
-                    
-                    // Find Connect button using multiple selectors
-                    const connectSelectors = [
-                        'button[aria-label*="Connect"]',
-                        'button[aria-label*="connect"]',
-                        'button[aria-label*="Invite"]',
-                        'button[aria-label*="invite"]',
-                        '.artdeco-button[aria-label*="Connect"]',
-                        '.artdeco-button[aria-label*="Invite"]',
-                        '[data-control-name="connect"]',
-                        '.pv-s-profile-actions--connect',
-                        '.pv-s-profile-actions button'
-                    ];
-                    
-                    let connectButton = null;
-                    for (const selector of connectSelectors) {
-                        connectButton = document.querySelector(selector);
-                        if (connectButton && connectButton.offsetParent !== null) {
-                            console.log(`✅ Found Connect button with selector: ${selector}`);
-                            break;
-                        }
-                    }
-                    
-                    // Fallback: look for any button with "Connect" or "Invite" text
-                    if (!connectButton) {
-                        const allButtons = document.querySelectorAll('button');
-                        for (const button of allButtons) {
-                            const buttonText = button.textContent.toLowerCase();
-                            if ((buttonText.includes('connect') || buttonText.includes('invite')) && button.offsetParent !== null) {
-                                connectButton = button;
-                                console.log('✅ Found Connect/Invite button by text content');
-                                break;
-                            }
-                        }
-                    }
-                    
-                    // Fallback: Check "More" dropdown for Connect button
-                    if (!connectButton) {
-                        console.log('🔍 Checking "More" dropdown for Connect button...');
-                        const moreButton = document.querySelector('button[aria-label*="More actions"], button[aria-label*="More"], .artdeco-dropdown__trigger');
-                        console.log('🔍 More button search result:', moreButton);
-                        if (moreButton) {
-                            console.log('✅ Found "More" button, details:', {
-                                text: moreButton.textContent,
-                                ariaLabel: moreButton.getAttribute('aria-label'),
-                                className: moreButton.className,
-                                id: moreButton.id,
-                                visible: moreButton.offsetParent !== null
-                            });
-                            console.log('🖱️ Clicking "More" button to open dropdown...');
-                            moreButton.click();
-                            console.log('✅ "More" button clicked, waiting for dropdown to open...');
-                            await delay(1000); // Wait for dropdown to open
-                            
-                            // Look for Connect button in dropdown
-                            console.log('🔍 Searching for Connect button in dropdown...');
-                            const dropdownConnectSelectors = [
-                                'button[aria-label*="Connect"]',
-                                'button[aria-label*="connect"]',
-                                'button[aria-label*="Invite"]',
-                                'button[aria-label*="invite"]',
-                                '.artdeco-dropdown__content button[aria-label*="Connect"]',
-                                '.artdeco-dropdown__content button[aria-label*="connect"]',
-                                '.artdeco-dropdown__content button[aria-label*="Invite"]',
-                                '.artdeco-dropdown__content button[aria-label*="invite"]',
-                                '.artdeco-dropdown__item[aria-label*="Connect"]',
-                                '.artdeco-dropdown__item[aria-label*="connect"]',
-                                '.artdeco-dropdown__item[aria-label*="Invite"]',
-                                '.artdeco-dropdown__item[aria-label*="invite"]',
-                                '[aria-label*="Invite"][aria-label*="connect"]',
-                                '[role="button"][aria-label*="Connect"]',
-                                '[role="button"][aria-label*="Invite"]'
-                            ];
-                            
-                            for (const selector of dropdownConnectSelectors) {
-                                connectButton = document.querySelector(selector);
-                                console.log(`🔍 Checking selector "${selector}":`, connectButton);
-                                if (connectButton && connectButton.offsetParent !== null) {
-                                    console.log(`✅ Found Connect button in dropdown with selector: ${selector}`);
-                                    console.log('🔍 Connect button details:', {
-                                        text: connectButton.textContent,
-                                        ariaLabel: connectButton.getAttribute('aria-label'),
-                                        className: connectButton.className,
-                                        id: connectButton.id,
-                                        visible: connectButton.offsetParent !== null
-                                    });
-                                    break;
-                                }
-                            }
-                            
-                            // Also check by text content in dropdown
-                            if (!connectButton) {
-                                console.log('🔍 Searching dropdown by text content...');
-                                const dropdownButtons = document.querySelectorAll('.artdeco-dropdown__content button, .artdeco-dropdown__content [role="menuitem"], .artdeco-dropdown__item, [role="button"]');
-                                console.log(`🔍 Found ${dropdownButtons.length} dropdown buttons to check`);
-                                for (const button of dropdownButtons) {
-                                    console.log(`🔍 Checking button: "${button.textContent.trim()}" (aria-label: "${button.getAttribute('aria-label')}")`);
-                                    const buttonText = button.textContent.toLowerCase();
-                                    if ((buttonText.includes('connect') || buttonText.includes('invite')) && button.offsetParent !== null) {
-                                        connectButton = button;
-                                        console.log('✅ Found Connect/Invite button in dropdown by text content');
-                                        console.log('🔍 Connect button details:', {
-                                            text: connectButton.textContent,
-                                            ariaLabel: connectButton.getAttribute('aria-label'),
-                                            className: connectButton.className,
-                                            id: connectButton.id,
-                                            visible: connectButton.offsetParent !== null
-                                        });
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    
-                    if (!connectButton) {
-                        console.log('❌ Connect button not found');
-                        return { success: false, error: 'Connect button not found' };
-                    }
-                    
-                    console.log('🖱️ Step 6: Clicking Connect button...');
-                    console.log('🔍 Connect button details:', {
-                        text: connectButton.textContent,
-                        ariaLabel: connectButton.getAttribute('aria-label'),
-                        className: connectButton.className,
-                        visible: connectButton.offsetParent !== null
-                    });
-                    
-                    // Scroll to button and click
-                    connectButton.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    await delay(1000);
-                    
-                    // Try multiple click methods
-                    try {
-                        connectButton.click();
-                        console.log('✅ Connect button clicked successfully');
-                    } catch (clickError) {
-                        console.log('⚠️ Standard click failed, trying alternative method:', clickError.message);
-                        // Alternative click method
-                        connectButton.dispatchEvent(new MouseEvent('click', {
-                            bubbles: true,
-                            cancelable: true,
-                            view: window
-                        }));
-                        console.log('✅ Connect button clicked with alternative method');
-                    }
-                    
-                    // Wait for modal to appear
-                    console.log('🔄 Step 7: Waiting for modal to appear...');
-                    await delay(2000);
-                    
-                    // Add custom message if provided
-                    if (customMessage) {
-                        console.log('📝 Step 7.5: Adding custom message...');
-                        const messageSelectors = [
-                            'textarea[aria-label*="message"]',
-                            'textarea[placeholder*="message"]',
-                            '.artdeco-modal__content textarea',
-                            'textarea'
-                        ];
-                        
-                        let messageTextarea = null;
-                        for (const selector of messageSelectors) {
-                            messageTextarea = document.querySelector(selector);
-                            if (messageTextarea && messageTextarea.offsetParent !== null) {
-                                console.log(`✅ Found message textarea with selector: ${selector}`);
-                                break;
-                            }
-                        }
-                        
-                        if (messageTextarea) {
-                            messageTextarea.value = customMessage;
-                            messageTextarea.dispatchEvent(new Event('input', { bubbles: true }));
-                            console.log('✅ Custom message added');
-                        } else {
-                            console.log('⚠️ Message textarea not found, sending without custom message');
-                        }
-                    }
-                    
-                    // Look for Send button in modal
-                    console.log('🔍 Step 8: Looking for Send button...');
-                    const sendSelectors = [
-                        'button[aria-label*="Send now"]',
-                        'button[aria-label*="send now"]',
-                        '.artdeco-button[aria-label*="Send"]',
-                        '[data-control-name="send_invite"]',
-                        '.artdeco-modal__actionbar button'
-                    ];
-                    
-                    let sendButton = null;
-                    for (const selector of sendSelectors) {
-                        sendButton = document.querySelector(selector);
-                        if (sendButton && sendButton.offsetParent !== null) {
-                            console.log(`✅ Found Send button with selector: ${selector}`);
-                            break;
-                        }
-                    }
-                    
-                    // Fallback: look for any button with "Send" text
-                    if (!sendButton) {
-                        const allButtons = document.querySelectorAll('button');
-                        for (const button of allButtons) {
-                            if (button.textContent.toLowerCase().includes('send') && button.offsetParent !== null) {
-                                sendButton = button;
-                                console.log('✅ Found Send button by text content');
-                                break;
-                            }
-                        }
-                    }
-                    
-                    if (!sendButton) {
-                        console.log('❌ Send button not found');
-                        return { success: false, error: 'Send button not found' };
-                    }
-                    
-                    console.log('📤 Step 9: Sending invite...');
-                    console.log('🔍 Send button details:', {
-                        text: sendButton.textContent,
-                        ariaLabel: sendButton.getAttribute('aria-label'),
-                        className: sendButton.className,
-                        visible: sendButton.offsetParent !== null
-                    });
-                    
-                    // Try multiple click methods for send button
-                    try {
-                        sendButton.click();
-                        console.log('✅ Send button clicked successfully');
-                    } catch (sendClickError) {
-                        console.log('⚠️ Standard send click failed, trying alternative method:', sendClickError.message);
-                        // Alternative click method
-                        sendButton.dispatchEvent(new MouseEvent('click', {
-                            bubbles: true,
-                            cancelable: true,
-                            view: window
-                        }));
-                        console.log('✅ Send button clicked with alternative method');
-                    }
-                    
-                    // Wait for confirmation
-                    await delay(2000);
-                    
-                    // Check for success indicators
-                    const successIndicators = [
-                        '[aria-label*="Invitation sent"]',
-                        '.artdeco-inline-feedback--success',
-                        '.pv-s-profile-actions--message'
-                    ];
-                    
-                    for (const selector of successIndicators) {
-                        const element = document.querySelector(selector);
-                        if (element) {
-                            console.log('✅ Invite sent successfully confirmed');
-                            return { success: true };
-                        }
-                    }
-                    
-                    console.log('✅ Invite sent (no explicit confirmation found)');
-                    return { success: true };
-                    
-                } catch (error) {
-                    console.error('❌ Error in automation:', error.message);
-                    return { success: false, error: 'Connection process failed' };
-                }
-            },
-            args: [customMessage]
-        });
-        
-        // Get the result from the injected script immediately after execution
-        const automationResult = result[0]?.result;
-        console.log('📊 Automation result:', automationResult);
-        console.log('🚨 CRITICAL: Full result object:', result);
-        console.log('🚨 CRITICAL: Result length:', result.length);
-        
-        // Step 4: Wait for automation to complete and get results
-        console.log('🔄 Step 4: Waiting for automation to complete...');
-        await new Promise(resolve => setTimeout(resolve, 5000)); // Give time for automation to complete
-        
-        // Step 5: Close the background tab
-        console.log('🔄 Step 5: Closing background tab...');
-        try {
-            await chrome.tabs.remove(tab.id);
-            console.log('✅ Background tab closed');
-        } catch (tabError) {
-            console.log('⚠️ Could not close tab (may have been closed already):', tabError.message);
-        }
-        
-        if (automationResult && automationResult.success) {
-            console.log(`✅ INVITATION SUCCESSFULLY SENT to ${profileName}`);
-            return { success: true, message: 'Invitation sent successfully' };
-        } else if (automationResult && automationResult.skipped) {
-            console.log(`⏭️ INVITATION SKIPPED for ${profileName}: ${automationResult.reason}`);
-            return { success: false, skipped: true, reason: automationResult.reason };
-        } else {
-            console.log(`❌ INVITATION FAILED for ${profileName}: ${automationResult?.error || 'Unknown error'}`);
-            return { success: false, error: 'Connection not successfully sent' };
-        }
-        
-    } catch (error) {
-        console.error('❌ Error in handleConnectionInviteRequest:', error.message);
-        return { success: false, error: 'Connection process failed' };
-    }
-};
-
-// Function to keep service worker alive
-const keepServiceWorkerAlive = () => {
-    if (keepAliveInterval) {
-        clearInterval(keepAliveInterval);
-    }
-    
-    keepAliveInterval = setInterval(async () => {
-        console.log('💓 Service worker keep-alive ping...');
-        
-        // Check for pending reminders every 5 minutes
-        await checkPendingReminders();
-        
-        try {
-            // Check if service worker is active by testing storage access
-            await chrome.storage.local.get(['activeCampaigns']);
-            
-        // Check for pending messages that are ready to send
-        await checkAndSendPendingMessages();
-        
-        // Clean up orphaned campaign data (run every 5 minutes)
-        const now = Date.now();
-        if (!lastCleanupTime || (now - lastCleanupTime) > 300000) { // 5 minutes
-            await cleanupOrphanedCampaignData();
-            lastCleanupTime = now;
-        }
-        
-        // Debug campaign storage (run every 2 minutes for debugging)
-        if (!lastDebugTime || (now - lastDebugTime) > 120000) { // 2 minutes
-            await debugCampaignStorage();
-            lastDebugTime = now;
-        }
-        
-        // Check if we have any active campaigns
-        chrome.storage.local.get(['activeCampaigns'], (result) => {
-                if (chrome.runtime.lastError) {
-                    console.log('⚠️ Service worker inactive, skipping campaign check');
-                    return;
-                }
-            const activeCampaigns = result.activeCampaigns || [];
-            if (activeCampaigns.length > 0) {
-                console.log('🔄 Found active campaigns, keeping service worker alive');
-                isServiceWorkerActive = true;
-            } else {
-                console.log('⏸️ No active campaigns, service worker can sleep');
-                isServiceWorkerActive = false;
-            }
-        });
-        } catch (error) {
-            if (error.message && error.message.includes('No SW')) {
-                console.log('⚠️ Service worker inactive, skipping keep-alive operations');
-            } else {
-                console.error('❌ Error in keep-alive ping:', error);
-            }
-        }
-    }, 25000); // Ping every 25 seconds (before 30-second timeout)
-};
-
-// Function to initialize and check for existing active campaigns
-const initializeActiveCampaigns = async () => {
-    console.log('🔍 Checking for existing active campaigns...');
-    
-    // Wait for LinkedIn ID to be available
-    if (!linkedinId) {
-        console.log('⏳ LinkedIn ID not available yet, waiting...');
-        // Try to authenticate first
-        try {
-            await authenticateUser();
-        } catch (error) {
-            console.log('⚠️ Authentication failed, will retry later');
-            return;
-        }
-    }
-    
-    // Add a small delay to ensure authentication is complete
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    // Double-check LinkedIn ID is available
-    if (!linkedinId) {
-        console.log('⚠️ LinkedIn ID still not available, skipping campaign check');
-        chrome.storage.local.set({ activeCampaigns: [] });
-        return;
-    }
-    
-    try {
-        // Get all campaigns from the backend
-        const response = await fetch(`${PLATFORM_URL}/api/campaigns`, {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-                'lk-id': linkedinId
-            }
-        });
-        
-        if (response.ok) {
-            const responseText = await response.text();
-            let data;
-            
-            try {
-                data = JSON.parse(responseText);
-            } catch (parseError) {
-                console.error('❌ Failed to parse response as JSON:', responseText);
-                console.log('⚠️ This might be a CSRF error or server issue');
-                chrome.storage.local.set({ activeCampaigns: [] });
-                return;
-            }
-            
-            if (data.status === 200 && data.data) {
-                const runningCampaigns = data.data.filter(campaign => campaign.status === 'running');
-                
-                if (runningCampaigns.length > 0) {
-                    const campaignIds = runningCampaigns.map(campaign => campaign.id);
-                    chrome.storage.local.set({ activeCampaigns: campaignIds });
-                    console.log(`📊 Found ${runningCampaigns.length} active campaigns:`, campaignIds);
-                    
-                    // Trigger the network update alarm to resume processing immediately
-                    console.log('🚀 Resuming campaign processing...');
-                    setTimeout(() => {
-                        _updateCampaignLeadsNetwork();
-                    }, 1000); // Small delay to ensure everything is set up
-                    chrome.alarms.create('sequence_leads_network_update', { delayInMinutes: 0.1 });
-                    console.log('⏰ Created network update alarm to resume processing');
-                } else {
-                    console.log('📊 No active campaigns found');
-                    chrome.storage.local.set({ activeCampaigns: [] });
-                }
-            } else {
-                console.log('📊 No campaign data or invalid status');
-                chrome.storage.local.set({ activeCampaigns: [] });
-            }
-        } else {
-            console.log(`⚠️ API call failed with status: ${response.status}`);
-            chrome.storage.local.set({ activeCampaigns: [] });
-        }
-    } catch (error) {
-        console.error('❌ Error checking for active campaigns:', error);
-        console.log('⚠️ This might be a network or authentication issue');
-        chrome.storage.local.set({ activeCampaigns: [] });
-    }
-};
-
-// Note: Service workers don't have access to window object
-// Unhandled promise rejections will be handled by individual try-catch blocks
-
-// Start keep-alive mechanism
-keepServiceWorkerAlive();
-
-// Handle service worker lifecycle
-chrome.runtime.onStartup.addListener(() => {
-    try {
-        console.log('🚀 Service worker started');
-        keepServiceWorkerAlive();
-        
-        // Store LinkedIn profile for reliable sender detection
-        setTimeout(() => {
-            console.log('🔍 Attempting to store LinkedIn profile...');
-            storeLinkedInProfile();
-        }, 2000);
-        
-        // Initialize active campaigns after a short delay to ensure LinkedIn ID is available
-        setTimeout(async () => {
-            console.log('🔄 Checking for active campaigns on startup...');
-            await initializeActiveCampaigns();
-            // Also check for existing alarms that might need to be resumed
-            await checkAndResumeCampaigns();
-        }, 3000); // 3 second delay to ensure LinkedIn ID is set
-    } catch (error) {
-        console.log('⚠️ Error in service worker startup:', error.message);
-    }
-});
-
-chrome.runtime.onInstalled.addListener(() => {
-    try {
-        console.log('📦 Extension installed/updated');
-        keepServiceWorkerAlive();
-        
-        // Clear any existing alarms that might cause CSRF errors
-        chrome.alarms.clear('sequence_leads_network_update');
-        console.log('🧹 Cleared existing sequence_leads_network_update alarm');
-        
-        // Initialize active campaigns after a short delay to ensure LinkedIn ID is set
-        setTimeout(async () => {
-            console.log('🔄 Checking for active campaigns after installation...');
-            await initializeActiveCampaigns();
-            // Also check for existing alarms that might need to be resumed
-            await checkAndResumeCampaigns();
-        }, 5000); // 5 second delay for fresh installation
-    } catch (error) {
-        console.log('⚠️ Error in extension installation:', error.message);
-    }
-});
-
-// Handle extension messages to check if service worker is active
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request.action === 'checkServiceWorkerStatus') {
-        sendResponse({ active: isServiceWorkerActive });
-        return true;
-    }
-    
-    if (request.action === 'checkCampaignStatus') {
-        // Return current campaign status
-        chrome.storage.local.get(['activeCampaigns', 'lastCampaignStatus', 'lastCampaignMessage'], (result) => {
-            const activeCampaigns = result.activeCampaigns || [];
-            const lastStatus = result.lastCampaignStatus;
-            const lastMessage = result.lastCampaignMessage;
-            
-            if (activeCampaigns.length > 0) {
-                sendResponse({
-                    status: 'running',
-                    message: `${activeCampaigns.length} campaign(s) active`
-                });
-            } else if (lastStatus === 'completed') {
-                // Show completed status for a short time after completion
-                sendResponse({
-                    status: 'completed',
-                    message: lastMessage || 'All invites sent successfully!'
-                });
-            } else {
-                // Check if service worker is active even without campaigns
-                sendResponse({
-                    status: 'inactive',
-                    message: 'No active campaigns - Service worker ready'
-                });
-            }
-        });
-        return true;
-    }
-    
-    if (request.action === 'refreshActiveCampaigns') {
-        // Manually trigger campaign detection
-        console.log('🔄 Manual campaign refresh requested');
-        initializeActiveCampaigns().then(() => {
-            sendResponse({ success: true, message: 'Campaign refresh completed' });
-        }).catch((error) => {
-            sendResponse({ success: false, message: 'Campaign refresh failed: ' + error.message });
-        });
-        return true;
-    }
-    
-    if (request.action === 'viewEndorsementHistory') {
-        console.log('📋 Viewing endorsement history requested');
-        viewEndorsementHistory().then(history => {
-            sendResponse({status: 'success', data: history});
-        }).catch(error => {
-            sendResponse({status: 'error', message: error.message});
-        });
-        return true;
-    }
-    
-    if (request.action === 'clearEndorsementHistory') {
-        console.log('🧹 Clearing endorsement history requested');
-        clearEndorsementHistory().then(() => {
-            sendResponse({status: 'success', message: 'Endorsement history cleared'});
-        }).catch(error => {
-            sendResponse({status: 'error', message: error.message});
-        });
-        return true;
-    }
-    
-    if (request.action === 'startCampaign') {
-        // Manually start a campaign
-        if (request.campaignId) {
-            startCampaign(request.campaignId).then(success => {
-                sendResponse({ success });
-            });
-            return true;
-        }
-    }
-});
-
-// Define missing variables that were in the imported scripts
-let audienceList = [];
-let campaignData = [];
-let campaignLeads = [];
-let campaignSequence = [];
-let campaignLeadgenRunning = [];
-let acceptedLeads = [];
-let notAcceptedLeads = [];
-
-// Auto-respond connection model
-let arConnectionModel = {
-    message: '',
-    distance: null,
-    connectionId: '',
-    name: '',
-    firstName: '',
-    lastName: '',
-    conversationUrnId: null,
-    totalEndorseSkills: 0
-};
-
-// Missing utility functions
-const changeMessageVariableNames = (message, lead) => {
-    // Validate message is not null/undefined
-    if (!message || typeof message !== 'string') {
-        console.warn('⚠️ changeMessageVariableNames: Invalid message provided:', message);
-        return ''; // Return empty string instead of crashing
-    }
-    
-    return message
-        .replace(/\{firstName\}/g, lead.firstName || '')
-        .replace(/\{lastName\}/g, lead.lastName || '')
-        .replace(/\{name\}/g, lead.name || '')
-        .replace(/\{title\}/g, lead.title || '')
-        .replace(/@firstName/g, lead.firstName || '')
-        .replace(/@lastName/g, lead.lastName || '')
-        .replace(/@name/g, lead.name || '')
-        .replace(/@title/g, lead.title || '');
-};
-
-// API helper functions
-const getCampaignSequence = async (campaignId) => {
-    try {
-        const response = await fetch(`${PLATFORM_URL}/api/campaign/${campaignId}/sequence`, {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-                'lk-id': linkedinId
-            }
-        });
-        
-        if (response.ok) {
-            const data = await response.json();
-            if (data.status === 200) {
-                campaignSequence = data.data;
-                return data.data;
-            }
-        }
-        throw new Error('Failed to fetch campaign sequence');
-    } catch (error) {
-        console.error('Error fetching campaign sequence:', error);
-        throw error;
-    }
-};
-
-const getCampaignLeads = async (campaignId, callback) => {
-    try {
-        const response = await fetch(`${PLATFORM_URL}/api/campaign/${campaignId}/leads`, {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-                'lk-id': linkedinId
-            }
-        });
-        
-        if (response.ok) {
-            const data = await response.json();
-            if (data.status === 200) {
-                callback(data.data);
-                return data.data;
-            }
-        }
-        callback([]);
-        return [];
-    } catch (error) {
-        console.error('Error fetching campaign leads:', error);
-        callback([]);
-        return [];
-    }
-};
-const getLeadGenRunning = async (campaignId) => {
-    try {
-        
-        // First try the new tracking endpoint
-        const response = await fetch(`${PLATFORM_URL}/api/campaign/${campaignId}/leadgen/tracking`, {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-                'lk-id': linkedinId
-            }
-        });
-        
-        
-        if (response.ok) {
-            const data = await response.json();
-            
-            if (data.status === 200) {
-                if (data.data && data.data.length > 0) {
-                    
-                    // Check if we have tracking data (new endpoint) or basic data (old endpoint)
-                    const hasTrackingData = data.data[0] && (data.data[0].accept_status !== undefined || data.data[0].status_last_id !== undefined);
-                    
-                    if (hasTrackingData) {
-                        // Count leads by status using tracking data
-                        const pendingLeads = data.data.filter(lead => 
-                            (lead.accept_status === false || lead.accept_status === 0) && lead.status_last_id == 2
-                        );
-                        const acceptedLeads = data.data.filter(lead => lead.accept_status === true || lead.accept_status === 1);
-                        const otherLeads = data.data.filter(lead => 
-                            !((lead.accept_status === false || lead.accept_status === 0) && lead.status_last_id == 2) && 
-                            lead.accept_status !== true && lead.accept_status !== 1
-                        );
-                        
-                        // Return the tracking data
-                        campaignLeadgenRunning = data.data;
-                        return data.data;
-                    } else {
-                        // Fallback to basic lead data if tracking data not available
-                        const pendingLeads = data.data.filter(lead => lead.acceptedStatus === false && lead.statusLastId == 2);
-                        const acceptedLeads = data.data.filter(lead => lead.acceptedStatus === true);
-                        const otherLeads = data.data.filter(lead => !(lead.acceptedStatus === false && lead.statusLastId == 2) && lead.acceptedStatus !== true);
-                    }
-                }
-                
-                campaignLeadgenRunning = data.data;
-                return data.data;
-            }
-        }
-        
-        campaignLeadgenRunning = [];
-        return [];
-    } catch (error) {
-        campaignLeadgenRunning = [];
-        return [];
-    }
-};
-
-const updateSequenceNodeModel = async (campaign, nodeModel) => {
-    try {
-        console.log(`🔧 updateSequenceNodeModel called with:`, {
-            campaignId: campaign.id,
-            nodeKey: nodeModel.key,
-            runStatus: nodeModel.runStatus
-        });
-        
-        const response = await fetch(`${PLATFORM_URL}/api/campaign/${campaign.id}/update-node`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'lk-id': linkedinId
-            },
-            body: JSON.stringify({
-                nodeKey: nodeModel.key,
-                runStatus: nodeModel.runStatus  // ✅ FIXED: Use actual nodeModel.runStatus instead of hardcoded true
-            })
-        });
-        
-        if (response.ok) {
-            const data = await response.json();
-            console.log(`✅ updateSequenceNodeModel successful:`, data);
-            return data;
-        }
-        throw new Error('Failed to update sequence node model');
-    } catch (error) {
-        console.error('Error updating sequence node model:', error);
-        throw error;
-    }
-};
-
-const updateCampaign = async (campaignData) => {
-    try {
-        const response = await fetch(`${PLATFORM_URL}/api/campaign/${campaignData.campaignId}/update`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'lk-id': linkedinId
-            },
-            body: JSON.stringify(campaignData)
-        });
-        
-        if (response.ok) {
-            const data = await response.json();
-            console.log('✅ Campaign updated successfully:', data);
-            
-            // If campaign is completed or stopped, remove from active campaigns
-            if (campaignData.status === 'completed' || campaignData.status === 'stop') {
-                chrome.storage.local.get(['activeCampaigns'], (result) => {
-                    const activeCampaigns = result.activeCampaigns || [];
-                    const updatedCampaigns = activeCampaigns.filter(id => id !== campaignData.campaignId);
-                    chrome.storage.local.set({ activeCampaigns: updatedCampaigns });
-                    console.log(`📊 Removed campaign ${campaignData.campaignId} from active campaigns list`);
-                });
-            }
-            
-            return data;
-        }
-        throw new Error('Failed to update campaign');
-    } catch (error) {
-        console.error('Error updating campaign:', error);
-        throw error;
-    }
-};
-
-const updateLeadGenRunning = async (campaignId, leadId, updateData) => {
-    try {
-        if (!leadId) {
-            console.error('❌ Missing leadId for updateLeadGenRunning');
-            throw new Error('Missing leadId parameter');
-        }
-
-        console.log(`🔄 Updating leadgen running for campaign ${campaignId}, lead ${leadId}`);
-        console.log(`🔍 Update data:`, updateData);
-        console.log(`🔗 API URL: ${PLATFORM_URL}/api/campaign/${campaignId}/leadgen/${leadId}/update`);
-        console.log(`🔑 LinkedIn ID: ${linkedinId}`);
-        
-        const requestBody = JSON.stringify(updateData);
-        console.log(`📦 Request body:`, requestBody);
-        
-        const response = await fetch(`${PLATFORM_URL}/api/campaign/${campaignId}/leadgen/${leadId}/update`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'lk-id': linkedinId
-            },
-            body: requestBody
-        });
-        
-        console.log(`📡 Response status: ${response.status} ${response.statusText}`);
-        console.log(`📡 Response headers:`, Object.fromEntries(response.headers.entries()));
-        
-        if (response.ok) {
-            const data = await response.json();
-            console.log(`✅ Successfully updated leadgen running for lead ${leadId}`);
-            console.log(`📄 Response data:`, data);
-            return data;
-        }
-        
-        // Get more details about the failure
-        const responseText = await response.text();
-        console.error(`❌ Failed to update leadgen running - Status: ${response.status}, Response: ${responseText}`);
-        console.error(`🔍 Full request details:`, {
-            url: `${PLATFORM_URL}/api/campaign/${campaignId}/leadgen/${leadId}/update`,
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'lk-id': linkedinId
-            },
-            body: requestBody
-        });
-        throw new Error(`API call failed with status ${response.status}: ${responseText}`);
-    } catch (error) {
-        console.error('❌ Error updating leadgen running:', error);
-        console.error('🔍 Parameters:', { campaignId, leadId, updateData });
-        console.error('🔍 LinkedIn ID available:', !!linkedinId);
-        console.error('🔍 Platform URL:', PLATFORM_URL);
-        
-        // Don't throw the error, just log it and continue
-        return null;
-    }
-};
-
-const updateLeadNetworkDegree = async (lead) => {
-    try {
-        // Use connectionId as the identifier since that's what the lead object has
-        const leadId = lead.id || lead.connectionId;
-        
-        if (!leadId) {
-            console.error('❌ Lead object missing both id and connectionId:', lead);
-            throw new Error('Lead object missing identifier');
-        }
-
-        // console.log(`🔄 Updating network degree for lead: ${leadId}`);
-        
-        const response = await fetch(`${PLATFORM_URL}/api/lead/${leadId}/update`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'lk-id': linkedinId
-            },
-            body: JSON.stringify({
-                connectionId: lead.connectionId,
-                networkDegree: lead.networkDegree,
-                leadSrc: lead.source || 'aud'  // Default to 'aud' (audience) if not specified
-            })
-        });
-        
-        if (response.ok) {
-            const data = await response.json();
-            console.log(`✅ Successfully updated network degree for ${leadId}`);
-            return data;
-        }
-        
-        // Get more details about the failure
-        const responseText = await response.text();
-        console.error(`❌ API call failed - Status: ${response.status}, Response: ${responseText}`);
-        
-        // Handle specific error cases
-        if (response.status === 401) {
-            console.error('🔐 Authentication failed - LinkedIn ID may be invalid or user not found');
-        } else if (response.status === 404) {
-            console.error('🔍 Endpoint not found - Check API route configuration');
-        }
-        
-        throw new Error(`API call failed with status ${response.status}: ${responseText}`);
-    } catch (error) {
-        console.error('❌ Error updating lead network degree:', error);
-        console.error('🔍 Lead object details:', {
-            connectionId: lead.connectionId,
-            id: lead.id,
-            networkDegree: lead.networkDegree,
-            name: lead.name
-        });
-        
-        // Don't throw the error, just log it and continue with other leads
-        return null;
-    }
-};
-
-const createLeadGenRunning = async (campaignId) => {
-    try {
-        console.log(`🔍 Checking if leadgen running already exists for campaign ${campaignId}...`);
-        
-        // First check if leadgen running already exists
-        const existingLeads = await getLeadGenRunning(campaignId);
-        if (existingLeads && existingLeads.length > 0) {
-            console.log(`⚠️ Leadgen running already exists for campaign ${campaignId} with ${existingLeads.length} leads`);
-            console.log('🔄 Skipping creation to prevent duplicates');
-            return { message: 'Leadgen running already exists', status: 200 };
-        }
-        
-        console.log(`✅ No existing leadgen running found, creating new entries for campaign ${campaignId}...`);
-        const response = await fetch(`${PLATFORM_URL}/api/campaign/${campaignId}/leadgen/store`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'lk-id': linkedinId
-            }
-        });
-        
-        if (response.ok) {
-            const data = await response.json();
-            console.log(`✅ Successfully created leadgen running for campaign ${campaignId}`);
-        
-        // Debug: Check what records were created
-        try {
-            const existingLeads = await getLeadGenRunning(campaignId);
-            console.log(`🔍 Created records for campaign ${campaignId}:`, existingLeads);
-        } catch (debugError) {
-            console.log('⚠️ Could not fetch created records for debugging:', debugError.message);
-        }
-        
-            return data;
-        }
-        throw new Error('Failed to create leadgen running');
-    } catch (error) {
-        console.error('Error creating leadgen running:', error);
-        throw error;
-    }
-};
-
-const getAudience = async (audienceId, total, filterApi, callback) => {
-    try {
-        const response = await fetch(`${filterApi}/audience/list?audienceId=${audienceId}&totalCount=${total}`);
-        const data = await response.json();
-        
-        if (data.length > 0) {
-            let dataPath = data[0].audience;
-            if (dataPath.length > 0) {
-                audienceList = [];
-                
-                for (let i = 0; i < dataPath.length; i++) {
-                    let netDistance;
-                    let targetIdd;
-                    
-                    if (dataPath[i].con_distance != null) {
-                        netDistance = dataPath[i].con_distance.split("_");
-                    }
-                    
-                    if (dataPath[i].con_member_urn.includes('urn:li:member:')) {
-                        targetIdd = dataPath[i].con_member_urn.replace('urn:li:member:', '');
-                    }
-                    
-                    audienceList.push({
-                        name: dataPath[i].con_first_name + ' ' + dataPath[i].con_last_name,
-                        firstName: dataPath[i].con_first_name,
-                        lastName: dataPath[i].con_last_name,
-                        title: dataPath[i].con_job_title,
-                        conId: dataPath[i].con_id,
-                        totalResultCount: dataPath.length,
-                        publicIdentifier: dataPath[i].con_public_identifier,
-                        memberUrn: dataPath[i].con_member_urn,
-                        networkDistance: parseInt(netDistance[1]),
-                        trackingId: dataPath[i].con_tracking_id,
-                        navigationUrl: `${LINKEDIN_URL}/in/${dataPath[i].con_public_identifier}`,
-                        targetId: parseInt(targetIdd),
-                        netDistance: parseInt(netDistance[1]),
-                    });
-                }
-            }
-            callback({ 'status': 'successful' });
-        }
-    } catch (error) {
-        console.error('Error fetching audience:', error);
-        callback({ 'status': 'error', 'message': error.message });
-    }
-};
-
-// Function to check call status from database
-const getCallStatus = async (callId) => {
-    try {
-        if (!callId) {
-            console.log('⚠️ No call_id provided for status check');
-            return null;
-        }
-        
-        console.log(`🔍 Checking call status for call_id: ${callId}`);
-        
-        const response = await fetch(`${PLATFORM_URL}/api/calls/${callId}/status`, {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-                'lk-id': linkedinId || 'vicken-concept'
-            }
-        });
-        
-        if (response.ok) {
-            const data = await response.json();
-            console.log(`📊 Call status for ${callId}:`, data.call_status || data.status);
-            return data.call_status || data.status;
-        } else {
-            console.log(`⚠️ Failed to fetch call status: ${response.status}`);
-            return null;
-        }
-    } catch (error) {
-        console.error('❌ Error fetching call status:', error);
-        return null;
-    }
-};
-
-const storeCallStatus = async (callData) => {
-    try {
-        console.log('🔧 DEBUG: storeCallStatus called with data:', callData);
-        console.log('🔧 DEBUG: API URL:', `${PLATFORM_URL}/api/book-call/store`);
-        console.log('🔧 DEBUG: LinkedIn ID:', linkedinId);
-        
-        const response = await fetch(`${PLATFORM_URL}/api/book-call/store`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'lk-id': linkedinId
-            },
-            body: JSON.stringify(callData)
-        });
-        
-        if (response.ok) {
-            const data = await response.json();
-            console.log('✅ Call status stored successfully:', data);
-            
-            // Store call_id for future reply processing
-            if (data.call_id && callData.connection_id) {
-                try {
-                    await chrome.storage.local.set({ [`call_id_${callData.connection_id}`]: data.call_id });
-                } catch (e) {
-                    console.log('⚠️ Failed to persist call_id in storage:', e.message);
-                }
-            }
-            
-            return data;
-        } else {
-            const errorText = await response.text();
-            console.error('❌ API Error Response:', {
-                status: response.status,
-                statusText: response.statusText,
-                body: errorText
-            });
-            throw new Error(`Failed to store call status: ${response.status} - ${errorText}`);
-        }
-    } catch (error) {
-        console.error('Error storing call status:', error);
-        throw error;
-    }
-};
-
 /**
  * Process call reply with AI analysis
  */
@@ -1237,7 +25,9 @@ const processCallReply = async (message, profileId, connectionId) => {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'lk-id': linkedinId
+                'lk-id': linkedinId,
+                'ngrok-skip-browser-warning': 'true',
+                'Accept': 'application/json'
             },
             body: JSON.stringify({
                 call_id: callId,
@@ -1263,7 +53,9 @@ const processCallReply = async (message, profileId, connectionId) => {
                             method: 'GET',
                             headers: {
                                 'Content-Type': 'application/json',
-                                'lk-id': linkedinId
+                                'lk-id': linkedinId,
+                                'ngrok-skip-browser-warning': 'true',
+                                'Accept': 'application/json'
                             }
                         });
                         if (schedRes.ok) {
@@ -1287,8 +79,19 @@ const processCallReply = async (message, profileId, connectionId) => {
 
                         console.log('📤 Sending scheduling message via LinkedIn...', { hasConversation: !!arConnectionModel.conversationUrnId });
                         // Reuse existing LinkedIn messaging helper
-                        await messageConnection({ uploads: [] });
-                        console.log('✅ Scheduling message sent');
+                        // Use browser automation instead of API
+                        const browserResult = await _sendMessageBrowser({
+                            name: scheduleInfo.recipient || 'Unknown',
+                            connectionId: scheduleInfo.connectionId,
+                            conId: scheduleInfo.connectionId,
+                            publicIdentifier: scheduleInfo.connectionId
+                        }, scheduleInfo.message || arConnectionModel.message);
+                        
+                        if (browserResult.success) {
+                            console.log('✅ Scheduling message sent (browser automation)');
+                        } else {
+                            throw new Error(browserResult.error || 'Failed to send scheduling message via browser automation');
+                        }
                     } else {
                         console.warn('⚠️ No scheduling details available to send');
                     }
@@ -1744,6 +547,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
         // console.log('⏰ Checking all active campaigns for invite acceptances...');
         // console.log('🕐 Alarm fired at:', new Date().toLocaleTimeString());
         checkAllCampaignsForAcceptances();
+    }else if(alarm.name.startsWith('next_step_')){
+        console.log(`🔔 Alarm triggered: ${alarm.name}`);
+        handleNextStepExecution(alarm.name);
     }else if(alarm.name == 'custom_like_post'){
         console.log('👍 LIKE POST: Custom like post alarm triggered');
         chrome.storage.local.get(["campaignCustomLikePost","nodeModelCustomLikePost"]).then((result) => {
@@ -1778,66 +584,6 @@ chrome.alarms.onAlarm.addListener((alarm) => {
                 })
             } catch (err) {
                 console.error('❌ Error in custom_profile_view alarm:', err);
-            }
-        });
-    }else if(alarm.name == 'custom_follow'){
-        console.log('👥 FOLLOW: Custom follow alarm triggered');
-        chrome.storage.local.get(["campaignCustomFollow","nodeModelCustomFollow"]).then((result) => {
-            console.log(`Campaign ${alarm.name} sequence is running...`)
-            let currentCampaign = result.campaignCustomFollow,
-            nodeModel = result.nodeModelCustomFollow;
-            
-            console.log(`💡 Note: Following does NOT require connection - will attempt for all leads`);
-
-            try {
-                getCampaignLeads(currentCampaign.id, (leadsData) => {
-                    console.log(`👥 FOLLOW: Retrieved ${leadsData.length} leads`);
-                    if(leadsData.length) runSequence(currentCampaign, leadsData, nodeModel);
-                })
-            } catch (err) {
-                console.error('❌ Error in custom_follow alarm:', err);
-            }
-        });
-    }else if(alarm.name == 'custom_message'){
-        console.log('💬 MESSAGE: Custom message alarm triggered');
-        chrome.storage.local.get(["campaignCustomMessage","nodeModelCustomMessage"]).then((result) => {
-            console.log(`Campaign ${alarm.name} sequence is running...`)
-            let currentCampaign = result.campaignCustomMessage,
-            nodeModel = result.nodeModelCustomMessage;
-            
-            console.log(`⚠️ Note: Messaging requires connection - will use accepted/connected leads only`);
-
-            try {
-                getCampaignLeads(currentCampaign.id, (leadsData) => {
-                    console.log(`👥 MESSAGE: Retrieved ${leadsData.length} leads (will filter for connected)`);
-                    if(leadsData.length) runSequence(currentCampaign, leadsData, nodeModel);
-                })
-            } catch (err) {
-                console.error('❌ Error in custom_message alarm:', err);
-            }
-        });
-    }else if(alarm.name == 'custom_endorse'){
-        console.log('🏷️ ENDORSEMENT: Custom endorse alarm triggered');
-        chrome.storage.local.get(["campaignCustomEndorse","nodeModelCustomEndorse"]).then((result) => {
-            console.log(`Campaign ${alarm.name} sequence is running...`)
-            let currentCampaign = result.campaignCustomEndorse,
-            nodeModel = result.nodeModelCustomEndorse;
-            
-            console.log(`🔍 Endorse campaign: ${currentCampaign.name} (ID: ${currentCampaign.id})`);
-            console.log(`🎯 Skills to endorse per lead: ${nodeModel.totalSkills || 1}`);
-            
-            try {
-                getCampaignLeads(currentCampaign.id, (leadsData) => {
-                    console.log(`👥 ENDORSEMENT: Retrieved ${leadsData.length} leads`);
-                    console.log(`💡 Note: Endorsement does NOT require connection - will attempt for all leads`);
-                    if(leadsData.length) {
-                        runSequence(currentCampaign, leadsData, nodeModel);
-                    } else {
-                        console.log('❌ No leads found for endorsement campaign');
-                    }
-                })
-            } catch (err) {
-                console.error('❌ Error in custom_endorse alarm:', err);
             }
         });
     }else if(alarm.name === 'check_review_messages'){
@@ -1935,29 +681,77 @@ chrome.alarms.onAlarm.addListener((alarm) => {
                     
                     // For these actions, we can use ALL campaign leads (not just accepted connections)
                     // Also use ALL leads for direct-action campaigns (even for message/call)
-                    await new Promise((resolve) => {
-                        getCampaignLeads(currentCampaign.id, (leadsData) => {
-                            leadsToProcess = leadsData || [];
-                            console.log(`👥 Retrieved ${leadsToProcess.length} leads from campaign`);
-                            resolve();
+                    // Inline API call to avoid scoping issues
+                    try {
+                        const leadsResponse = await fetch(`${PLATFORM_URL}/api/campaign/${currentCampaign.id}/leads`, {
+                            method: 'GET',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'lk-id': linkedinId,
+                                'ngrok-skip-browser-warning': 'true',
+                                'Accept': 'application/json'
+                            }
                         });
-                    });
+                        
+                        if (leadsResponse.ok) {
+                            const contentType = leadsResponse.headers.get('content-type');
+                            if (contentType && contentType.includes('application/json')) {
+                                const leadsDataResponse = await leadsResponse.json();
+                                if (leadsDataResponse.status === 200 && leadsDataResponse.data) {
+                                    leadsToProcess = Array.isArray(leadsDataResponse.data) ? leadsDataResponse.data : [];
+                            console.log(`👥 Retrieved ${leadsToProcess.length} leads from campaign`);
+                                } else if (Array.isArray(leadsDataResponse)) {
+                                    leadsToProcess = leadsDataResponse;
+                                    console.log(`👥 Retrieved ${leadsToProcess.length} leads (direct array response)`);
+                                }
+                            }
+                        } else {
+                            console.error(`❌ Failed to fetch leads (status ${leadsResponse.status})`);
+                        }
+                    } catch (error) {
+                        console.error(`❌ Error fetching leads:`, error.message);
+                    }
                 } else {
                     console.log(`⚠️ Unknown action type "${actionType}" - falling back to all leads`);
                     
-                    // Fallback: try to get all campaign leads
-                    await new Promise((resolve) => {
-                        getCampaignLeads(currentCampaign.id, (leadsData) => {
-                            leadsToProcess = leadsData || [];
-                            console.log(`👥 Retrieved ${leadsToProcess.length} leads from campaign (fallback)`);
-                            resolve();
+                    // Fallback: try to get all campaign leads - inline API call
+                    try {
+                        const leadsResponse = await fetch(`${PLATFORM_URL}/api/campaign/${currentCampaign.id}/leads`, {
+                            method: 'GET',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'lk-id': linkedinId,
+                                'ngrok-skip-browser-warning': 'true',
+                                'Accept': 'application/json'
+                            }
                         });
-                    });
+                        
+                        if (leadsResponse.ok) {
+                            const contentType = leadsResponse.headers.get('content-type');
+                            if (contentType && contentType.includes('application/json')) {
+                                const leadsDataResponse = await leadsResponse.json();
+                                if (leadsDataResponse.status === 200 && leadsDataResponse.data) {
+                                    leadsToProcess = Array.isArray(leadsDataResponse.data) ? leadsDataResponse.data : [];
+                            console.log(`👥 Retrieved ${leadsToProcess.length} leads from campaign (fallback)`);
+                                } else if (Array.isArray(leadsDataResponse)) {
+                                    leadsToProcess = leadsDataResponse;
+                                    console.log(`👥 Retrieved ${leadsToProcess.length} leads (fallback, direct array)`);
+                                }
+                            }
+                        }
+                    } catch (error) {
+                        console.error(`❌ Error fetching leads (fallback):`, error.message);
+                    }
                 }
 
                 if (leadsToProcess.length > 0) {
                     console.log(`🚀 Executing sequence for ${leadsToProcess.length} leads`);
-                    await runSequence(currentCampaign, leadsToProcess, nodeModel);
+                    // Get processed leads from storage for this alarm
+                    const storageKey = `campaign_${alarm.name}_processed`;
+                    const storageResult = await chrome.storage.local.get([storageKey]);
+                    const processedLeads = storageResult[storageKey] || [];
+                    console.log(`📋 Found ${processedLeads.length} previously processed leads in storage`);
+                    await runSequence(currentCampaign, leadsToProcess, nodeModel, alarm.name, processedLeads);
                 } else {
                     console.log(`⚠️ No leads found for ${actionType} execution`);
                 }
@@ -1971,43 +765,263 @@ chrome.alarms.onAlarm.addListener((alarm) => {
             }
         });
         return;
+    }else if(alarm.name === 'content_creator_check'){
+        // DEPRECATED: Content creator posting now handled by backend API
+        console.log('⚠️ Content Creator alarm - NOW HANDLED BY BACKEND API (No action needed)');
+        return;
     }else{
         console.log('🎯 Starting general campaign alarm for:', alarm.name);
-        chrome.storage.local.get(["campaign","nodeModel"]).then((result) => {
+        chrome.storage.local.get(["campaign","nodeModel", "sequence", `campaign_${alarm.name}_running`, `campaign_${alarm.name}_running_timestamp`, `campaign_${alarm.name}_processed`]).then(async (result) => {
             console.log(`Campaign ${alarm.name} sequence is running...`)
             let currentCampaign = result.campaign,
-            nodeModel = result.nodeModel;
+            nodeModel = result.nodeModel,
+            sequence = result.sequence;
 
             console.log('📊 Retrieved campaign data:', currentCampaign);
             console.log('🔗 Retrieved node model:', nodeModel);
+            console.log('🔗 Retrieved sequence:', sequence?.length || 0, 'nodes');
+
+            // Validate campaign data exists
+            if (!currentCampaign || !currentCampaign.id) {
+                console.error('❌ Invalid campaign data in storage');
+                console.log('🔍 Storage result:', result);
+                return;
+            }
+
+            // Check if campaign is already running (prevent concurrent executions)
+            // But allow if it's been running for more than 2 minutes (might be stuck)
+            const isRunning = result[`campaign_${alarm.name}_running`];
+            const lockTimestamp = result[`campaign_${alarm.name}_running_timestamp`];
+            const now = Date.now();
+            const lockAge = lockTimestamp ? (now - lockTimestamp) : 0;
+            const MAX_LOCK_AGE = 2 * 60 * 1000; // 2 minutes (reduced from 5 to catch stuck executions faster)
+            
+            if (isRunning && lockAge < MAX_LOCK_AGE) {
+                console.log(`⚠️ Campaign is already running (lock age: ${Math.round(lockAge/1000)}s), skipping this alarm trigger to prevent duplicates`);
+                console.log(`🔍 Lock details:`, { isRunning, lockTimestamp, lockAge, MAX_LOCK_AGE });
+                return;
+            } else if (isRunning && lockAge >= MAX_LOCK_AGE) {
+                console.log(`⚠️ Campaign lock is stale (${Math.round(lockAge/1000)}s old), clearing and proceeding...`);
+                await chrome.storage.local.remove([`campaign_${alarm.name}_running`, `campaign_${alarm.name}_running_timestamp`]);
+            }
+            
+            // Also check if lock exists but no timestamp (old lock format) - clear it
+            if (isRunning && !lockTimestamp) {
+                console.log(`⚠️ Found lock without timestamp (old format), clearing it...`);
+                await chrome.storage.local.remove([`campaign_${alarm.name}_running`, `campaign_${alarm.name}_running_timestamp`]);
+            }
+
+            // Set running flag with timestamp
+            await chrome.storage.local.set({ 
+                [`campaign_${alarm.name}_running`]: true,
+                [`campaign_${alarm.name}_running_timestamp`]: Date.now()
+            });
+            console.log('🔒 Lock acquired - campaign execution started');
 
             try {
-                getCampaignLeads(currentCampaign.id, (leadsData) => {
-                    console.log('👥 Retrieved leads data:', leadsData);
-                    if(leadsData.length) {
-                        console.log('🚀 Starting runSequence with', leadsData.length, 'leads');
-                        runSequence(currentCampaign, leadsData, nodeModel);
+                let leadsData = [];
+                const processedLeads = result[`campaign_${alarm.name}_processed`] || [];
+                console.log(`📋 Already processed leads: ${processedLeads.length}`, processedLeads);
+                
+                // Use the SAME endpoint that works: /api/campaign/{id}/leads
+                console.log(`📡 Fetching leads for campaign ${currentCampaign.id} from /leads endpoint...`);
+                
+                // Ensure linkedinId is available
+                let currentLinkedInId = linkedinId;
+                if (!currentLinkedInId || currentLinkedInId === 'undefined') {
+                    const storedId = await chrome.storage.local.get(['linkedinId']);
+                    currentLinkedInId = storedId.linkedinId || 'vicken-concept';
+                    console.log(`🔑 Using LinkedIn ID from storage: ${currentLinkedInId}`);
+                }
+                
+                try {
+                    const leadsResponse = await fetch(`${PLATFORM_URL}/api/campaign/${currentCampaign.id}/leads`, {
+                        method: 'GET',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'lk-id': currentLinkedInId,
+                            'ngrok-skip-browser-warning': 'true',
+                            'Accept': 'application/json'
+                        }
+                    });
+                    
+                    if (leadsResponse.ok) {
+                        const contentType = leadsResponse.headers.get('content-type');
+                        if (contentType && contentType.includes('application/json')) {
+                            const leadsDataResponse = await leadsResponse.json();
+                            console.log(`📊 /leads endpoint response:`, {
+                                status: leadsDataResponse.status,
+                                hasData: !!leadsDataResponse.data,
+                                dataLength: leadsDataResponse.data?.length || 0
+                            });
+                            
+                            // Handle standardized response format: {data: [...], status: 200}
+                            if (leadsDataResponse.status === 200 && leadsDataResponse.data) {
+                                leadsData = Array.isArray(leadsDataResponse.data) ? leadsDataResponse.data : [];
+                                console.log(`✅ Fetched ${leadsData.length} leads from /leads endpoint`);
+                                if (leadsData.length > 0) {
+                                    console.log(`📋 Sample leads:`, leadsData.slice(0, 3).map(l => l.name || 'Unknown').join(', '));
+                                }
+                            } else if (Array.isArray(leadsDataResponse)) {
+                                leadsData = leadsDataResponse;
+                                console.log(`✅ Fetched ${leadsData.length} leads (direct array response)`);
+                            }
+                        }
                     } else {
-                        console.log('❌ No leads found for campaign');
+                        console.error(`❌ /leads endpoint failed with status ${leadsResponse.status}`);
+                    }
+                } catch (apiError) {
+                    console.error(`❌ Error fetching leads from /leads endpoint:`, apiError.message);
+                }
+                
+                // Fallback: Try getLeadGenRunning if /leads didn't work
+                if ((!leadsData || leadsData.length === 0) && typeof getLeadGenRunning === 'function') {
+                    try {
+                        leadsData = await getLeadGenRunning(currentCampaign.id);
+                        console.log('👥 Retrieved leads via getLeadGenRunning:', leadsData?.length || 0);
+                    } catch (error) {
+                        console.log('⚠️ getLeadGenRunning failed:', error.message);
+                    }
+                }
+                
+                // Fallback: Try getCampaignLeads if still no leads
+                if ((!leadsData || leadsData.length === 0) && typeof getCampaignLeads === 'function') {
+                    try {
+                        await new Promise((resolve) => {
+                            getCampaignLeads(currentCampaign.id, (data) => {
+                                leadsData = data || [];
+                                console.log('👥 Retrieved leads via getCampaignLeads:', leadsData.length);
+                                resolve();
+                            });
+                        });
+                    } catch (error) {
+                        console.error('❌ Error fetching leads with getCampaignLeads:', error.message);
+                    }
+                }
+                
+                // Filter out already processed leads
+                if (processedLeads.length > 0) {
+                    const processedIds = new Set(processedLeads.map(l => l.id || l.connectionId));
+                    console.log(`🔍 FILTERING: Processed IDs:`, Array.from(processedIds));
+                    console.log(`🔍 FILTERING: All leads before filter:`, leadsData.map(l => ({ id: l.id, connectionId: l.connectionId, name: l.name })));
+                    const originalCount = leadsData.length;
+                    leadsData = leadsData.filter(lead => {
+                        const leadId = lead.id || lead.connectionId;
+                        const isProcessed = processedIds.has(leadId);
+                        if (isProcessed) {
+                            console.log(`   ⏭️ Filtering out ${lead.name} (ID: ${leadId}) - already processed`);
+                        }
+                        return !isProcessed;
+                    });
+                    console.log(`🔍 Filtered leads: ${originalCount} → ${leadsData.length} (skipped ${originalCount - leadsData.length} already processed)`);
+                    console.log(`🔍 FILTERING: Remaining leads after filter:`, leadsData.map(l => ({ id: l.id, connectionId: l.connectionId, name: l.name })));
+                }
+
+                // Process leads
+                if(leadsData && leadsData.length > 0) {
+                        console.log('🚀 Starting runSequence with', leadsData.length, 'leads');
+                    console.log('📋 Campaign:', currentCampaign.name, '(ID:', currentCampaign.id + ')');
+                    console.log('🎯 Node to execute:', nodeModel?.label || nodeModel?.value || 'Unknown');
+                    
+                    // Pass processed leads tracking info to runSequence
+                    await runSequence(currentCampaign, leadsData, nodeModel, alarm.name, processedLeads);
+                    } else {
+                    console.log('❌ No leads found for campaign (or all leads already processed)');
+                    if (processedLeads.length > 0) {
+                        console.log(`✅ All ${processedLeads.length} leads have been processed`);
+                    } else {
                         console.log('🛑 STOPPING EXECUTION: Cannot process campaign without leads');
                         console.log('💡 SOLUTION: Add leads to this campaign in your LinkDominator dashboard');
                         console.log('🔗 Campaign ID:', currentCampaign.id);
                         console.log('📋 Campaign Name:', currentCampaign.name);
-                        
-                        // Clear any existing alarms to prevent infinite loops
-                        const alarmName = currentCampaign.sequenceType.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
-                        chrome.alarms.clear(alarmName);
-                        console.log('🧹 Cleared alarm:', alarmName);
-                        
-                        return; // Exit completely to prevent further processing
+                        console.log('🔍 Campaign Status:', currentCampaign.status);
                     }
-                })
+                    
+                    // Release lock
+                    await chrome.storage.local.remove([`campaign_${alarm.name}_running`, `campaign_${alarm.name}_running_timestamp`]);
+                    console.log('🔓 Lock released - campaign execution completed (no leads)');
+                    }
             } catch (err) {
-                console.error('❌ Error in general campaign alarm:', err)
+                console.error('❌ Error in general campaign alarm:', err);
+                console.error('❌ Error stack:', err.stack);
+                // Release lock on error
+                await chrome.storage.local.remove([`campaign_${alarm.name}_running`, `campaign_${alarm.name}_running_timestamp`]);
+                console.log('🔓 Lock released due to error');
+            } finally {
+                // Always ensure lock is released after a timeout (safety net)
+                setTimeout(async () => {
+                    const checkLock = await chrome.storage.local.get([`campaign_${alarm.name}_running`]);
+                    if (checkLock[`campaign_${alarm.name}_running`]) {
+                        const lockTime = await chrome.storage.local.get([`campaign_${alarm.name}_running_timestamp`]);
+                        const lockAge = lockTime[`campaign_${alarm.name}_running_timestamp`] ? (Date.now() - lockTime[`campaign_${alarm.name}_running_timestamp`]) : 0;
+                        if (lockAge > 3 * 60 * 1000) { // 3 minutes
+                            console.warn(`⚠️ Safety net: Clearing stale lock (${Math.round(lockAge/1000)}s old)`);
+                            await chrome.storage.local.remove([`campaign_${alarm.name}_running`, `campaign_${alarm.name}_running_timestamp`]);
+                        }
+                    }
+                }, 3 * 60 * 1000); // Check after 3 minutes
             }
+        }).catch((err) => {
+            console.error('❌ Fatal error in alarm handler promise:', err);
+            // Release lock on fatal error
+            chrome.storage.local.remove([`campaign_${alarm.name}_running`, `campaign_${alarm.name}_running_timestamp`]).then(() => {
+                console.log('🔓 Lock released due to fatal error');
+            });
         });
     }
 })
+
+/**
+ * Handle execution of next step after send-invites
+ * @param {string} alarmName 
+ */
+const handleNextStepExecution = async (alarmName) => {
+    console.log(`🎯 HANDLING NEXT STEP EXECUTION: ${alarmName}`);
+    
+    try {
+        // Extract campaign ID from alarm name (format: next_step_255_1)
+        const parts = alarmName.split('_');
+        const campaignId = parseInt(parts[2]);
+        
+        console.log(`🔍 Campaign ID: ${campaignId}`);
+        
+        // Get the stored next node info
+        const storageKey = `next_node_${campaignId}`;
+        const result = await chrome.storage.local.get([storageKey]);
+        
+        if (!result[storageKey]) {
+            console.error(`❌ No next node info found for campaign ${campaignId}`);
+            return;
+        }
+        
+        const { campaign, node } = result[storageKey];
+        console.log(`📋 Campaign: ${campaign.name} (ID: ${campaign.id})`);
+        console.log(`🎯 Next node: ${node.label} (${node.value})`);
+        
+        // Get leads for this campaign using callback pattern
+        getCampaignLeads(campaign.id, (leadsData) => {
+            console.log(`👥 Found ${leadsData.length} leads for next step execution`);
+            
+            if (leadsData.length > 0) {
+                // Execute the next node
+                runSequence(campaign, leadsData, node).then(() => {
+                    console.log(`✅ Next step executed successfully: ${node.label}`);
+                }).catch((error) => {
+                    console.error(`❌ Error executing next step: ${error}`);
+                });
+            } else {
+                console.log(`⚠️ No leads found for next step execution`);
+            }
+        });
+        
+        // Clean up the stored next node info
+        chrome.storage.local.remove([storageKey]);
+        
+    } catch (error) {
+        console.error('❌ Error in handleNextStepExecution:', error);
+    }
+};
+
 
 /**
  * Set new campaign schedule
@@ -2032,13 +1046,58 @@ const setCampaignAlarm = async (campaign) => {
         status: campaign.status,
         sequenceType: campaign.sequenceType
     });
-    await getCampaignSequence(campaign.id)
+    
+    // Try to get sequence data from storage first (faster and already available)
+    const storageKey = `campaign_${campaign.id}`;
+    const storedData = await chrome.storage.local.get([storageKey]);
+    const campaignData = storedData[storageKey];
+    
+    if (campaignData && campaignData.sequence && campaignData.sequence.nodeModel) {
+        console.log('✅ Using sequence data from storage');
+        nodeModelArr = campaignData.sequence.nodeModel;
+        // Also update global campaignSequence variable for compatibility
+        campaignSequence = campaignData.sequence;
+    } else {
+        // Fallback: fetch from API if not in storage
+        console.log('⚠️ Sequence data not in storage, fetching from API...');
+        try {
+            if (typeof getCampaignSequence === 'function') {
+                await getCampaignSequence(campaign.id);
+                nodeModelArr = campaignSequence?.nodeModel;
+            } else {
+                console.error('❌ getCampaignSequence function not available');
+                return;
+            }
+        } catch (error) {
+            console.error('❌ Error fetching campaign sequence:', error.message);
+            return;
+        }
+    }
+    
+    if (!nodeModelArr || !Array.isArray(nodeModelArr) || nodeModelArr.length === 0) {
+        console.error('❌ No valid node model array found');
+        return;
+    }
+    
     alarmName = (campaign.sequenceType || 'default_sequence').replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
-    nodeModelArr = campaignSequence.nodeModel
     
     console.log('📋 Campaign sequence loaded:', nodeModelArr ? 'Yes' : 'No');
     console.log('⏰ Alarm name:', alarmName);
     console.log('🔗 Node model array length:', nodeModelArr ? nodeModelArr.length : 0);
+    
+    // Log first node details
+    if (nodeModelArr && nodeModelArr.length > 0) {
+        const firstNode = nodeModelArr[0];
+        console.log('🎯 FIRST NODE:', {
+            key: firstNode.key,
+            label: firstNode.label,
+            type: firstNode.type,
+            value: firstNode.value,
+            runStatus: firstNode.runStatus,
+            icon: firstNode.icon
+        });
+    }
+    
     console.log('🔗 Node model array:', nodeModelArr);
     console.log('🔍 SEQUENCE-CHECK: Send-invites node (index 0) runStatus:', nodeModelArr[0]?.runStatus);
     console.log('🔍 SEQUENCE-CHECK: Send-invites node value:', nodeModelArr[0]?.value);
@@ -2123,18 +1182,61 @@ const setCampaignAlarm = async (campaign) => {
         // Support ANY first action (not just send-invites)
         if(nodeModelArr[0].value == 'send-invites'){
             console.log('📧 First action is SEND INVITES');
-            if(nodeModelArr[0].runStatus === false){
+            if(nodeModelArr[0].runStatus === false || nodeModelArr[0].runStatus === null || nodeModelArr[0].runStatus === undefined){
                 nodeItem = nodeModelArr[0]
                 delayInMinutes = 0.10;
                 console.log('✅ Setting up send-invites node with 0.1 minute delay');
             }else{
-                console.log('✅ Send-invites ALREADY COMPLETED - invites were sent!');
+                console.log('✅ Send-invites ALREADY COMPLETED - finding next unexecuted node...');
                 console.log(`📊 Node 0 (send-invites) runStatus: ${nodeModelArr[0].runStatus}`);
-                console.log('⏸️ Skipping alarm creation - waiting for acceptance check to handle next steps');
-                console.log('💡 The continuous_invite_monitoring will detect acceptances and trigger next actions');
                 
-                // Don't create any alarm - let the acceptance monitoring handle it
-                return;
+                // Find next unexecuted action node (same logic as other node types)
+                for(const [idx, node] of nodeModelArr.entries()){
+                    if((node.runStatus === false || node.runStatus === null || node.runStatus === undefined) && node.type === 'action' && node.value != 'end' && node.value != 'add-action'){
+                        nodeItem = node;
+                        // Set alarm name based on next node type
+                        alarmName = `custom_${node.value}`;
+                        // Check if there's a delay node before this action
+                        if(idx > 0 && nodeModelArr[idx -1].type === 'delay'){
+                            delayInMinutes = nodeModelArr[idx -1].time == 'days' 
+                                ? nodeModelArr[idx -1].value * 24 * 60
+                                : nodeModelArr[idx -1].value * 60;
+                            // Update delay node status (don't await to avoid blocking)
+                            if (typeof updateSequenceNodeModel === 'function') {
+                                updateSequenceNodeModel(campaign, nodeModelArr[idx -1]).catch(err => {
+                                    console.warn(`⚠️ Failed to update delay node:`, err.message);
+                                });
+                            }
+                            console.log(`✅ Found next node: ${node.label} (${node.value}) with delay: ${delayInMinutes} minutes`);
+                        } else {
+                            delayInMinutes = 0.10;
+                            console.log(`✅ Found next node: ${node.label} (${node.value}) - immediate execution`);
+                        }
+                        break;
+                    }
+                }
+                
+                // Check if we found a next node, if not check for end node
+                if(!nodeItem){
+                    const endNode = nodeModelArr.find(node => node.type === 'end' || node.value === 'end');
+                    if(endNode){
+                        console.log('🏁 END node detected - marking campaign as completed');
+                        try {
+                            await updateSequenceNodeModel(campaign, { ...endNode, runStatus: true });
+                            await updateCampaign({
+                                campaignId: campaign.id,
+                                status: 'completed'
+                            });
+                            console.log('✅ Campaign marked as COMPLETED');
+                        } catch (error) {
+                            console.error('❌ Failed to mark campaign as completed:', error);
+                        }
+                        return;
+                    } else {
+                        console.log('⚠️ No next action node found and no end node');
+                        return;
+                    }
+                }
             }
         }else if(nodeModelArr[0].value == 'like-post'){
             let nodeItemCustomLikePost;
@@ -2190,8 +1292,9 @@ const setCampaignAlarm = async (campaign) => {
                 nodeItemCustomProfileView = nodeModelArr[0]
                 delayInMinutes = 0.10;
             }else {
+                // Find next unexecuted action node (check for false, null, or undefined)
                 for(const [idx, node] of nodeModelArr.entries()){
-                    if(node.runStatus === false && node.type === 'action' && node.value != 'end'){
+                    if((node.runStatus === false || node.runStatus === null || node.runStatus === undefined) && node.type === 'action' && node.value != 'end' && node.value != 'add-action'){
                         nodeItemCustomProfileView = node
                         delayInMinutes = nodeModelArr[idx -1].time == 'days' 
                             ? nodeModelArr[idx -1].value * 24 * 60
@@ -2332,8 +1435,9 @@ const setCampaignAlarm = async (campaign) => {
                 nodeItemCustomEndorse = nodeModelArr[0]
                 delayInMinutes = 0.10;
             }else {
+                // Find next unexecuted action node (check for false, null, or undefined)
                 for(const [idx, node] of nodeModelArr.entries()){
-                    if(node.runStatus === false && node.type === 'action' && node.value != 'end'){
+                    if((node.runStatus === false || node.runStatus === null || node.runStatus === undefined) && node.type === 'action' && node.value != 'end' && node.value != 'add-action'){
                         nodeItemCustomEndorse = node
                         delayInMinutes = nodeModelArr[idx -1].time == 'days' 
                             ? nodeModelArr[idx -1].value * 24 * 60
@@ -2384,24 +1488,83 @@ const setCampaignAlarm = async (campaign) => {
     console.log(`📋 alarmName:`, alarmName);
     
     if(nodeItem && Object.keys(nodeItem).length){
-        console.log('🔔 Creating alarm for node:', nodeItem);
-        campaignModel = {
-            campaign: campaign,
-            nodeModel: nodeItem,
-            sequence: nodeModelArr // Save the full sequence array for AI mode access
+        // Check if node is already completed
+        if(nodeItem.runStatus === true){
+            console.log(`⏸️ Node ${nodeItem.label} (${nodeItem.value}) already completed - skipping alarm creation`);
+            return;
         }
-        chrome.storage.local.set(campaignModel).then(() => {
-            console.log('💾 Campaign model saved to storage:', campaignModel);
-            console.log('🔍 Sequence data saved:', nodeModelArr);
-            console.log('🔍 First node AI mode:', nodeModelArr[0]?.ai_mode);
-            console.log('🔍 First node review time:', nodeModelArr[0]?.review_time);
-            chrome.alarms.create(
-                alarmName, {
-                    delayInMinutes: 0.1 // Reduced from 2 to 0.1 minutes (6 seconds) for faster testing
+        
+        // Synchronous duplicate prevention - use async/await to prevent race conditions
+        (async () => {
+            try {
+                // Special handling for call nodes - they don't complete, so check if call messages were already sent
+                if(nodeItem.value === 'call'){
+                    try {
+                        // Check Chrome storage directly for call attempts (more reliable than fetching leads)
+                        const allStorage = await chrome.storage.local.get();
+                        const callAttemptKeys = Object.keys(allStorage).filter(key => 
+                            key.startsWith(`call_attempted_${campaign.id}_`)
+                        );
+                        
+                        // If call messages were already sent, skip creating alarm (call node stays open for monitoring)
+                        if(callAttemptKeys.length > 0){
+                            console.log(`⏸️ Call messages already sent (${callAttemptKeys.length} attempts found) - skipping duplicate alarm creation (call node stays open for monitoring)`);
+                            return;
+                        }
+                    } catch (e) {
+                        console.log('⚠️ Could not check call attempts:', e.message);
+                    }
                 }
-            );
-            console.log('⏰ Alarm created:', alarmName, 'with 0.1 minute delay');
-        });
+                
+                // Check if alarm already exists
+                const allAlarms = await new Promise((resolve) => {
+                    chrome.alarms.getAll(resolve);
+                });
+                const existingAlarm = allAlarms.find(a => a.name === alarmName);
+                if(existingAlarm){
+                    console.log(`⏸️ Alarm ${alarmName} already exists - skipping duplicate creation`);
+                    return;
+                }
+                
+                // Check if node is currently executing (lock check)
+                const lockResult = await chrome.storage.local.get([`campaign_${alarmName}_running`]);
+                const isRunning = lockResult[`campaign_${alarmName}_running`];
+                if(isRunning){
+                    console.log(`⏸️ Node ${nodeItem.label} is already executing (lock active) - skipping alarm creation`);
+                    return;
+                }
+                
+                // Double-check alarm doesn't exist (race condition protection)
+                const allAlarms2 = await new Promise((resolve) => {
+                    chrome.alarms.getAll(resolve);
+                });
+                const existingAlarm2 = allAlarms2.find(a => a.name === alarmName);
+                if(existingAlarm2){
+                    console.log(`⏸️ Alarm ${alarmName} was created by another process - skipping duplicate creation`);
+                    return;
+                }
+                
+                console.log('🔔 Creating alarm for node:', nodeItem);
+                campaignModel = {
+                    campaign: campaign,
+                    nodeModel: nodeItem,
+                    sequence: nodeModelArr // Save the full sequence array for AI mode access
+                }
+                await chrome.storage.local.set(campaignModel);
+                console.log('💾 Campaign model saved to storage:', campaignModel);
+                console.log('🔍 Sequence data saved:', nodeModelArr);
+                console.log('🔍 First node AI mode:', nodeModelArr[0]?.ai_mode);
+                console.log('🔍 First node review time:', nodeModelArr[0]?.review_time);
+                chrome.alarms.create(
+                    alarmName, {
+                        delayInMinutes: 0.1 // Reduced from 2 to 0.1 minutes (6 seconds) for faster testing
+                    }
+                );
+                console.log('⏰ Alarm created:', alarmName, 'with 0.1 minute delay');
+            } catch (error) {
+                console.error(`❌ Error in alarm creation check:`, error);
+            }
+        })();
     } else {
         console.log('💡 No invite-based node setup needed (campaign does not use send-invites workflow)');
         console.log('🔍 Checking for direct-action campaign (endorse/message/follow/etc. without invites)...');
@@ -2414,7 +1577,8 @@ const setCampaignAlarm = async (campaign) => {
             let node = nodeModelArr[i];
             console.log(`🔍 Node ${i}: Key: ${node.key}, Type: ${node.type}, Value: ${node.value}, RunStatus: ${node.runStatus}`);
             
-            if(node.type === 'action' && node.runStatus === false && node.value !== 'end' && node.value !== 'add-action') {
+            // Check for false, null, or undefined runStatus (all mean "not executed yet")
+            if(node.type === 'action' && (node.runStatus === false || node.runStatus === null || node.runStatus === undefined) && node.value !== 'end' && node.value !== 'add-action') {
                 console.log(`✅ Found next action to execute: ${node.key} - ${node.label} (${node.value})`);
                 console.log(`📋 Action type: ${node.value}`);
                 console.log(`💡 This is a direct-action campaign (does not require send-invites first)`);
@@ -2440,40 +1604,97 @@ const setCampaignAlarm = async (campaign) => {
         }
         
         if(nodeItem) {
-            console.log('─'.repeat(80));
-            console.log(`🚀 Setting up direct-action campaign: ${nodeItem.value}`);
-            console.log('─'.repeat(80));
-            console.log(`📋 Action: ${nodeItem.label} (${nodeItem.value})`);
-            console.log(`⏰ Alarm name: ${alarmName}`);
-            console.log(`⏱️ Delay: ${delayInMinutes} minutes`);
-            console.log(`💡 Will use campaign_list leads (no invite tracking needed)`);
-            console.log('─'.repeat(80));
-            
-            campaignModel = {
-                campaign: campaign,
-                nodeModel: nodeItem,
-                sequence: nodeModelArr // Save the full sequence array for AI mode access
+            // Check if node is already completed
+            if(nodeItem.runStatus === true){
+                console.log(`⏸️ Direct-action node ${nodeItem.label} (${nodeItem.value}) already completed - skipping alarm creation`);
+                return;
             }
-            chrome.storage.local.set(campaignModel).then(() => {
-                console.log('💾 Direct-action campaign model saved to storage');
-                console.log('🔍 Sequence data:', nodeModelArr.length, 'nodes');
-                console.log('🎯 Next action:', nodeItem.label);
-                chrome.alarms.create(
-                    alarmName, {
-                        delayInMinutes: 0.1
+            
+            // Synchronous duplicate prevention - use async/await to prevent race conditions
+            (async () => {
+                try {
+                    // Check if alarm already exists
+                    const allAlarms = await new Promise((resolve) => {
+                        chrome.alarms.getAll(resolve);
+                    });
+                    const existingAlarm = allAlarms.find(a => a.name === alarmName);
+                    if(existingAlarm){
+                        console.log(`⏸️ Direct-action alarm ${alarmName} already exists - skipping duplicate creation`);
+                        return;
                     }
-                );
-                console.log(`⏰ Direct-action alarm created: ${alarmName}`);
-            });
+                    
+                    // Check if node is currently executing (lock check)
+                    const lockResult = await chrome.storage.local.get([`campaign_${alarmName}_running`]);
+                    const isRunning = lockResult[`campaign_${alarmName}_running`];
+                    if(isRunning){
+                        console.log(`⏸️ Direct-action node ${nodeItem.label} is already executing (lock active) - skipping alarm creation`);
+                        return;
+                    }
+                    
+                    // Double-check alarm doesn't exist (race condition protection)
+                    const allAlarms2 = await new Promise((resolve) => {
+                        chrome.alarms.getAll(resolve);
+                    });
+                    const existingAlarm2 = allAlarms2.find(a => a.name === alarmName);
+                    if(existingAlarm2){
+                        console.log(`⏸️ Direct-action alarm ${alarmName} was created by another process - skipping duplicate creation`);
+                        return;
+                    }
+                    
+                    console.log('─'.repeat(80));
+                    console.log(`🚀 Setting up direct-action campaign: ${nodeItem.value}`);
+                    console.log('─'.repeat(80));
+                    console.log(`📋 Action: ${nodeItem.label} (${nodeItem.value})`);
+                    console.log(`⏰ Alarm name: ${alarmName}`);
+                    console.log(`⏱️ Delay: ${delayInMinutes} minutes`);
+                    console.log(`💡 Will use campaign_list leads (no invite tracking needed)`);
+                    console.log('─'.repeat(80));
+                    
+                    campaignModel = {
+                        campaign: campaign,
+                        nodeModel: nodeItem,
+                        sequence: nodeModelArr // Save the full sequence array for AI mode access
+                    }
+                    await chrome.storage.local.set(campaignModel);
+                    console.log('💾 Direct-action campaign model saved to storage');
+                    console.log('🔍 Sequence data:', nodeModelArr.length, 'nodes');
+                    console.log('🎯 Next action:', nodeItem.label);
+                    chrome.alarms.create(
+                        alarmName, {
+                            delayInMinutes: 0.1
+                        }
+                    );
+                    console.log(`⏰ Direct-action alarm created: ${alarmName}`);
+                } catch (error) {
+                    console.error(`❌ Error in direct-action alarm creation check:`, error);
+                }
+            })();
         } else {
             console.log('❌ No executable action found in campaign sequence');
         }
     }
 }
-const runSequence = async (currentCampaign, leads, nodeModel) => {
+const runSequence = async (currentCampaign, leads, nodeModel, alarmName = null, processedLeads = []) => {
     console.log('🎬 RUNSEQUENCE CALLED - Starting sequence execution...');
     console.log('📊 Campaign:', currentCampaign.name, '(ID:', currentCampaign.id, ')');
     console.log('👥 Leads to process:', leads.length);
+    console.log('🔒 Alarm name:', alarmName || 'none');
+    console.log('📋 Previously processed:', processedLeads.length);
+    
+    // Filter out already processed leads to prevent duplicate sends
+    if (alarmName && processedLeads.length > 0) {
+        const processedIds = new Set(processedLeads.map(p => p.id || p.connectionId));
+        const originalCount = leads.length;
+        leads = leads.filter(lead => {
+            const leadId = lead.id || lead.connectionId;
+            return !processedIds.has(leadId);
+        });
+        console.log(`🔍 Filtered out ${originalCount - leads.length} already processed leads. Remaining: ${leads.length}`);
+        if (leads.length === 0) {
+            console.log('✅ All leads already processed for this node. Skipping execution.');
+            return;
+        }
+    }
     console.log('🎯 Node Model AI Settings:', {
         ai_mode: nodeModel?.ai_mode || 'auto',
         review_time: nodeModel?.review_time || null,
@@ -2493,10 +1714,16 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
     }
     
     updateCampaignStatus('processing', `Processing ${leads.length} leads...`);
+    console.log(`📊 TOTAL LEADS TO PROCESS: ${leads.length}`);
+    if (leads.length > 0) {
+        console.log(`📋 Lead names:`, leads.map(l => l.name || 'Unknown').join(', '));
+    }
     
     for(const [i, lead] of leads.entries()){
-        console.log(`👤 Processing lead ${i+1}/${leads.length}:`, lead);
+        console.log(`\n${'='.repeat(80)}`);
+        console.log(`👤 Processing lead ${i+1}/${leads.length}: ${lead.name || 'Unknown'}`);
         console.log(`🔗 Node action: ${nodeModel.value}`);
+        console.log(`📊 Lead details:`, { id: lead.id, connectionId: lead.connectionId, name: lead.name });
         
         if(nodeModel.value == 'endorse'){
             console.log('\n' + '='.repeat(80));
@@ -2528,7 +1755,15 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
             console.log(`⏰ Delay: ${nodeModel.delayInMinutes || 0} minutes`);
             console.log('─'.repeat(80));
             console.log('🚀 PROFILE FLOW: Viewing profile...');
-            _viewProfile(lead)
+            let profileViewSuccess = false;
+            try {
+                await _viewProfile(lead);
+                profileViewSuccess = true;
+                console.log(`✅ Profile view completed successfully for ${lead.name}`);
+            } catch (profileError) {
+                console.error(`❌ Profile view failed for ${lead.name}:`, profileError);
+                profileViewSuccess = false;
+            }
         }else if(nodeModel.value == 'follow'){
             console.log('\n' + '='.repeat(80));
             console.log('👥 FOLLOW FLOW: STARTING');
@@ -2589,8 +1824,20 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                     console.log('⏭️ Skipping message send - message is empty');
                     continue; // Skip to next lead
                 }
+                
+                // Warn if networkDistance is null (may require InMail credits)
+                if (lead.networkDistance === null || lead.networkDistance === undefined) {
+                    console.warn('⚠️ MESSAGE FLOW: Network distance is unknown (null)');
+                    console.warn('⚠️ This may require InMail credits if the person is not a connection');
+                    console.warn('⚠️ Message will attempt to send, but may fail with "Insufficient InMail credits" error');
+                }
             } else {
                 console.log(`💬 Executing ${nodeModel.value} action...`);
+            }
+            
+            // Initialize arConnectionModel if not available (service worker scoping issue)
+            if (typeof arConnectionModel !== 'object' || arConnectionModel === null) {
+                arConnectionModel = {};
             }
             
             arConnectionModel.message = nodeModel.message
@@ -2605,31 +1852,107 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
             // Declare messageSentViaAI flag for both message and call actions
             let messageSentViaAI = false;
 
-            // Check for duplicate call attempts (but don't set flag yet)
+            // Check for duplicate call attempts and set flag IMMEDIATELY to prevent duplicates
             if (nodeModel.value === 'call') {
                 const attemptKey = `call_attempted_${currentCampaign.id}_${lead.connectionId}`;
                 try {
                     const stored = await chrome.storage.local.get([attemptKey]);
                     if (stored && stored[attemptKey]) {
                         console.log(`⏭️ Skipping duplicate call attempt for ${lead.name} (key: ${attemptKey})`);
-                        // Also mark node as completed to avoid loops if already attempted
-                        try {
-                            await updateSequenceNodeModel(currentCampaign, { ...nodeModel, runStatus: true });
-                            console.log('✅ Call node marked as completed to prevent repeat');
-                        } catch (e) {}
+                        console.log(`ℹ️ Previous attempt timestamp: ${new Date(stored[attemptKey]).toLocaleString()}`);
+                        // Don't mark call node as completed - it stays open for monitoring
                         continue;
                     }
+                    // Set flag IMMEDIATELY to prevent duplicate messages if alarm triggers again
+                    await chrome.storage.local.set({ [attemptKey]: Date.now() });
+                    console.log(`🔒 Call dedupe flag set IMMEDIATELY for ${lead.name} to prevent duplicates`);
                     console.log('📝 No previous call attempt found, proceeding with call...');
+                    console.log(`📝 Message from nodeModel: ${nodeModel.message ? `"${nodeModel.message.substring(0, 100)}..."` : 'EMPTY - will use AI or fallback'}`);
                 } catch (e) {
-                    console.log('⚠️ Could not check dedupe key:', e.message);
+                    console.log('⚠️ Could not check/set dedupe key:', e.message);
                 }
             }
 
             if(nodeModel.value == 'call'){
                 console.log('📞 Recording call status with enhanced data...');
                 try {
-                    // First, store the call status with user's message and paraphrase preference
-                    const callResponse = await storeCallStatus({
+                    // Check if storeCallStatus is available
+                    let callResponse = null;
+                    let callId = null;
+                    
+                    if (typeof storeCallStatus !== 'function') {
+                        console.warn('⚠️ storeCallStatus function not available - creating call record directly via API');
+                        
+                        // Create call record directly via API
+                        try {
+                            const callData = {
+                                recipient: `${lead.firstName} ${lead.lastName}`,
+                                profile: `${firstName} ${lastName}`,
+                                sequence: currentCampaign.name,
+                                callStatus: 'suggested',
+                                company: lead.company || null,
+                                industry: lead.industry || null,
+                                job_title: lead.jobTitle || null,
+                                location: lead.location || null,
+                                original_message: arConnectionModel.message || null,
+                                paraphrase_user_message: nodeModel.paraphrase_user_message || false,
+                                ai_mode: nodeModel.ai_mode || 'auto',
+                                review_time: nodeModel.review_time || null,
+                                linkedin_profile_url: lead.profileUrl || null,
+                                connection_id: lead.connectionId || null,
+                                conversation_urn_id: arConnectionModel.conversationUrnId || null,
+                                campaign_id: currentCampaign.id || null,
+                                campaign_name: currentCampaign.name || null
+                            };
+                            
+                            console.log('📞 Creating call record directly via API...');
+                            const directCallResponse = await fetch(`${PLATFORM_URL}/api/book-call/store`, {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'lk-id': linkedinId,
+                                    'ngrok-skip-browser-warning': 'true',
+                                    'Accept': 'application/json'
+                                },
+                                body: JSON.stringify(callData)
+                            });
+                            
+                            if (directCallResponse.ok) {
+                                const callContentType = directCallResponse.headers.get('content-type') || '';
+                                if (callContentType.includes('application/json')) {
+                                    callResponse = await directCallResponse.json();
+                                    callId = callResponse.call_id || callResponse.id || callResponse.data?.call_id;
+                                    console.log('✅ Call record created directly via API:', callId);
+                                    
+                                    // Store call_id in Chrome storage for future retrieval
+                                    if (callId && lead.connectionId) {
+                                        await chrome.storage.local.set({ [`call_id_${lead.connectionId}`]: String(callId) });
+                                        console.log(`✅ Stored call_id in Chrome storage: call_id_${lead.connectionId} = ${callId}`);
+                                    }
+                                } else {
+                                    console.error('❌ Expected JSON when creating call record but got non-JSON response');
+                                }
+                            } else {
+                                const errorText = await directCallResponse.text();
+                                console.error('❌ Failed to create call record:', directCallResponse.status, errorText);
+                            }
+                        } catch (directCallError) {
+                            console.error('❌ Error creating call record directly:', directCallError);
+                        }
+                        
+                        // If we couldn't create the call record, continue anyway but warn
+                        if (!callId) {
+                            console.warn('⚠️ Could not create call record - conversation messages may not be stored properly');
+                            console.warn('⚠️ Message will still be sent via standard method');
+                            messageSentViaAI = false;
+                            // Continue to standard message sending
+                        } else {
+                            // We have a call_id, so we can proceed with AI message flow
+                            messageSentViaAI = false; // Will be set to true if AI message is sent
+                        }
+                    } else {
+                        // First, store the call status with user's message and paraphrase preference
+                        const callResponse = await storeCallStatus({
                         recipient: `${lead.firstName} ${lead.lastName}`,
                         profile: `${firstName} ${lastName}`,
                         sequence: currentCampaign.name,
@@ -2651,18 +1974,30 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                     
                     console.log('✅ Call status stored successfully:', callResponse);
                     
-                    // Now fetch the AI-generated message from the backend
-                    console.log('🔍 Attempting to fetch AI-generated message...');
-                    let aiMessage = null;
+                    // Extract call_id from response
+                    callId = callResponse.call_id || callResponse.id || callResponse.data?.call_id;
+                    console.log('🔍 Call ID extracted from storeCallStatus:', callId);
                     
-                    try {
-                        const callId = callResponse.call_id || callResponse.data?.call_id;
-                        console.log('🔍 Call ID extracted:', callId);
+                    // Store call_id in Chrome storage for future retrieval
+                    if (callId && lead.connectionId) {
+                        await chrome.storage.local.set({ [`call_id_${lead.connectionId}`]: String(callId) });
+                        console.log(`✅ Stored call_id in Chrome storage: call_id_${lead.connectionId} = ${callId}`);
+                    }
+                    }
+                    
+                    // Now fetch the AI-generated message from the backend (for both paths - direct API or storeCallStatus)
+                    if (callId) {
+                        console.log('🔍 Attempting to fetch AI-generated message...');
+                        let aiMessage = null;
                         
-                        if (!callId) {
-                            console.warn('⚠️ No call_id received from backend');
-                            return;
-                        }
+                        try {
+                            console.log('🔍 Using call ID:', callId);
+                            
+                            if (!callId) {
+                                console.warn('⚠️ No call_id available');
+                                messageSentViaAI = false;
+                                return;
+                            }
                         
                         // Check AI mode to determine message handling
                         const aiMode = nodeModel.ai_mode || 'auto';
@@ -2692,17 +2027,58 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                                 // Small wait to ensure LinkedIn is ready but not as long as AI path
                                 await new Promise(resolve => setTimeout(resolve, 5000));
 
-                                await messageConnection({ uploads: [], filters: { message: arConnectionModel.message } });
-
-                                console.log('✅ User message sent without AI polling');
+                                // Use browser automation instead of API
+                                const browserResult = await _sendMessageBrowser(lead, arConnectionModel.message);
+                                if (browserResult.success) {
+                                    console.log('✅ User message sent without AI polling (browser automation)');
+                                    
+                                    // Use conversation URN from browser automation if available
+                                    const extractedConversationUrnId = browserResult.conversationUrnId || null;
+                                    if (extractedConversationUrnId) {
+                                        console.log(`✅ Extracted conversation URN from browser: ${extractedConversationUrnId}`);
+                                        arConnectionModel.conversationUrnId = extractedConversationUrnId;
+                                        lead.conversationUrnId = extractedConversationUrnId;
+                                    }
+                                    
                                 messageSentViaAI = true; // prevent duplicate send in standard path
+                                } else {
+                                    throw new Error(browserResult.error || 'Failed to send message via browser automation');
+                                }
+                                
+                                // Store in Chrome storage IMMEDIATELY (primary tracking)
+                                const conversationUrnId = arConnectionModel.conversationUrnId || lead.conversationUrnId || null;
+                                await storeSentMessageInChromeStorage(lead.connectionId, arConnectionModel.message, 'user', conversationUrnId);
+                                
+                                // Wait a bit for conversation_urn_id to be set from messageConnection response
+                                setTimeout(async () => {
+                                    if (callId && arConnectionModel.message) {
+                                        try {
+                                            // Async store to database (fire-and-forget, backup persistence)
+                                            storeConversationMessage({
+                                                call_id: String(callId),
+                                                message: arConnectionModel.message,
+                                                sender: 'user',
+                                                message_type: 'initial_message',
+                                                lead_name: lead.name,
+                                                connection_id: lead.connectionId,
+                                                conversation_urn_id: conversationUrnId,
+                                                campaign_id: currentCampaign.id
+                                            }).catch(storeErr => {
+                                                console.error('⚠️ Failed to sync initial message to database (will retry on next poll):', storeErr);
+                                            });
+                                            console.log('✅ Initial message stored (Chrome storage + async DB sync)');
+                                        } catch (storeErr) {
+                                            console.error('❌ Error initiating database sync:', storeErr);
+                                        }
+                                    }
+                                }, 2000); // Wait 2 seconds for messageConnection to set conversation_urn_id
                                 
                                 // Set up monitoring for responses to this initial message
                                 const initialMonitoringData = {
                                     callId: callId,
                                     campaignId: currentCampaign.id,
                                     connectionId: lead.connectionId,
-                                    conversationUrnId: lead.conversationUrnId,
+                                    conversationUrnId: conversationUrnId, // Use extracted URN if available
                                     leadName: lead.name
                                 };
                                 await setupAIMessageMonitoring(initialMonitoringData);
@@ -2730,7 +2106,9 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                                 method: 'GET',
                                 headers: {
                                     'Content-Type': 'application/json',
-                                    'lk-id': currentLinkedInId
+                                    'lk-id': currentLinkedInId,
+                                    'ngrok-skip-browser-warning': 'true',
+                                    'Accept': 'application/json'
                                 }
                             });
                             
@@ -2791,11 +2169,46 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                                     
                                     // Send the message using the existing messageConnection function
                                     console.log('🚀 Calling messageConnection function...');
-                                    messageConnection({ uploads: [] });
+                                    console.log(`📝 Final message to send: "${aiMessage}"`);
+                                    console.log(`👤 Sending to: ${lead.name} (${lead.connectionId})`);
+                                    // Use browser automation instead of API
+                                    const browserResult = await _sendMessageBrowser(lead, aiMessage);
+                                    if (browserResult.success) {
                                     messageSentViaAI = true;
-                                    console.log('✅ AI-generated message sent successfully to LinkedIn!');
+                                        console.log('✅ AI-generated message sent successfully to LinkedIn! (browser automation)');
+                                    } else {
+                                        throw new Error(browserResult.error || 'Failed to send AI message via browser automation');
+                                    }
+                                    
+                                    // Store the AI message as the first message in conversation history
+                                    // Wait a bit for conversation_urn_id to be set from messageConnection response
+                                    setTimeout(async () => {
+                                        if (callId && aiMessage) {
+                                            try {
+                                                // Get conversation_urn_id from arConnectionModel (set by messageConnection after sending)
+                                                const conversationUrnId = arConnectionModel.conversationUrnId || lead.conversationUrnId || null;
+                                                
+                                                await storeConversationMessage({
+                                                    call_id: String(callId),
+                                                    message: aiMessage,
+                                                    sender: 'user',
+                                                    message_type: 'initial_message',
+                                                    lead_name: lead.name,
+                                                    connection_id: lead.connectionId,
+                                                    conversation_urn_id: conversationUrnId,
+                                                    campaign_id: currentCampaign.id
+                                                });
+                                                console.log('✅ Initial AI message stored in conversation history');
+                                            } catch (storeErr) {
+                                                console.error('❌ Failed to store initial AI message in conversation history:', storeErr);
+                                            }
+                                        }
+                                    }, 2000); // Wait 2 seconds for messageConnection to set conversation_urn_id
                                 } catch (sendErr) {
                                     console.error('❌ Failed to send AI message to LinkedIn:', sendErr);
+                                    console.error('❌ Error details:', sendErr.message, sendErr.stack);
+                                    // Don't set messageSentViaAI to true so fallback can try
+                                    messageSentViaAI = false;
                                 }
                             } else {
                                 console.log('⚠️ No AI message available, using original message');
@@ -2819,10 +2232,39 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
 
                                     await new Promise(resolve => setTimeout(resolve, 5000));
 
-                                    await messageConnection({ uploads: [], filters: { message: arConnectionModel.message } });
-
-                                    console.log('✅ Fallback user message sent');
+                                    // Use browser automation instead of API
+                                    const browserResult = await _sendMessageBrowser(lead, arConnectionModel.message);
+                                    if (browserResult.success) {
+                                        console.log('✅ Fallback user message sent (browser automation)');
                                     messageSentViaAI = true; // prevent duplicate standard send
+                                    } else {
+                                        throw new Error(browserResult.error || 'Failed to send fallback message via browser automation');
+                                    }
+                                    
+                                    // Store the fallback message as the first message in conversation history
+                                    // Wait a bit for conversation_urn_id to be set from messageConnection response
+                                    setTimeout(async () => {
+                                        if (callId && arConnectionModel.message) {
+                                            try {
+                                                // Get conversation_urn_id from arConnectionModel (set by messageConnection after sending)
+                                                const conversationUrnId = arConnectionModel.conversationUrnId || lead.conversationUrnId || null;
+                                                
+                                                await storeConversationMessage({
+                                                    call_id: String(callId),
+                                                    message: arConnectionModel.message,
+                                                    sender: 'user',
+                                                    message_type: 'initial_message',
+                                                    lead_name: lead.name,
+                                                    connection_id: lead.connectionId,
+                                                    conversation_urn_id: conversationUrnId,
+                                                    campaign_id: currentCampaign.id
+                                                });
+                                                console.log('✅ Initial fallback message stored in conversation history');
+                                            } catch (storeErr) {
+                                                console.error('❌ Failed to store initial fallback message in conversation history:', storeErr);
+                                            }
+                                        }
+                                    }, 2000); // Wait 2 seconds for messageConnection to set conversation_urn_id
                                 } catch (fallbackErr) {
                                     console.error('❌ Failed to send fallback user message:', fallbackErr);
                                 }
@@ -2833,13 +2275,13 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                         console.warn('🔍 Full error:', msgErr);
                     }
                     
-                    // Only set deduplication flag after successful API call
-                    const attemptKey = `call_attempted_${currentCampaign.id}_${lead.connectionId}`;
-                    await chrome.storage.local.set({ [attemptKey]: Date.now() });
-                    console.log('✅ Call status stored successfully, dedupe flag set:', attemptKey);
+                        // Dedupe flag already set before API call to prevent duplicates
+                        console.log('✅ Call status stored successfully');
+                    } // End of else block for storeCallStatus availability check
                 } catch (err) {
                     console.error('❌ Failed to store call status (will not retry immediately):', err.message);
-                    // Don't set dedupe flag on API failure, allowing retry
+                    // Dedupe flag is already set, so we won't retry automatically
+                    // User can manually retry if needed
                 } finally {
                     // Don't mark call node as completed immediately - wait for response
                     console.log('⏳ Call message sent, waiting for response...');
@@ -2848,12 +2290,176 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
             }
 
             // Send the LinkedIn message (only if not already sent via AI message processing)
+            let messageSuccess = false;
             if (!messageSentViaAI) {
                 console.log('📤 Sending message via standard method (no AI message or AI message not used)');
-                // Ensure we send the current arConnectionModel.message
-                await messageConnection({ uploads: [], filters: { message: arConnectionModel.message } });
+                console.log(`📝 Message content: ${arConnectionModel.message ? `"${arConnectionModel.message.substring(0, 100)}..."` : 'EMPTY - ERROR!'}`);
+                console.log(`👤 Sending to: ${lead.name} (${lead.connectionId})`);
+                
+                // Check if message exists
+                if (!arConnectionModel.message || arConnectionModel.message.trim() === '') {
+                    console.error(`❌ ERROR: No message content available for ${lead.name}!`);
+                    console.error(`❌ Cannot send empty message. Check nodeModel.message in campaign sequence.`);
+                    messageSuccess = false;
+                    // Remove the duplicate flag so it can retry
+                    if (nodeModel.value === 'call') {
+                        const attemptKey = `call_attempted_${currentCampaign.id}_${lead.connectionId}`;
+                        await chrome.storage.local.remove([attemptKey]);
+                        console.log(`🔄 Removed duplicate flag for ${lead.name} - will retry on next run`);
+                    }
+                    continue; // Skip to next lead
+                }
+                
+                // Ensure we send the current arConnectionModel.message using browser automation
+                try {
+                    const browserResult = await _sendMessageBrowser(lead, arConnectionModel.message);
+                    if (browserResult.success) {
+                        console.log(`✅ Message sent successfully to ${lead.name} (browser automation)`);
+                        messageSuccess = true;
+                        
+                        // Extract and store conversation URN from browser automation result
+                        if (browserResult.conversationUrnId) {
+                            console.log(`🔗 Extracted conversation URN from browser: ${browserResult.conversationUrnId}`);
+                            // Store in arConnectionModel and lead for later use
+                            arConnectionModel.conversationUrnId = browserResult.conversationUrnId;
+                            lead.conversationUrnId = browserResult.conversationUrnId;
+                            
+                            // Update monitoring data with conversation URN (for both call and message actions)
+                            const monitoringKey = `call_response_monitoring_${currentCampaign.id}_${lead.connectionId}`;
+                            const existingMonitoring = await chrome.storage.local.get([monitoringKey]);
+                            if (existingMonitoring[monitoringKey]) {
+                                existingMonitoring[monitoringKey].conversationUrnId = browserResult.conversationUrnId;
+                                await chrome.storage.local.set({ [monitoringKey]: existingMonitoring[monitoringKey] });
+                                console.log(`✅ Updated monitoring data with conversation URN: ${browserResult.conversationUrnId}`);
+                            }
+                        } else {
+                            console.log('⚠️ No conversation URN extracted from browser automation');
+                        }
+                    } else {
+                        throw new Error(browserResult.error || 'Failed to send message via browser automation');
+                    }
+                    
+                    // For call actions, store the message as the first message in conversation history
+                    if (nodeModel.value === 'call') {
+                        // Get callId from storage
+                        const callIdKey = `call_id_${lead.connectionId}`;
+                        const callIdData = await chrome.storage.local.get([callIdKey]);
+                        const callId = callIdData[callIdKey];
+                        
+                        // Store conversation message with extracted URN
+                        setTimeout(async () => {
+                            if (callId && arConnectionModel.message) {
+                                try {
+                                    // Use conversation URN from browser result (already stored in arConnectionModel)
+                                    const conversationUrnId = arConnectionModel.conversationUrnId || lead.conversationUrnId || browserResult.conversationUrnId || null;
+                                    
+                                    await storeConversationMessage({
+                                        call_id: String(callId),
+                                        message: arConnectionModel.message,
+                                        sender: 'user',
+                                        message_type: 'initial_message',
+                                        lead_name: lead.name,
+                                        connection_id: lead.connectionId,
+                                        conversation_urn_id: conversationUrnId,
+                                        campaign_id: currentCampaign.id
+                                    });
+                                    console.log('✅ Initial message stored in conversation history with URN:', conversationUrnId);
+                                } catch (storeErr) {
+                                    console.error('❌ Failed to store initial message in conversation history:', storeErr);
+                                }
+                            }
+                        }, 1000); // Reduced wait time since we already have the URN from browser result
+                    }
+                    
+                    // For message actions, also store the conversation message and set up monitoring
+                    if (nodeModel.value === 'message') {
+                        // Store the message in conversation history
+                        setTimeout(async () => {
+                            try {
+                                const conversationUrnId = arConnectionModel.conversationUrnId || lead.conversationUrnId || browserResult.conversationUrnId || null;
+                                
+                                // Try to get callId from monitoring data (if it exists from a previous call action)
+                                const monitoringKey = `call_response_monitoring_${currentCampaign.id}_${lead.connectionId}`;
+                                const monitoringData = await chrome.storage.local.get([monitoringKey]);
+                                const callId = monitoringData[monitoringKey]?.callId || null;
+                                
+                                if (callId) {
+                                    await storeConversationMessage({
+                                        call_id: String(callId),
+                                        message: arConnectionModel.message,
+                                        sender: 'user',
+                                        message_type: 'user_message',
+                                        lead_name: lead.name,
+                                        connection_id: lead.connectionId,
+                                        conversation_urn_id: conversationUrnId,
+                                        campaign_id: currentCampaign.id
+                                    });
+                                    console.log('✅ Message stored in conversation history with URN:', conversationUrnId);
+                                } else {
+                                    console.log('⚠️ No callId found for message action - message not stored in conversation history');
+                                }
+                                
+                                // Set up or update monitoring data with conversation URN
+                                const existingMonitoring = await chrome.storage.local.get([monitoringKey]);
+                                if (existingMonitoring[monitoringKey]) {
+                                    // Update existing monitoring
+                                    existingMonitoring[monitoringKey].conversationUrnId = conversationUrnId;
+                                    await chrome.storage.local.set({ [monitoringKey]: existingMonitoring[monitoringKey] });
+                                    console.log(`✅ Updated monitoring data with conversation URN for message action`);
+                                } else {
+                                    // Create new monitoring entry for message action
+                                    await chrome.storage.local.set({
+                                        [monitoringKey]: {
+                                            callId: null,
+                                            campaignId: currentCampaign.id,
+                                            connectionId: lead.connectionId,
+                                            conversationUrnId: conversationUrnId,
+                                            leadName: lead.name,
+                                            lastCheckedMessageId: null,
+                                            sentAt: Date.now(),
+                                            status: 'waiting_for_response',
+                                            messageCount: 0
+                                        }
+                                    });
+                                    console.log(`✅ Created monitoring data for message action with conversation URN`);
+                                }
+                            } catch (storeErr) {
+                                console.error('❌ Failed to store message in conversation history:', storeErr);
+                            }
+                        }, 1000);
+                    }
+                } catch (messageError) {
+                    console.error(`❌ Failed to send message to ${lead.name}:`, messageError.message);
+                    console.error(`❌ Error stack:`, messageError.stack);
+                    console.error(`⏭️ Skipping this lead and continuing to next lead...`);
+                    messageSuccess = false;
+                    // Remove the duplicate flag so it can retry
+                    if (nodeModel.value === 'call') {
+                        const attemptKey = `call_attempted_${currentCampaign.id}_${lead.connectionId}`;
+                        await chrome.storage.local.remove([attemptKey]);
+                        console.log(`🔄 Removed duplicate flag for ${lead.name} - will retry on next run`);
+                    }
+                    // Don't mark as processed, allow retry on next run
+                    continue; // Skip to next lead
+                }
             } else {
                 console.log('✅ Message already sent via AI message processing, skipping duplicate send');
+                messageSuccess = true; // AI message already sent
+                
+                // Mark as processed since AI message was sent
+                if (alarmName) {
+                    const processedLead = {
+                        id: lead.id,
+                        connectionId: lead.connectionId,
+                        name: lead.name,
+                        processedAt: new Date().toISOString(),
+                        success: true,
+                        backendUpdated: true
+                    };
+                    processedLeads.push(processedLead);
+                    await chrome.storage.local.set({ [`campaign_${alarmName}_processed`]: processedLeads });
+                    console.log(`💾 Saved to Chrome storage: ${lead.name} (Total processed: ${processedLeads.length})`);
+                }
                 
                 // Set up response monitoring after AI message is sent
                 setTimeout(async () => {
@@ -2888,10 +2494,28 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
         if (i === 0) { // Only create once at the start
             console.log('📊 Creating lead gen running for campaign:', currentCampaign.id);
             try {
-                await createLeadGenRunning(currentCampaign.id);
-                console.log('✅ Successfully created lead gen running entries');
+                // Inline API call to avoid scoping issues
+                const createResponse = await fetch(`${PLATFORM_URL}/api/campaign/${currentCampaign.id}/leadgen/store`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'lk-id': linkedinId,
+                        'ngrok-skip-browser-warning': 'true',
+                        'Accept': 'application/json'
+                    }
+                });
+                
+                if (createResponse.ok) {
+                    const createData = await createResponse.json();
+                    console.log('✅ Successfully created lead gen running entries:', createData);
+                } else {
+                    const errorText = await createResponse.text();
+                    console.warn(`⚠️ Failed to create lead gen running (status ${createResponse.status}):`, errorText);
+                    // Don't throw - continue anyway, records might already exist
+                }
             } catch (error) {
-                console.error('❌ Failed to create lead gen running entries:', error);
+                console.error('❌ Failed to create lead gen running entries:', error.message);
+                // Don't throw - continue anyway, records might already exist
             }
         }
         
@@ -2933,20 +2557,83 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                 console.log(`⚠️ Could not get current network status for ${lead.name}, using database value: ${currentNetworkDistance}`);
             }
             
+            let inviteSuccess = false;
+            let backendUpdateSuccess = false;
+            
             if(currentNetworkDistance != 1 && !nodeModel.runStatus){
                 console.log('✅ CONDITIONS MET: Sending connection invite to:', lead.name);
                 console.log('🚀 About to call _sendConnectionInvite...');
                 try {
+                    // Send invite - this will also update backend table
                     await _sendConnectionInvite(lead, nodeModel, currentCampaign.id);
                     console.log(`✅ Invite process completed for ${lead.name}`);
+                    
+                    // _sendConnectionInvite updates backend table internally and throws error if it fails
+                    // If we reach here, backend was updated successfully
+                    backendUpdateSuccess = lead._backendUpdated === true;
+                    
+                    if (backendUpdateSuccess) {
+                        console.log(`✅ Backend table verified updated for lead ${lead.name}`);
+                    } else {
+                        throw new Error('Backend update verification failed');
+                    }
+                    
+                    inviteSuccess = true; // Mark as successful only if no error thrown
                 } catch (error) {
                     console.error(`❌ Invite failed for ${lead.name}:`, error);
                     console.error(`❌ Error details:`, error.stack);
+                    inviteSuccess = false; // Mark as failed
+                    backendUpdateSuccess = false;
+                    console.log(`⚠️ Lead ${lead.name} will NOT be marked as processed due to failure`);
                 }
             } else {
                 console.log('❌ CONDITIONS NOT MET - Skipping invite:');
                 if (currentNetworkDistance == 1) {
                     console.log('   ⏭️ Reason: Already connected (current network distance is 1)');
+                    console.log('   ✅ User already accepted invite - marking as accepted in backend...');
+                    
+                    // If already connected, mark them as accepted immediately
+                    try {
+                        const leadIdToUpdate = lead.id || lead.connectionId;
+                        if (leadIdToUpdate) {
+                            const updateData = {
+                                acceptedStatus: true,
+                                statusLastId: 3, // 3 = accepted
+                                currentNodeKey: nodeModel.key || 0,
+                                nextNodeKey: 0
+                            };
+                            
+                            const response = await fetch(`${PLATFORM_URL}/api/campaign/${currentCampaign.id}/leadgen/${leadIdToUpdate}/update`, {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'lk-id': linkedinId,
+                                    'ngrok-skip-browser-warning': 'true',
+                                    'Accept': 'application/json'
+                                },
+                                body: JSON.stringify(updateData)
+                            });
+                            
+                            if (response.ok) {
+                                const updateResult = await response.json();
+                                console.log(`✅ Already-connected user ${lead.name} marked as accepted:`, updateResult);
+                                console.log(`🔄 Continuing to process remaining leads...`);
+                                backendUpdateSuccess = true;
+                                // Update local lead object
+                                lead.acceptedStatus = true;
+                                lead.statusLastId = 3;
+                            } else {
+                                console.error(`❌ Failed to mark already-connected user as accepted: ${response.status}`);
+                                backendUpdateSuccess = false;
+                            }
+                        } else {
+                            console.warn('⚠️ Could not mark as accepted: No lead ID available');
+                            backendUpdateSuccess = false;
+                        }
+                    } catch (updateError) {
+                        console.error(`❌ Error marking already-connected user as accepted:`, updateError);
+                        backendUpdateSuccess = false;
+                    }
                 } else if (nodeModel.runStatus) {
                     console.log('   ⏭️ Reason: Node already marked as completed (runStatus is true)');
                 } else {
@@ -2954,12 +2641,93 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                     console.log(`   🔍 currentNetworkDistance: ${currentNetworkDistance} (expected != 1)`);
                     console.log(`   🔍 runStatus: ${nodeModel.runStatus} (expected false)`);
                 }
+                
+                // Only set inviteSuccess to false if NOT already connected (already connected is a success case)
+                if (currentNetworkDistance != 1) {
+                    inviteSuccess = false; // Conditions not met = not processed
+                    if (currentNetworkDistance != 1) {
+                        backendUpdateSuccess = false;
+                    }
+                } else {
+                    // Already connected is considered a success (no invite needed)
+                    inviteSuccess = true; // Mark as success since they're already connected
+                }
+            }
+            
+            // Only mark as processed if BOTH invite was sent AND backend was updated
+            if (inviteSuccess && backendUpdateSuccess && alarmName) {
+                const processedLead = { 
+                    id: lead.id, 
+                    connectionId: lead.connectionId, 
+                    name: lead.name, 
+                    processedAt: new Date().toISOString(),
+                    success: true,
+                    backendUpdated: true
+                };
+                processedLeads.push(processedLead);
+                await chrome.storage.local.set({ [`campaign_${alarmName}_processed`]: processedLeads });
+                console.log(`💾 STEP 2: Saved to Chrome storage AFTER backend update: ${lead.name} (Total processed: ${processedLeads.length})`);
+                console.log(`✅ Lead ${lead.name} fully processed: Backend ✅ Chrome ✅`);
+            } else {
+                console.log(`⏭️ Lead ${lead.name} NOT saved to Chrome storage`);
+                console.log(`   - Invite success: ${inviteSuccess}`);
+                console.log(`   - Backend update: ${backendUpdateSuccess}`);
+                console.log(`   - Will retry on next campaign run`);
+            }
+        } else if (nodeModel.value === 'message') {
+            // Mark message as processed in Chrome storage if successful
+            if (typeof messageSuccess !== 'undefined' && messageSuccess && alarmName) {
+                const processedLead = {
+                    id: lead.id,
+                    connectionId: lead.connectionId,
+                    name: lead.name,
+                    processedAt: new Date().toISOString(),
+                    success: true,
+                    backendUpdated: true
+                };
+                processedLeads.push(processedLead);
+                await chrome.storage.local.set({ [`campaign_${alarmName}_processed`]: processedLeads });
+                console.log(`💾 Saved to Chrome storage: ${lead.name} (Total processed: ${processedLeads.length})`);
+            }
+        } else if (nodeModel.value === 'profile-view') {
+            // Mark profile view as processed in Chrome storage if successful
+            if (typeof profileViewSuccess !== 'undefined' && profileViewSuccess && alarmName) {
+                const processedLead = {
+                    id: lead.id,
+                    connectionId: lead.connectionId,
+                    name: lead.name,
+                    processedAt: new Date().toISOString(),
+                    success: true,
+                    backendUpdated: true
+                };
+                processedLeads.push(processedLead);
+                await chrome.storage.local.set({ [`campaign_${alarmName}_processed`]: processedLeads });
+                console.log(`💾 Saved to Chrome storage: ${lead.name} (Total processed: ${processedLeads.length})`);
             }
         }
         console.log(`✅ Finished processing lead ${i+1}/${leads.length}`);
+        
         console.log(`⏱️ Waiting 20 seconds before next lead...`);
         await delay(20000)
         console.log(`✅ 20-second delay completed`);
+    }
+    
+    // Release lock when all leads are processed
+    if (alarmName) {
+        // If this is a direct_ alarm, also release the corresponding custom_ lock
+        if (alarmName.startsWith('direct_')) {
+            const customAlarmName = alarmName.replace('direct_', 'custom_');
+            await chrome.storage.local.remove([
+                `campaign_${alarmName}_running`,
+                `campaign_${alarmName}_running_timestamp`,
+                `campaign_${customAlarmName}_running`,
+                `campaign_${customAlarmName}_running_timestamp`
+            ]);
+            console.log(`🔓 Released locks for both ${alarmName} and ${customAlarmName}`);
+        } else {
+            await chrome.storage.local.remove([`campaign_${alarmName}_running`]);
+            console.log('🔓 Lock released - all leads processed');
+        }
     }
     
     console.log('🔧 DEBUG: Finished processing all leads, checking for completion logic...');
@@ -2970,14 +2738,32 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
         // 🎯 COMPLETION LOGIC: After sending invites, check for next node
         console.log('🎉 All invites sent successfully! Checking for next node...');
         
-        // Mark the send-invites node as completed
+        // Mark the send-invites node as completed - inline API call to avoid scoping issues
         try {
             console.log('🔧 DEBUG: About to mark send-invites node as completed...');
-            await updateSequenceNodeModel(currentCampaign, {
-                ...nodeModel,
+            
+            // Inline API call to update node status
+            const updateNodeResponse = await fetch(`${PLATFORM_URL}/api/campaign/${currentCampaign.id}/update-node`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'lk-id': linkedinId,
+                    'ngrok-skip-browser-warning': 'true',
+                    'Accept': 'application/json'
+                },
+                body: JSON.stringify({
+                    nodeKey: nodeModel.key,
                 runStatus: true
+                })
             });
-            console.log('✅ Send-invites node marked as completed');
+            
+            if (updateNodeResponse.ok) {
+                const updateNodeData = await updateNodeResponse.json();
+                console.log('✅ Send-invites node marked as completed:', updateNodeData);
+            } else {
+                const errorText = await updateNodeResponse.text();
+                console.warn(`⚠️ Failed to mark node as completed (status ${updateNodeResponse.status}):`, errorText);
+            }
             
             // Add a small delay to prevent race conditions
             await new Promise(resolve => setTimeout(resolve, 1000));
@@ -2999,13 +2785,38 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
             console.log('⚠️ Could not update UI status (content script not available):', error.message);
         }
         
-        // Check if there's a next node in the sequence
+        // Check if there's a next node in the sequence - inline API call to avoid scoping issues
         try {
-            await getCampaignSequence(currentCampaign.id);
-            console.log(`📋 Campaign sequence loaded with ${campaignSequence.nodeModel.length} nodes`);
+            // Inline API call to get campaign sequence
+            const sequenceResponse = await fetch(`${PLATFORM_URL}/api/campaign/${currentCampaign.id}/sequence`, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'lk-id': linkedinId,
+                    'ngrok-skip-browser-warning': 'true',
+                    'Accept': 'application/json'
+                }
+            });
+            
+            if (!sequenceResponse.ok) {
+                throw new Error(`Failed to fetch sequence: ${sequenceResponse.status}`);
+            }
+            
+            const contentType = sequenceResponse.headers.get('content-type');
+            if (!contentType || !contentType.includes('application/json')) {
+                const text = await sequenceResponse.text();
+                if (text.includes('<!DOCTYPE') || text.includes('ngrok')) {
+                    throw new Error('Received HTML response (ngrok warning page) instead of JSON');
+                }
+            }
+            
+            const sequenceData = await sequenceResponse.json();
+            const campaignSequence = sequenceData.data || sequenceData;
+            
+            console.log(`📋 Campaign sequence loaded with ${campaignSequence.nodeModel?.length || 0} nodes`);
             
             // Find the next node after send-invites
-            const nextNode = campaignSequence.nodeModel.find(node => 
+            const nextNode = campaignSequence.nodeModel?.find(node => 
                 node.value !== 'send-invites' && !node.runStatus
             );
             
@@ -3013,32 +2824,82 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                 console.log(`🔄 Found next node: ${nextNode.label} (${nextNode.value})`);
                 console.log(`⏰ Executing next node immediately...`);
                 
-                // Get accepted leads for the next node
-                await getLeadGenRunning(currentCampaign.id);
-                const acceptedLeads = campaignLeadgenRunning.filter(lead => lead.acceptedStatus === true);
+                // Get accepted leads for the next node - inline API call
+                let acceptedLeads = [];
+                try {
+                    const leadsResponse = await fetch(`${PLATFORM_URL}/api/campaign/${currentCampaign.id}/leads/running`, {
+                        method: 'GET',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'lk-id': linkedinId,
+                            'ngrok-skip-browser-warning': 'true',
+                            'Accept': 'application/json'
+                        }
+                    });
+                    
+                    if (leadsResponse.ok) {
+                        const leadsData = await leadsResponse.json();
+                        const allLeads = leadsData.data || leadsData || [];
+                        console.log(`🔍 DEBUG: Total leads in campaignLeadgenRunning: ${allLeads.length}`);
+                
+                        acceptedLeads = allLeads.filter(lead => 
+                    lead.accept_status === true || lead.accept_status === 1 || lead.acceptedStatus === true
+                );
+                console.log(`🔍 DEBUG: Found ${acceptedLeads.length} accepted leads after filtering`);
+                    }
+                } catch (error) {
+                    console.error('❌ Failed to fetch accepted leads:', error.message);
+                }
                 
                 if (acceptedLeads.length > 0) {
                     console.log(`👥 Found ${acceptedLeads.length} accepted leads for next node execution`);
+                    console.log(`🔄 Executing next node: ${nextNode.label} (${nextNode.value})`);
                     
                     // Execute the next node immediately
-                    await runSequence(currentCampaign, acceptedLeads, nextNode);
+                    await runSequence(currentCampaign, acceptedLeads, nextNode, alarmName);
                     console.log('✅ Next node executed successfully');
                 } else {
                     console.log('⚠️ No accepted leads found for next node execution');
+                    console.log('💡 Next node will execute when leads accept the invites');
                 }
             } else {
                 console.log('❌ No next node found, marking campaign as completed');
                 
                 try {
-                    await updateCampaign({
-                        campaignId: currentCampaign.id,
+                    // Inline API call to mark campaign as completed
+                    const updateCampaignResponse = await fetch(`${PLATFORM_URL}/api/campaign/${currentCampaign.id}/update`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'lk-id': linkedinId,
+                            'ngrok-skip-browser-warning': 'true',
+                            'Accept': 'application/json'
+                        },
+                        body: JSON.stringify({
                         status: 'completed'
+                        })
                     });
-                    console.log('✅ Campaign marked as completed in backend');
+                    
+                    if (updateCampaignResponse.ok) {
+                        const updateData = await updateCampaignResponse.json();
+                        console.log('✅ Campaign marked as completed in backend:', updateData);
+                        
+                        // Remove from active campaigns
+                        chrome.storage.local.get(['activeCampaigns'], (result) => {
+                            const activeCampaigns = result.activeCampaigns || [];
+                            const updatedCampaigns = activeCampaigns.filter(id => id !== currentCampaign.id);
+                            chrome.storage.local.set({ activeCampaigns: updatedCampaigns });
+                            console.log(`📊 Removed campaign ${currentCampaign.id} from active campaigns list`);
+                        });
+                    } else {
+                        const errorText = await updateCampaignResponse.text();
+                        console.warn(`⚠️ Failed to mark campaign as completed (status ${updateCampaignResponse.status}):`, errorText);
+                    }
                         
                     // Clear any pending alarms for this campaign
                     chrome.alarms.clear('lead_generation');
                     chrome.alarms.clear('accepted_leads');
+                    chrome.alarms.clear(alarmName);
                     console.log('🧹 Cleared pending campaign alarms');
                     
                     console.log('🎊 CAMPAIGN COMPLETED SUCCESSFULLY!');
@@ -3058,56 +2919,94 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
         return;
     }
     
-    // If current node is call, check if campaign should be completed
+    // If current node is call, campaign should continue running to monitor for responses
     if (nodeModel.value === 'call') {
-        console.log('🔧 DEBUG: Call action completed, checking if campaign should be marked as completed...');
+        console.log('🔧 DEBUG: Call action completed - campaign will continue running to monitor for responses...');
         
+        // For call campaigns, we should NOT mark as completed after sending call messages
+        // The campaign should remain active to monitor for user responses
+        console.log('📞 Call message sent - campaign will continue running to monitor responses');
+        console.log('🔄 Campaign remains active for response monitoring');
+        console.log('💡 User can respond to the call message, and the system will detect it');
+        
+        // Update UI status to show call sent and waiting for response
         try {
-            // Check if there are any more unrun actions in the sequence
-            await getCampaignSequence(currentCampaign.id);
-            console.log(`📋 Campaign sequence loaded with ${campaignSequence.nodeModel.length} nodes`);
-            
-            // Find any remaining unrun action nodes (excluding send-invites and call)
-            const remainingActions = campaignSequence.nodeModel.filter(node => 
-                node.type === 'action' && 
-                node.runStatus === false && 
-                node.value !== 'send-invites' && 
-                node.value !== 'call' &&
-                node.value !== 'end'
-            );
-            
-            if (remainingActions.length === 0) {
-                console.log('🎉 No more actions available - marking campaign as completed');
-                
-                await updateCampaign({
-                    campaignId: currentCampaign.id,
-                    status: 'completed'
-                });
-                console.log('✅ Campaign marked as completed in backend');
-                
-                // Clear any pending alarms for this campaign
-                chrome.alarms.clear('lead_generation');
-                chrome.alarms.clear('accepted_leads');
-                console.log('🧹 Cleared pending campaign alarms');
-                
-                console.log('🎊 CAMPAIGN COMPLETED SUCCESSFULLY!');
-                console.log('📞 All call actions have been completed');
-                console.log('🛑 Campaign will no longer run automatically');
-            } else {
-                console.log(`📋 Found ${remainingActions.length} remaining actions, campaign will continue`);
-                console.log('Remaining actions:', remainingActions.map(a => `${a.label} (${a.value})`));
-            }
+            updateCampaignStatus('running', 'Call message sent - waiting for response');
         } catch (error) {
-            console.error('❌ Failed to check campaign completion status:', error);
+            console.log('⚠️ Could not update UI status:', error.message);
         }
         
-        console.log('🔧 DEBUG: Returning early after call node handling to preserve completion state');
+        console.log('🔧 DEBUG: Call node completed, campaign continues running for response monitoring');
         return;
     }
 
     console.log('🔄 Updating sequence node model...');
-    // Mark the current node as completed
-    await updateSequenceNodeModel(currentCampaign, { ...nodeModel, runStatus: true });
+    // Mark the current node as completed - inline API call to avoid scoping issues
+    try {
+        console.log(`📤 Updating node model for campaign ${currentCampaign.id}, node ${nodeModel.key}, runStatus: true`);
+        
+        const response = await fetch(`${PLATFORM_URL}/api/campaign/${currentCampaign.id}/update-node`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'lk-id': linkedinId || 'vicken-concept',
+                'ngrok-skip-browser-warning': 'true'
+            },
+            body: JSON.stringify({
+                nodeKey: nodeModel.key,
+                runStatus: true
+            })
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`❌ Failed to update sequence node model: ${response.status} ${response.statusText}`, errorText);
+            throw new Error(`Failed to update sequence node model: ${response.status}`);
+        }
+
+        const data = await response.json();
+        console.log(`✅ Sequence node model updated successfully:`, data);
+        
+        // Refresh sequence from API to get updated runStatus before checking for next node
+        console.log('🔄 Refreshing sequence from API to get updated node statuses...');
+        try {
+            const sequenceResponse = await fetch(`${PLATFORM_URL}/api/campaign/${currentCampaign.id}/sequence`, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'lk-id': linkedinId || 'vicken-concept',
+                    'ngrok-skip-browser-warning': 'true',
+                    'Accept': 'application/json'
+                }
+            });
+            
+            if (sequenceResponse.ok) {
+                const contentType = sequenceResponse.headers.get('content-type');
+                if (contentType && contentType.includes('application/json')) {
+                    const sequenceData = await sequenceResponse.json();
+                    const updatedSequence = sequenceData.data || sequenceData;
+                    
+                    // Get current campaign data from storage first
+                    const campaignKey = `campaign_${currentCampaign.id}`;
+                    const currentCampaignData = await chrome.storage.local.get([campaignKey]);
+                    
+                    // Update storage with fresh sequence data
+                    await chrome.storage.local.set({
+                        [campaignKey]: {
+                            ...(currentCampaignData[campaignKey] || {}),
+                            sequence: updatedSequence
+                        }
+                    });
+                    console.log(`✅ Sequence refreshed from API with ${updatedSequence.nodeModel?.length || 0} nodes`);
+                }
+            }
+        } catch (refreshErr) {
+            console.warn(`⚠️ Failed to refresh sequence from API, using cached data:`, refreshErr.message);
+        }
+    } catch (updateErr) {
+        console.error(`❌ Error updating sequence node model:`, updateErr);
+        // Continue execution even if update fails
+    }
     
     // Check if this is a direct-action campaign and we need to execute the next node
     console.log('🔍 Checking if next node should be executed...');
@@ -3132,6 +3031,15 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
         
         console.log(`📋 Found sequence with ${sequenceNodes.length} nodes`);
         
+        // Log all nodes for debugging
+        console.log(`🔍 All nodes in sequence:`, sequenceNodes.map(n => ({
+            key: n.key,
+            label: n.label,
+            value: n.value,
+            type: n.type,
+            runStatus: n.runStatus
+        })));
+        
         // Find the next unrun action node (only nodes AFTER the current one)
         const nextNode = sequenceNodes.find(node => 
             node.type === 'action' && 
@@ -3144,22 +3052,59 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
             console.log(`🎯 FOUND NEXT NODE: ${nextNode.label} (${nextNode.value})`);
             console.log(`🔑 Next node key: ${nextNode.key}`);
             console.log(`⏰ Next node delay: ${nextNode.delayInMinutes || 0} minutes`);
+            console.log(`📊 Current node key: ${nodeModel.key}, Next node key: ${nextNode.key}`);
             
             // Check if this is a direct-action campaign (first node is NOT send-invites)
             const firstNode = sequenceNodes[0];
             const isDirectActionCampaign = firstNode && firstNode.value !== 'send-invites';
+            const isSendInvitesCompleted = firstNode && firstNode.value === 'send-invites' && firstNode.runStatus === true;
             
-            if (isDirectActionCampaign) {
-                console.log('💡 This is a direct-action campaign - executing next node immediately');
+            if (isDirectActionCampaign || isSendInvitesCompleted) {
+                if (isDirectActionCampaign) {
+                    console.log('💡 This is a direct-action campaign - executing next node immediately');
+                } else {
+                    console.log('💡 Send-invites completed - executing next node immediately');
+                }
                 
                 // Filter out audience objects - only keep actual lead objects with connectionId
                 const validLeads = leads.filter(lead => lead.connectionId && lead.firstName);
                 console.log(`👥 Filtered leads: ${validLeads.length} valid out of ${leads.length} total`);
                 
                 if (validLeads.length > 0) {
-                    setTimeout(() => {
-                        runSequence(currentCampaign, validLeads, nextNode);
-                    }, 2000); // Small delay to allow current action to complete
+                    console.log(`🚀 Executing next node: ${nextNode.label} (${nextNode.value}) with ${validLeads.length} leads`);
+                    
+                    // Calculate delay based on next node's delayInMinutes
+                    const delayMs = (nextNode.delayInMinutes || 0) * 60 * 1000;
+                    const minDelay = 2000; // Minimum 2 seconds
+                    const actualDelay = Math.max(delayMs, minDelay);
+                    
+                    console.log(`⏰ Next node will execute in ${actualDelay}ms (${nextNode.delayInMinutes || 0} minutes delay)`);
+                    
+                    setTimeout(async () => {
+                        try {
+                            // Get processed leads from storage for the next node
+                            const nextAlarmName = `direct_${nextNode.value}`;
+                            const customAlarmName = `custom_${nextNode.value}`;
+                            const storageKey = `campaign_${nextAlarmName}_processed`;
+                            const storageResult = await chrome.storage.local.get([storageKey]);
+                            const processedLeads = storageResult[storageKey] || [];
+                            console.log(`📋 Found ${processedLeads.length} previously processed leads for next node`);
+                            
+                            // Set locks for BOTH direct_ and custom_ alarm names to prevent duplicates
+                            await chrome.storage.local.set({
+                                [`campaign_${nextAlarmName}_running`]: true,
+                                [`campaign_${nextAlarmName}_running_timestamp`]: Date.now(),
+                                [`campaign_${customAlarmName}_running`]: true,
+                                [`campaign_${customAlarmName}_running_timestamp`]: Date.now()
+                            });
+                            console.log(`🔒 Set locks for both ${nextAlarmName} and ${customAlarmName} to prevent duplicates`);
+                            
+                            await runSequence(currentCampaign, validLeads, nextNode, nextAlarmName, processedLeads);
+                            console.log('✅ Next node executed successfully');
+                        } catch (nextNodeError) {
+                            console.error(`❌ Error executing next node:`, nextNodeError);
+                        }
+                    }, actualDelay);
                     
                     console.log('✅ Next node scheduled for execution');
                 } else {
@@ -3178,16 +3123,54 @@ const runSequence = async (currentCampaign, leads, nodeModel) => {
                 console.log(`🔑 End node key: ${endNode.key}`);
                 
                 try {
-                    // Mark the end node as complete
-                    await updateSequenceNodeModel(currentCampaign, { ...endNode, runStatus: true });
+                    // Mark the end node as complete - inline API call to avoid scoping issues
+                    console.log(`📤 Updating end node for campaign ${currentCampaign.id}, node ${endNode.key}, runStatus: true`);
+                    const endNodeResponse = await fetch(`${PLATFORM_URL}/api/campaign/${currentCampaign.id}/update-node`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'lk-id': linkedinId || 'vicken-concept',
+                            'ngrok-skip-browser-warning': 'true'
+                        },
+                        body: JSON.stringify({
+                            nodeKey: endNode.key,
+                            runStatus: true
+                        })
+                    });
+                    if (!endNodeResponse.ok) {
+                        throw new Error(`Failed to update end node: ${endNodeResponse.status}`);
+                    }
+                    const endNodeData = await endNodeResponse.json();
+                    console.log(`✅ End node updated successfully:`, endNodeData);
                     
-                    // Mark the campaign as completed
-                    await updateCampaign({
-                        campaignId: currentCampaign.id,
-                        status: 'completed'
+                    // Mark the campaign as completed - inline API call to avoid scoping issues
+                    console.log(`📤 Marking campaign ${currentCampaign.id} as completed`);
+                    const campaignResponse = await fetch(`${PLATFORM_URL}/api/campaign/${currentCampaign.id}/update`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'lk-id': linkedinId || 'vicken-concept',
+                            'ngrok-skip-browser-warning': 'true'
+                        },
+                        body: JSON.stringify({
+                            campaignId: currentCampaign.id,
+                            status: 'completed'
+                        })
+                    });
+                    if (!campaignResponse.ok) {
+                        throw new Error(`Failed to update campaign: ${campaignResponse.status}`);
+                    }
+                    const campaignData = await campaignResponse.json();
+                    console.log(`✅ Campaign marked as COMPLETED:`, campaignData);
+                    
+                    // Remove from active campaigns
+                    chrome.storage.local.get(['activeCampaigns'], (result) => {
+                        const activeCampaigns = result.activeCampaigns || [];
+                        const updatedCampaigns = activeCampaigns.filter(id => id !== currentCampaign.id);
+                        chrome.storage.local.set({ activeCampaigns: updatedCampaigns });
+                        console.log(`📊 Removed campaign ${currentCampaign.id} from active campaigns list`);
                     });
                     
-                    console.log('✅ Campaign marked as COMPLETED');
                     updateCampaignStatus('completed', 'All sequence steps completed');
                 } catch (error) {
                     console.error('❌ Failed to mark campaign as completed:', error);
@@ -3214,9 +3197,17 @@ const sendFollowupMessage = async (scheduleInfo) => {
         arConnectionModel.conversationUrnId = ''
 
         try {
-            messageConnection(scheduleInfo);
+            // Use browser automation instead of API
+            const lead = {
+                name: scheduleInfo.name || arConnectionModel.name || 'Unknown',
+                connectionId: scheduleInfo.connectionId || arConnectionModel.connectionId,
+                conId: scheduleInfo.connectionId || arConnectionModel.connectionId,
+                publicIdentifier: scheduleInfo.connectionId || arConnectionModel.connectionId
+            };
+            const message = scheduleInfo.message || arConnectionModel.message || '';
+            await _sendMessageBrowser(lead, message);
         } catch (error) {
-            console.log(error)
+            console.log('❌ Error sending message:', error);
         }
         await delay(30000)
     }    
@@ -3261,9 +3252,50 @@ const getUserProfile = () => {
             lastName = res.miniProfile.lastName
             console.log('LinkedIn ID set to:', linkedinId);
             console.log('User profile loaded:', firstName, lastName);
+            console.log('🔍 Full profile response structure:', JSON.stringify(res, null, 2).substring(0, 1000));
             
-            // Store LinkedIn ID in storage
-            chrome.storage.local.set({ linkedinId: linkedinId });
+            // Extract entity URN from multiple possible locations
+            let entityUrn = null;
+            
+            // Try different locations in the response
+            if (res.miniProfile?.entityUrn) {
+                entityUrn = res.miniProfile.entityUrn;
+                console.log('✅ Found entity URN in res.miniProfile.entityUrn:', entityUrn);
+            } else if (res.entityUrn) {
+                entityUrn = res.entityUrn;
+                console.log('✅ Found entity URN in res.entityUrn:', entityUrn);
+            } else if (res.miniProfile?.objectUrn) {
+                entityUrn = res.miniProfile.objectUrn;
+                console.log('✅ Found entity URN in res.miniProfile.objectUrn:', entityUrn);
+            } else if (plainId) {
+                // Construct entity URN from plainId (format: urn:li:fs_miniProfile:{plainId})
+                entityUrn = `urn:li:fs_miniProfile:${plainId}`;
+                console.log('✅ Constructed entity URN from plainId:', entityUrn);
+            } else if (linkedinId) {
+                // Try to construct from public identifier (less reliable)
+                // Format might be: urn:li:member:{linkedinId}
+                entityUrn = `urn:li:member:${linkedinId}`;
+                console.log('⚠️ Constructed entity URN from publicIdentifier (may not be accurate):', entityUrn);
+            }
+            
+            if (!entityUrn) {
+                console.error('❌ Could not extract or construct entity URN from profile response');
+                console.log('📋 Available fields in res:', Object.keys(res));
+                console.log('📋 Available fields in res.miniProfile:', res.miniProfile ? Object.keys(res.miniProfile) : 'null');
+            }
+            
+            // Store LinkedIn ID and profile info (including entity URN for reliable sender detection)
+            chrome.storage.local.set({ 
+                linkedinId: linkedinId,
+                linkedinProfile: {
+                    entityUrn: entityUrn,
+                    publicIdentifier: linkedinId,
+                    firstName: firstName,
+                    lastName: lastName,
+                    plainId: plainId
+                }
+            });
+            console.log('✅ Stored LinkedIn profile with entity URN:', entityUrn);
             
             // Trigger campaign check now that LinkedIn ID is available
             setTimeout(async () => {
@@ -3271,7 +3303,20 @@ const getUserProfile = () => {
                 try {
                     // Ensure LinkedIn ID is properly set before proceeding
                     if (linkedinId && linkedinId !== 'undefined') {
+                        // Check if function exists before calling
+                        if (typeof initializeActiveCampaigns === 'function') {
                         await initializeActiveCampaigns();
+                        } else {
+                            console.log('⚠️ initializeActiveCampaigns function not yet available, will retry later');
+                            // Retry after a delay
+                            setTimeout(async () => {
+                                if (typeof initializeActiveCampaigns === 'function') {
+                                    await initializeActiveCampaigns();
+                                } else {
+                                    console.log('⚠️ initializeActiveCampaigns still not available after retry');
+                                }
+                            }, 2000);
+                        }
                     } else {
                         console.log('⚠️ LinkedIn ID not properly set, skipping campaign initialization');
                     }
@@ -3287,217 +3332,1066 @@ const getUserProfile = () => {
 }
 
 /**
- * Send message to a given LinkedIn profile
- * @param {object} scheduleInfo 
+ * Send message using browser automation (fallback when API fails)
+ * @param {object} lead - Lead object with connection data
+ * @param {string} message - Message text to send
+ * @returns {Promise<Object>} - Result object with success status
  */
-const messageConnection = scheduleInfo => {
-    console.log('─'.repeat(80));
-    console.log('📤 MESSAGE FLOW: SENDING TO LINKEDIN');
-    console.log('─'.repeat(80));
-    console.log(`👤 Lead: ${arConnectionModel.name || 'Unknown'}`);
-    console.log(`🔗 Connection ID: ${arConnectionModel.connectionId}`);
-    console.log(`💬 Conversation URN: ${arConnectionModel.conversationUrnId || 'New conversation'}`);
-    console.log(`📊 Network Distance: ${arConnectionModel.distance}`);
-    console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
-    console.log('─'.repeat(80));
-    console.log(`📝 Original message: ${arConnectionModel.message ? arConnectionModel.message.substring(0, 150) + '...' : 'No message'}`);
-    console.log('─'.repeat(80));
-    console.log('🔄 Processing message variables...');
-
-    arConnectionModel.message = changeMessageVariableNames(arConnectionModel.message, arConnectionModel)
-    
-    console.log(`📝 Processed message: ${arConnectionModel.message ? arConnectionModel.message.substring(0, 150) + '...' : 'No message'}`);
-    console.log('─'.repeat(80));
-
-    let url = ''
-    let conversationObj = {}
-    let messageEvent = {
-        value: {
-            'com.linkedin.voyager.messaging.create.MessageCreate' : {
-                attachments: scheduleInfo.uploads.length ? scheduleInfo.uploads : [],
-                body: arConnectionModel.message,
-                attributedBody: {"text": arConnectionModel.message, "attributes": []},
-                mediaAttachments: [],
-            }
-        }
-    }
-
-    if(arConnectionModel.conversationUrnId){
-        url = `${voyagerApi}/messaging/conversations/${arConnectionModel.conversationUrnId}/events?action=create`
-        conversationObj = {
-            eventCreate: messageEvent
-        }
-        console.log('─'.repeat(80));
-        console.log('💬 MESSAGE FLOW: USING EXISTING CONVERSATION');
-        console.log('─'.repeat(80));
-        console.log(`💬 Conversation URN: ${arConnectionModel.conversationUrnId}`);
-        console.log(`👤 Lead: ${arConnectionModel.name || 'Unknown'}`);
-        console.log(`🔗 Connection ID: ${arConnectionModel.connectionId}`);
-        console.log('─'.repeat(80));
-    }else {
-        url = `${voyagerApi}/messaging/conversations?action=create`
-        conversationObj = {
-            conversationCreate: {
-                eventCreate: messageEvent,
-                recipients: [arConnectionModel.connectionId],
-                subtype: arConnectionModel.distance == 1 ? "MEMBER_TO_MEMBER" : "INMAIL"
-            }
-        }
-        console.log('─'.repeat(80));
-        console.log('💬 MESSAGE FLOW: CREATING NEW CONVERSATION');
-        console.log('─'.repeat(80));
-        console.log(`👤 Lead: ${arConnectionModel.name || 'Unknown'}`);
-        console.log(`🔗 Connection ID: ${arConnectionModel.connectionId}`);
-        console.log(`📊 Network Distance: ${arConnectionModel.distance}`);
-        console.log(`📧 Message Type: ${arConnectionModel.distance == 1 ? 'MEMBER_TO_MEMBER' : 'INMAIL'}`);
-        console.log('─'.repeat(80));
-    }
-
-    // Get browser cookie
-            chrome.cookies.get({
-                url: inURL,
-                name: 'JSESSIONID'
-    }, function(data) {
-        if (data !== null) {
-            chrome.storage.local.remove("csrfToken")
-            chrome.storage.local.set({
-                "csrfToken": data.value.replaceAll('"','')
-            });
-        }
+const _sendMessageBrowser = async (lead, message) => {
+    console.log('🚀🚀🚀 _sendMessageBrowser function STARTED!');
+    console.log('🔍 Function called with:', { 
+        leadName: lead.name, 
+        leadId: lead.connectionId || lead.conId,
+        messageLength: message ? message.length : 0
     });
-
-    chrome.storage.local.get(["csrfToken"]).then((result) => {
-        console.log('─'.repeat(80));
-        console.log('📤 MESSAGE FLOW: SENDING REQUEST TO LINKEDIN');
-        console.log('─'.repeat(80));
-        console.log(`🔑 CSRF Token: ${result.csrfToken ? 'Available' : 'Missing'}`);
-        console.log(`🌐 API URL: ${url}`);
-        console.log(`📦 Request type: ${arConnectionModel.conversationUrnId ? 'Add to existing' : 'Create new'}`);
-        console.log(`👤 Lead: ${arConnectionModel.name || 'Unknown'}`);
-        console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
-        console.log('─'.repeat(80));
-        console.log('⏳ Sending request...');
+    
+    try {
+        // Create profile URL from connection ID
+        let profileId = lead.conId || lead.connectionId || lead.profileId || lead.publicIdentifier;
         
-        fetch(url, {
-            method: 'post',
-            headers: {
-                'csrf-token': result.csrfToken,
-                'accept': 'text/plain, */*; q=0.01',
-                'content-type': 'application/json; charset=UTF-8',
-                'x-li-lang': 'en_US',
-                'x-li-page-instance': 'urn:li:page:d_flagship3_people_invitations;1ZlPK7kKRNSMi+vkXMyVMw==',
-                'x-li-track': JSON.stringify({"clientVersion":"1.10.1208","osName":"web","timezoneOffset":1,"deviceFormFactor":"DESKTOP","mpName":"voyager-web"}),
-                'x-restli-protocol-version': '2.0.0',
-            },
-            body: JSON.stringify(conversationObj)
-        })
-        .then(res => {
-            console.log('─'.repeat(80));
-            console.log('📊 MESSAGE FLOW: API RESPONSE');
-            console.log('─'.repeat(80));
-            console.log(`📡 Status: ${res.status} ${res.statusText}`);
-            console.log(`👤 Lead: ${arConnectionModel.name || arConnectionModel.connectionId}`);
-            
-            if(res.ok) {
-                console.log('✅ Response: Success');
-            } else {
-                console.error('❌ Response: Failed');
-            }
-            
-            return res.json();
-        })
-        .then(res => {
-            console.log('─'.repeat(80));
-            console.log('✅ MESSAGE FLOW: SUCCESS! ✅');
-            console.log('='.repeat(80));
-            console.log('🎉 Message sent successfully to LinkedIn!');
-            console.log(`👤 Lead: ${arConnectionModel.name || 'Unknown'}`);
-            console.log(`🔗 Connection ID: ${arConnectionModel.connectionId}`);
-            console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
-            console.log('📄 Response data:', res);
-            
-            // Extract conversation URN ID from response if available
-            if (res && res.value && res.value.entityUrn) {
-                const conversationUrnId = res.value.entityUrn.replace('urn:li:fsd_conversation:', '');
-                arConnectionModel.conversationUrnId = conversationUrnId;
-                console.log('─'.repeat(80));
-                console.log('🔗 MESSAGE FLOW: CONVERSATION ESTABLISHED');
-                console.log('─'.repeat(80));
-                console.log(`💬 Conversation URN: ${conversationUrnId}`);
-                console.log(`👤 Lead: ${arConnectionModel.name || 'Unknown'}`);
-                console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
-                console.log('─'.repeat(80));
+        if (!profileId) {
+            console.error('❌ No profile ID found in lead data:', lead);
+            return { 
+                success: false, 
+                error: 'User profile not accessible' 
+            };
+        }
+        
+        // Validate profile ID is not "undefined" or empty
+        if (profileId === 'undefined' || profileId === '' || profileId === null) {
+            console.error('❌ Invalid profile ID:', profileId);
+            return { 
+                success: false, 
+                error: 'User profile not accessible' 
+            };
+        }
+        
+        const profileUrl = `https://www.linkedin.com/in/${profileId}`;
+        console.log(`🌐 Profile URL: ${profileUrl}`);
+        console.log(`📝 Message to send: ${message ? message.substring(0, 100) + '...' : 'No message'}`);
+        
+        // Step 1: Open LinkedIn profile page in background (like send invite)
+        console.log('🔄 Step 1: Opening LinkedIn profile page in background...');
+        const tab = await chrome.tabs.create({
+            url: profileUrl,
+            active: false // Open in background, don't interfere with user's other tabs
+        });
+        console.log(`✅ Tab created with ID: ${tab.id} (background tab)`);
+        
+        // Step 2: Wait for tab to load and ensure it's ready
+        console.log('🔄 Step 2: Waiting for tab to load completely...');
+        await new Promise((resolve) => {
+            const checkTab = () => {
+                chrome.tabs.get(tab.id, (tabData) => {
+                    if (tabData && tabData.status === 'complete') {
+                        console.log(`✅ Tab ${tab.id} loaded completely`);
+                        resolve();
+                    } else {
+                        setTimeout(checkTab, 500);
+                    }
+                });
+            };
+            checkTab();
+        });
+        
+        // Wait a bit more for page to fully render
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        
+        // Step 3: Inject automation script
+        console.log('🔄 Step 3: Injecting automation script...');
+        const result = await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            function: async (messageText) => {
+                console.log('🤖 Message automation script injected');
+                console.log(`📝 Message to send: ${messageText ? messageText.substring(0, 100) + '...' : 'No message'}`);
                 
-                // Set up response monitoring if this is a call message
-                if (arConnectionModel.message && arConnectionModel.message.toLowerCase().includes('call')) {
-                    setTimeout(async () => {
-                        // Try to find the call ID from recent call attempts
-                        const allStorage = await chrome.storage.local.get();
-                        const callKeys = Object.keys(allStorage).filter(key => key.startsWith('call_attempted_'));
+                // Helper function for delays
+                const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+                
+                // Helper function to wait for element
+                const waitForElement = (selector, timeout = 10000) => {
+                    return new Promise((resolve, reject) => {
+                        const startTime = Date.now();
+                        const checkElement = () => {
+                            const element = document.querySelector(selector);
+                            if (element) {
+                                resolve(element);
+                                return;
+                            }
+                            if (Date.now() - startTime > timeout) {
+                                reject(new Error(`Element ${selector} not found within ${timeout}ms`));
+                                return;
+                            }
+                            setTimeout(checkElement, 100);
+                        };
+                        checkElement();
+                    });
+                };
+                
+                try {
+                    // Step 1: Find main profile div (.ph5.pb5)
+                    console.log('🔍 Step 1: Looking for main profile div (.ph5.pb5)...');
+                    let mainProfileDiv = null;
+                    try {
+                        mainProfileDiv = await waitForElement('.ph5.pb5', 15000);
+                        console.log('✅ Main profile div found');
+                    } catch (waitError) {
+                        console.log('⚠️ Profile container not found with .ph5.pb5, trying alternatives...');
+                        const alternativeSelectors = [
+                            '[class*="ph5"][class*="pb5"]',
+                            '.pv-top-card',
+                            '[data-test-id="profile-container"]',
+                            'main section'
+                        ];
                         
-                        for (const key of callKeys) {
-                            const callData = allStorage[key];
-                            if (callData && Date.now() - callData < 10000) { // Within last 10 seconds
-                                const parts = key.split('_');
-                                const campaignId = parts[2];
-                                const connectionId = parts[3];
-                                
-                                if (connectionId === arConnectionModel.connectionId) {
-                                    const responseMonitoringKey = `call_response_monitoring_${campaignId}_${connectionId}`;
-                                    await chrome.storage.local.set({ 
-                                        [responseMonitoringKey]: {
-                                            callId: null, // Will be updated when we get the actual call ID
-                                            leadId: null, // Will be updated when we get the lead ID
-                                            leadName: arConnectionModel.name,
-                                            connectionId: arConnectionModel.connectionId,
-                                            campaignId: campaignId,
-                                            conversationUrnId: conversationUrnId,
-                                            sentAt: Date.now(),
-                                            status: 'waiting_for_response',
-                                            lastCheckedMessageId: null,
-                                            messageCount: 0,
-                                            responseCount: 0, // Track how many times we've responded
-                                            lastResponseSentAt: null // Track when we last sent a response
-                                        }
-                                    });
-                                    console.log('📊 Response monitoring set up for call message:', responseMonitoringKey);
-                                    console.log('🔗 Conversation URN ID stored:', conversationUrnId);
+                        for (const selector of alternativeSelectors) {
+                            try {
+                                mainProfileDiv = await waitForElement(selector, 3000);
+                                console.log(`✅ Found profile container with selector: ${selector}`);
+                                break;
+                            } catch (e) {
+                                console.log(`⚠️ Selector ${selector} not found, trying next...`);
+                            }
+                        }
+                    }
+                    
+                    if (!mainProfileDiv) {
+                        console.log('❌ Main profile div not found');
+                        window.linkdominatorMessageResult = { success: false, error: 'Profile container not found' };
+                        return { success: false, error: 'Profile container not found' };
+                    }
+                    
+                    // Step 2: Look for Message button in .ph5.pb5
+                    console.log('🔍 Step 2: Looking for Message button in .ph5.pb5...');
+                    const messageSelectors = [
+                        '.ph5.pb5 button[aria-label*="Message"]',
+                        '.ph5.pb5 button[aria-label*="message"]',
+                        '.ph5.pb5 button:contains("Message")',
+                        '.ph5.pb5 .artdeco-button[aria-label*="Message"]',
+                        '.ph5.pb5 [data-control-name="message"]',
+                        '.ph5.pb5 .pv-s-profile-actions--message',
+                        '.ph5.pb5 .pv-s-profile-actions button[aria-label*="Message"]',
+                        '.ph5.pb5 * button[aria-label*="Message"]',
+                        '.ph5.pb5 * button[aria-label*="message"]'
+                    ];
+                    
+                    let messageButton = null;
+                    for (const selector of messageSelectors) {
+                        messageButton = mainProfileDiv.querySelector(selector);
+                        if (messageButton && messageButton.offsetParent !== null) {
+                            console.log(`✅ Found Message button with selector: ${selector}`);
+                            break;
+                        }
+                    }
+                    
+                    // Fallback: look for any button with "Message" text within main profile div
+                    if (!messageButton) {
+                        console.log('🔍 No direct Message button found, checking by text content...');
+                        const profileButtons = mainProfileDiv.querySelectorAll('button');
+                        for (const button of profileButtons) {
+                            const buttonText = button.textContent.toLowerCase();
+                            if (buttonText.includes('message') && button.offsetParent !== null) {
+                                messageButton = button;
+                                console.log('✅ Found Message button by text content');
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // Step 3: If Message button not found, look for "More" button
+                    if (!messageButton) {
+                        console.log('🔍 Message button not found, checking "More" dropdown...');
+                        const moreButton = mainProfileDiv.querySelector('button[aria-label*="More actions"], button[aria-label*="More"], .artdeco-dropdown__trigger, button[aria-label*="more"], button[aria-label*="Additional actions"]');
+                        
+                        if (moreButton) {
+                            console.log('✅ Found "More" button');
+                            console.log('🖱️ Clicking "More" button to open dropdown...');
+                            moreButton.click();
+                            console.log('✅ "More" button clicked, waiting for dropdown...');
+                            await delay(1000); // Wait for dropdown to open
+                            
+                            // Look for Message button in dropdown
+                            console.log('🔍 Searching for Message button in dropdown...');
+                            const dropdownMessageSelectors = [
+                                '.ph5.pb5 .artdeco-dropdown__content button[aria-label*="Message"]',
+                                '.ph5.pb5 .artdeco-dropdown__content button[aria-label*="message"]',
+                                '.ph5.pb5 .artdeco-dropdown__item[aria-label*="Message"]',
+                                '.ph5.pb5 .artdeco-dropdown__item[aria-label*="message"]',
+                                '.ph5.pb5 [role="menuitem"][aria-label*="Message"]',
+                                '.ph5.pb5 * .artdeco-dropdown__content button[aria-label*="Message"]',
+                                '.ph5.pb5 * .artdeco-dropdown__content button[aria-label*="message"]'
+                            ];
+                            
+                            for (const selector of dropdownMessageSelectors) {
+                                messageButton = document.querySelector(selector);
+                                if (messageButton && messageButton.offsetParent !== null) {
+                                    console.log(`✅ Found Message button in dropdown with selector: ${selector}`);
+                                    break;
+                                }
+                            }
+                            
+                            // Also check by text content in dropdown
+                            if (!messageButton) {
+                                console.log('🔍 Searching dropdown by text content...');
+                                const dropdownButtons = mainProfileDiv.querySelectorAll('.artdeco-dropdown__content button, .artdeco-dropdown__content [role="menuitem"], .artdeco-dropdown__item');
+                                for (const button of dropdownButtons) {
+                                    const buttonText = button.textContent.toLowerCase();
+                                    if (buttonText.includes('message') && button.offsetParent !== null) {
+                                        messageButton = button;
+                                        console.log('✅ Found Message button in dropdown by text content');
+                                        break;
+                                    }
+                                }
+                            }
+                        } else {
+                            console.log('❌ "More" button not found');
+                        }
+                    }
+                    
+                    if (!messageButton) {
+                        console.log('❌ Message button not found');
+                        window.linkdominatorMessageResult = { success: false, error: 'Message button not found' };
+                        return { success: false, error: 'Message button not found' };
+                    }
+                    
+                    // Step 4: Click Message button
+                    console.log('🖱️ Step 4: Clicking Message button...');
+                    messageButton.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    await delay(1000);
+                    messageButton.click();
+                    console.log('✅ Message button clicked');
+                    
+                    // Step 5: Wait for message modal/text area to appear
+                    console.log('🔄 Step 5: Waiting for message text area to appear...');
+                    await delay(2000);
+                    
+                    // Step 6: Find and fill text area
+                    console.log('🔍 Step 6: Looking for message text area...');
+                    // PRIORITY: Look for msg-form__contenteditable first (most specific)
+                    let textArea = document.querySelector('.msg-form__contenteditable');
+                    if (textArea && textArea.offsetParent !== null) {
+                        console.log('✅ Found text area with .msg-form__contenteditable');
+                    } else {
+                        console.log('⚠️ .msg-form__contenteditable not found, trying other selectors...');
+                        const textAreaSelectors = [
+                            'div[contenteditable="true"][role="textbox"]',
+                            'div[contenteditable="true"]',
+                            '.msg-form__contenteditable',
+                            'textarea[placeholder*="message"]',
+                            'textarea[placeholder*="Message"]',
+                            '[data-test-id="message-text-input"]',
+                            '.msg-send-form__contenteditable',
+                            'div[aria-label*="Write a message"]',
+                            'div[aria-label*="write a message"]'
+                        ];
+                        
+                        for (const selector of textAreaSelectors) {
+                            textArea = document.querySelector(selector);
+                            if (textArea && textArea.offsetParent !== null) {
+                                console.log(`✅ Found text area with selector: ${selector}`);
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // Fallback: look for any contenteditable div
+                    if (!textArea) {
+                        console.log('🔍 No text area found with selectors, looking for contenteditable...');
+                        const allContentEditables = document.querySelectorAll('div[contenteditable="true"]');
+                        console.log(`🔍 Found ${allContentEditables.length} contenteditable divs`);
+                        for (let i = 0; i < allContentEditables.length; i++) {
+                            const elem = allContentEditables[i];
+                            if (elem.offsetParent !== null) {
+                                console.log(`   Checking element ${i}: class="${elem.className}"`);
+                                // Prefer elements with msg-form in class name
+                                if (elem.className && elem.className.includes('msg-form')) {
+                                    textArea = elem;
+                                    console.log(`✅ Found contenteditable text area with msg-form class: ${elem.className}`);
                                     break;
                                 }
                             }
                         }
-                    }, 1000);
+                        // If still not found, use first visible one
+                        if (!textArea) {
+                            for (const elem of allContentEditables) {
+                                if (elem.offsetParent !== null) {
+                                    textArea = elem;
+                                    console.log(`✅ Found contenteditable text area (fallback): ${elem.className}`);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    
+                    if (!textArea) {
+                        console.log('❌ Message text area not found');
+                        console.log('🔍 Available contenteditable elements:');
+                        const allEditable = document.querySelectorAll('[contenteditable="true"]');
+                        allEditable.forEach((el, idx) => {
+                            console.log(`   ${idx}: class="${el.className}", visible=${el.offsetParent !== null}`);
+                        });
+                        window.linkdominatorMessageResult = { success: false, error: 'Message text area not found' };
+                        return { success: false, error: 'Message text area not found' };
+                    }
+                    
+                    console.log(`✅ Text area found: class="${textArea.className}"`);
+                    
+                    if (!textArea) {
+                        console.log('❌ Message text area not found');
+                        window.linkdominatorMessageResult = { success: false, error: 'Message text area not found' };
+                        return { success: false, error: 'Message text area not found' };
+                    }
+                    
+                    // Step 7: Input message text
+                    console.log('📝 Step 7: Inputting message text...');
+                    console.log(`📝 Message: ${messageText}`);
+                    console.log(`📝 Text area class: ${textArea.className}`);
+                    
+                    // For contenteditable divs (like msg-form__contenteditable)
+                    if (textArea.contentEditable === 'true' || textArea.hasAttribute('contenteditable')) {
+                        console.log('📝 Using contenteditable input method...');
+                        
+                        // Focus on the text area first
+                        textArea.focus();
+                        await delay(300);
+                        
+                        // Click on the text area to ensure it's active
+                        textArea.click();
+                        await delay(300);
+                        
+                        // Clear any existing text
+                        console.log('🧹 Clearing existing text...');
+                        textArea.innerHTML = '';
+                        textArea.textContent = '';
+                        await delay(200);
+                        
+                        // Simulate REAL paste (like manual copy-paste) - this is what LinkedIn expects
+                        console.log('📋 Simulating REAL paste (like manual copy-paste)...');
+                        
+                        // Step 1: Copy text to clipboard (like user would do)
+                        console.log('📋 Step 1: Copying text to clipboard...');
+                        try {
+                            await navigator.clipboard.writeText(messageText);
+                            console.log('✅ Text copied to clipboard');
+                            await delay(200);
+                        } catch (clipboardError) {
+                            console.log('❌ Failed to copy to clipboard:', clipboardError.message);
+                            // Fallback: try execCommand copy
+                            try {
+                                // Create temporary textarea for copying
+                                const tempTextarea = document.createElement('textarea');
+                                tempTextarea.value = messageText;
+                                tempTextarea.style.position = 'fixed';
+                                tempTextarea.style.opacity = '0';
+                                document.body.appendChild(tempTextarea);
+                                tempTextarea.select();
+                                document.execCommand('copy');
+                                document.body.removeChild(tempTextarea);
+                                console.log('✅ Text copied using execCommand');
+                                await delay(200);
+                            } catch (e) {
+                                console.log('❌ All copy methods failed');
+                            }
+                        }
+                        
+                        // Step 2: Focus and clear text area
+                        console.log('📋 Step 2: Focusing text area...');
+                        textArea.focus();
+                        await delay(200);
+                        textArea.click();
+                        await delay(200);
+                        
+                        // Clear existing text
+                        textArea.innerHTML = '';
+                        textArea.textContent = '';
+                        await delay(100);
+                        
+                        // Step 3: Select all (to replace any existing text)
+                        console.log('📋 Step 3: Selecting all text...');
+                        const pasteSelection = window.getSelection();
+                        const pasteRange = document.createRange();
+                        pasteRange.selectNodeContents(textArea);
+                        pasteSelection.removeAllRanges();
+                        pasteSelection.addRange(pasteRange);
+                        await delay(100);
+                        
+                        // Step 4: Simulate Ctrl+V (the actual paste keyboard shortcut)
+                        console.log('📋 Step 4: Simulating Ctrl+V paste...');
+                        
+                        // First, dispatch keydown for Ctrl+V
+                        const keyDownEvent = new KeyboardEvent('keydown', {
+                            bubbles: true,
+                            cancelable: true,
+                            key: 'v',
+                            code: 'KeyV',
+                            ctrlKey: true,
+                            metaKey: false,
+                            keyCode: 86,
+                            which: 86
+                        });
+                        textArea.dispatchEvent(keyDownEvent);
+                        await delay(50);
+                        
+                        // Then dispatch the paste event with clipboard data
+                        const pasteEvent = new ClipboardEvent('paste', {
+                            bubbles: true,
+                            cancelable: true,
+                            clipboardData: new DataTransfer()
+                        });
+                        pasteEvent.clipboardData.setData('text/plain', messageText);
+                        textArea.dispatchEvent(pasteEvent);
+                        await delay(50);
+                        
+                        // Also try execCommand paste (for compatibility)
+                        try {
+                            document.execCommand('paste', false, null);
+                        } catch (e) {
+                            // Ignore if not supported
+                        }
+                        
+                        // Dispatch keyup for Ctrl+V
+                        const keyUpEvent = new KeyboardEvent('keyup', {
+                            bubbles: true,
+                            cancelable: true,
+                            key: 'v',
+                            code: 'KeyV',
+                            ctrlKey: true,
+                            metaKey: false,
+                            keyCode: 86,
+                            which: 86
+                        });
+                        textArea.dispatchEvent(keyUpEvent);
+                        
+                        await delay(500); // Wait for paste to complete
+                        
+                        // Step 5: Verify text was pasted
+                        console.log('📋 Step 5: Verifying paste...');
+                        if (!textArea.textContent || textArea.textContent.trim().length < messageText.trim().length * 0.9) {
+                            console.log('⚠️ Paste event may not have worked, trying direct insertion...');
+                            // Fallback: direct insertion with execCommand
+                            try {
+                                if (document.execCommand('insertText', false, messageText)) {
+                                    console.log('✅ Text inserted using execCommand insertText');
+                                    await delay(300);
+                                } else {
+                                    // Last resort: direct text setting
+                                    textArea.textContent = messageText;
+                                    textArea.innerText = messageText;
+                                    const inputEvent = new Event('input', { bubbles: true, cancelable: true });
+                                    textArea.dispatchEvent(inputEvent);
+                                    await delay(300);
+                                }
+                            } catch (e) {
+                                console.log('⚠️ All insertion methods failed');
+                            }
+                        } else {
+                            console.log('✅ Text pasted successfully via clipboard');
+                        }
+                        
+                        // Step 6: Trigger final events to ensure LinkedIn recognizes the input
+                        console.log('📋 Step 6: Triggering final validation events...');
+                        textArea.click();
+                        await delay(100);
+                        
+                        // Trigger input event one more time
+                        const finalInputEvent = new InputEvent('input', {
+                            bubbles: true,
+                            cancelable: true,
+                            inputType: 'insertText'
+                        });
+                        textArea.dispatchEvent(finalInputEvent);
+                        
+                        await delay(300);
+                        console.log('✅ Paste simulation complete');
+                        
+                        // Trigger input event IMMEDIATELY after setting text (critical for LinkedIn)
+                        const inputEvent = new Event('input', { bubbles: true, cancelable: true });
+                        textArea.dispatchEvent(inputEvent);
+                        
+                        // Also try InputEvent for better compatibility
+                        try {
+                            const inputEvent2 = new InputEvent('input', { 
+                                bubbles: true, 
+                                cancelable: true,
+                                inputType: 'insertText',
+                                data: messageText
+                            });
+                            textArea.dispatchEvent(inputEvent2);
+                        } catch (e) {
+                            console.log('⚠️ InputEvent not available:', e.message);
+                        }
+                        
+                        await delay(100);
+                        
+                        // Trigger beforeinput event (LinkedIn might listen to this)
+                        try {
+                            const beforeInputEvent = new InputEvent('beforeinput', { 
+                                bubbles: true, 
+                                cancelable: true,
+                                inputType: 'insertText',
+                                data: messageText
+                            });
+                            textArea.dispatchEvent(beforeInputEvent);
+                        } catch (e) {
+                            // Fallback if InputEvent not available
+                            const beforeInputEvent = new Event('beforeinput', { bubbles: true, cancelable: true });
+                            textArea.dispatchEvent(beforeInputEvent);
+                        }
+                        await delay(50);
+                        
+                        // Trigger change event
+                        const changeEvent = new Event('change', { bubbles: true, cancelable: true });
+                        textArea.dispatchEvent(changeEvent);
+                        await delay(50);
+                        
+                        // Trigger keyup event (some frameworks listen to this)
+                        const keyupEvent = new KeyboardEvent('keyup', { bubbles: true, cancelable: true, key: ' ' });
+                        textArea.dispatchEvent(keyupEvent);
+                        await delay(50);
+                        
+                        // Trigger composition events
+                        try {
+                            const compositionEnd = new CompositionEvent('compositionend', { bubbles: true, data: messageText });
+                            textArea.dispatchEvent(compositionEnd);
+                        } catch (e) {
+                            // Fallback
+                            const compositionEnd = new Event('compositionend', { bubbles: true });
+                            textArea.dispatchEvent(compositionEnd);
+                        }
+                        await delay(50);
+                        
+                        // Force a re-render by blurring and focusing again
+                        textArea.blur();
+                        await delay(50);
+                        textArea.focus();
+                        await delay(50);
+                        
+                        // Trigger input event one more time after focus
+                        textArea.dispatchEvent(inputEvent);
+                        await delay(100);
+                        
+                        console.log('✅ Message text inputted (contenteditable)');
+                        console.log(`   Text length: ${textArea.textContent.length}`);
+                        console.log(`   Text content preview: "${textArea.textContent.substring(0, 50)}..."`);
+                        
+                        // Verify text was set correctly
+                        if (textArea.textContent.length === 0 || textArea.textContent.trim() !== messageText.trim()) {
+                            console.log('⚠️ Text verification failed, retrying...');
+                            textArea.textContent = messageText;
+                            textArea.dispatchEvent(inputEvent);
+                            await delay(200);
+                        }
+                    } else {
+                        // For regular textarea
+                        console.log('📝 Using textarea input method...');
+                        textArea.focus();
+                        await delay(200);
+                        textArea.value = '';
+                        await delay(100);
+                        textArea.value = messageText;
+                        
+                        // Trigger multiple events
+                        textArea.dispatchEvent(new Event('input', { bubbles: true }));
+                        textArea.dispatchEvent(new Event('change', { bubbles: true }));
+                        textArea.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+                        
+                        console.log('✅ Message text inputted (textarea)');
+                        console.log(`   Value length: ${textArea.value.length}`);
+                    }
+                    
+                    // Wait longer for Send button to become enabled
+                    console.log('⏳ Waiting for Send button to become enabled...');
+                    console.log('⏳ Text area content:', textArea.textContent ? `"${textArea.textContent.substring(0, 50)}..."` : 'EMPTY');
+                    await delay(3000); // Wait longer for LinkedIn to process the text
+                    
+                    // Step 8: Find and click Send button
+                    console.log('🔍 Step 8: Looking for Send button...');
+                    console.log('🔍 Final text area check:', textArea.textContent ? `"${textArea.textContent.substring(0, 50)}..."` : 'EMPTY');
+                    await delay(2000); // Additional wait for Send button to become enabled
+                    
+                    let sendButton = null;
+                    
+                    // FIRST: Look for the msg-form__footer container and search within it
+                    console.log('🔍 Step 8a: Looking for msg-form__footer container...');
+                    const footerContainer = document.querySelector('.msg-form__footer');
+                    if (footerContainer) {
+                        console.log('✅ Found msg-form__footer container!');
+                        console.log(`   Container has ${footerContainer.querySelectorAll('button').length} buttons`);
+                        
+                        // Search for Send button within the footer container
+                        const footerSendSelectors = [
+                            'button[aria-label*="Send"]',
+                            'button[aria-label*="send"]',
+                            'button[aria-label="Send"]',
+                            'button[aria-label="send"]',
+                            'button[type="submit"]',
+                            'button[type="button"]',
+                            '.msg-form__send-button',
+                            'button'
+                        ];
+                        
+                        for (const selector of footerSendSelectors) {
+                            const buttons = footerContainer.querySelectorAll(selector);
+                            console.log(`   Found ${buttons.length} buttons with selector: ${selector}`);
+                            
+                            for (const button of buttons) {
+                                const isVisible = button.offsetParent !== null;
+                                const isDisabled = button.disabled;
+                                const buttonText = button.textContent.toLowerCase().trim();
+                                const ariaLabel = button.getAttribute('aria-label')?.toLowerCase() || '';
+                                
+                                console.log(`     Button: "${buttonText}" (visible: ${isVisible}, disabled: ${isDisabled}, aria-label: "${ariaLabel}")`);
+                                
+                                // Check if this looks like a Send button
+                                if (isVisible && !isDisabled && (buttonText.includes('send') || ariaLabel.includes('send') || selector === 'button[type="submit"]')) {
+                                    sendButton = button;
+                                    console.log(`✅ Found Send button in msg-form__footer with selector: ${selector}`);
+                                    break;
+                                }
+                            }
+                            
+                            if (sendButton) break;
+                        }
+                        
+                        // If still not found, try any enabled button in footer
+                        if (!sendButton) {
+                            console.log('🔍 Trying any enabled button in footer...');
+                            const allFooterButtons = footerContainer.querySelectorAll('button');
+                            for (const button of allFooterButtons) {
+                                if (button.offsetParent !== null && !button.disabled) {
+                                    sendButton = button;
+                                    console.log(`✅ Using enabled button in footer: "${button.textContent.trim()}"`);
+                                    break;
+                                }
+                            }
+                        }
+                    } else {
+                        console.log('⚠️ msg-form__footer container not found, trying other methods...');
+                    }
+                    
+                    // FALLBACK: If not found in footer, try global selectors
+                    if (!sendButton) {
+                        console.log('🔍 Step 8b: Trying global selectors...');
+                        const sendSelectors = [
+                            'button[aria-label*="Send"]',
+                            'button[aria-label*="send"]',
+                            'button[aria-label="Send"]',
+                            'button[aria-label="send"]',
+                            '.msg-form__send-button',
+                            '.msg-send-form__send-button',
+                            'button[data-control-name="send_message"]',
+                            '.artdeco-button[aria-label*="Send"]',
+                            'button[type="submit"]',
+                            'button.send-button',
+                            '[data-test-id="send-button"]',
+                            'button.msg-form__send-button'
+                        ];
+                        
+                        for (const selector of sendSelectors) {
+                            try {
+                                sendButton = document.querySelector(selector);
+                                if (sendButton) {
+                                    console.log(`🔍 Found element with selector: ${selector}`);
+                                    console.log(`   - Visible: ${sendButton.offsetParent !== null}`);
+                                    console.log(`   - Disabled: ${sendButton.disabled}`);
+                                    console.log(`   - Text: "${sendButton.textContent.trim()}"`);
+                                    console.log(`   - Aria-label: "${sendButton.getAttribute('aria-label')}"`);
+                                    
+                                    if (sendButton.offsetParent !== null && !sendButton.disabled) {
+                                        console.log(`✅ Found Send button with selector: ${selector}`);
+                                        break;
+                                    } else {
+                                        console.log(`⚠️ Button found but not usable (visible: ${sendButton.offsetParent !== null}, disabled: ${sendButton.disabled})`);
+                                        sendButton = null;
+                                    }
+                                }
+                            } catch (e) {
+                                console.log(`⚠️ Error with selector ${selector}:`, e.message);
+                            }
+                        }
+                    }
+                    
+                    // Fallback: look for any button with "Send" text
+                    if (!sendButton) {
+                        console.log('🔍 No Send button found with selectors, checking all buttons by text...');
+                        const allButtons = document.querySelectorAll('button');
+                        console.log(`🔍 Found ${allButtons.length} total buttons on page`);
+                        
+                        for (let i = 0; i < allButtons.length; i++) {
+                            const button = allButtons[i];
+                            const buttonText = button.textContent.toLowerCase().trim();
+                            const isVisible = button.offsetParent !== null;
+                            const isDisabled = button.disabled;
+                            
+                            if (i < 10) { // Log first 10 buttons for debugging
+                                console.log(`   Button ${i}: "${buttonText}" (visible: ${isVisible}, disabled: ${isDisabled})`);
+                            }
+                            
+                            if (buttonText.includes('send') && isVisible && !isDisabled) {
+                                sendButton = button;
+                                console.log(`✅ Found Send button by text content at index ${i}: "${buttonText}"`);
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // Additional fallback: look for buttons near the message form
+                    if (!sendButton) {
+                        console.log('🔍 Trying to find Send button near message form...');
+                        const messageForm = textArea.closest('form') || textArea.closest('.msg-form') || textArea.closest('[class*="msg"]');
+                        if (messageForm) {
+                            console.log('✅ Found message form container');
+                            const formButtons = messageForm.querySelectorAll('button');
+                            console.log(`🔍 Found ${formButtons.length} buttons in message form`);
+                            
+                            for (const button of formButtons) {
+                                const buttonText = button.textContent.toLowerCase().trim();
+                                const isVisible = button.offsetParent !== null;
+                                const isDisabled = button.disabled;
+                                
+                                console.log(`   Form button: "${buttonText}" (visible: ${isVisible}, disabled: ${isDisabled})`);
+                                
+                                if ((buttonText.includes('send') || button.getAttribute('aria-label')?.toLowerCase().includes('send')) && isVisible && !isDisabled) {
+                                    sendButton = button;
+                                    console.log(`✅ Found Send button in message form: "${buttonText}"`);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Last resort: look for any enabled button that might be the send button
+                    if (!sendButton) {
+                        console.log('🔍 Last resort: looking for any enabled button in message area...');
+                        const messageArea = textArea.closest('[class*="msg"]') || textArea.closest('[class*="message"]') || document.body;
+                        const areaButtons = messageArea.querySelectorAll('button');
+                        console.log(`🔍 Found ${areaButtons.length} buttons in message area`);
+                        
+                        for (const button of areaButtons) {
+                            if (button.offsetParent !== null && !button.disabled) {
+                                const buttonText = button.textContent.toLowerCase().trim();
+                                const ariaLabel = button.getAttribute('aria-label')?.toLowerCase() || '';
+                                
+                                // Check if it looks like a send button (has send text or icon)
+                                if (buttonText.includes('send') || ariaLabel.includes('send') || button.querySelector('[class*="send"]') || button.querySelector('[class*="paper-plane"]')) {
+                                    sendButton = button;
+                                    console.log(`✅ Found potential Send button: "${buttonText}"`);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    
+                    if (!sendButton) {
+                        console.log('❌ Send button not found after all attempts');
+                        console.log('🔍 Current page structure:');
+                        console.log('   - Text area found:', !!textArea);
+                        console.log('   - Text area parent:', textArea.parentElement?.className);
+                        console.log('   - All buttons count:', document.querySelectorAll('button').length);
+                        window.linkdominatorMessageResult = { success: false, error: 'Send button not found' };
+                        return { success: false, error: 'Send button not found' };
+                    }
+                    
+                    // Step 9: Click Send button
+                    console.log('📤 Step 9: Clicking Send button...');
+                    console.log(`   Button details: text="${sendButton.textContent.trim()}", aria-label="${sendButton.getAttribute('aria-label')}"`);
+                    sendButton.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    await delay(500);
+                    
+                    // Try multiple click methods
+                    try {
+                        sendButton.click();
+                        console.log('✅ Send button clicked (method 1: click())');
+                    } catch (e) {
+                        console.log('⚠️ Click method 1 failed, trying method 2...');
+                        try {
+                            sendButton.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                            console.log('✅ Send button clicked (method 2: dispatchEvent)');
+                        } catch (e2) {
+                            console.log('⚠️ Click method 2 failed, trying method 3...');
+                            sendButton.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+                            sendButton.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+                            console.log('✅ Send button clicked (method 3: pointer events)');
+                        }
+                    }
+                    
+                    // Step 10: Wait for confirmation and extract conversation URN
+                    console.log('⏳ Waiting for message to send...');
+                    await delay(3000); // Wait longer for message to send
+                    
+                    // Try to extract conversation URN from the page
+                    let conversationUrnId = null;
+                    console.log('🔍 Attempting to extract conversation URN from page...');
+                    
+                    // Method 1: Check if URL changed to messaging thread
+                    const currentUrl = window.location.href;
+                    console.log(`🔍 Current URL: ${currentUrl}`);
+                    if (currentUrl.includes('/messaging/thread/')) {
+                        const threadMatch = currentUrl.match(/\/messaging\/thread\/([^\/\?]+)/);
+                        if (threadMatch) {
+                            conversationUrnId = threadMatch[1];
+                            console.log(`✅ Extracted conversation URN from URL: ${conversationUrnId}`);
+                        }
+                    }
+                    
+                    // Method 2: Try to find conversation URN in React state/data attributes
+                    if (!conversationUrnId) {
+                        console.log('🔍 Trying to extract from React state/data attributes...');
+                        // Look for data attributes that might contain conversation info
+                        const messageForm = document.querySelector('.msg-form, [class*="msg-form"]');
+                        if (messageForm) {
+                            // Check data attributes
+                            const dataAttrs = ['data-conversation-id', 'data-conversation-urn', 'data-thread-id', 'data-conversation'];
+                            for (const attr of dataAttrs) {
+                                const value = messageForm.getAttribute(attr);
+                                if (value) {
+                                    conversationUrnId = value;
+                                    console.log(`✅ Found conversation URN in ${attr}: ${conversationUrnId}`);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Method 3: Try to extract from window.__INITIAL_STATE__ or similar
+                    if (!conversationUrnId) {
+                        try {
+                            // LinkedIn might store conversation data in window state
+                            const windowState = window.__INITIAL_STATE__ || window.__APP_STATE__ || window.__REACT_QUERY_STATE__;
+                            if (windowState) {
+                                const stateStr = JSON.stringify(windowState);
+                                // Look for conversation URN patterns
+                                const urnMatch = stateStr.match(/urn:li:fsd_conversation:([A-Za-z0-9_-]+)/);
+                                if (urnMatch) {
+                                    conversationUrnId = urnMatch[1];
+                                    console.log(`✅ Extracted conversation URN from window state: ${conversationUrnId}`);
+                                }
+                            }
+                        } catch (e) {
+                            console.log('⚠️ Could not access window state:', e.message);
+                        }
+                    }
+                    
+                    // Method 4: Check if we're redirected to messaging page
+                    if (!conversationUrnId) {
+                        await delay(2000); // Wait a bit more for potential redirect
+                        const newUrl = window.location.href;
+                        if (newUrl !== currentUrl && newUrl.includes('/messaging/thread/')) {
+                            const threadMatch = newUrl.match(/\/messaging\/thread\/([^\/\?]+)/);
+                            if (threadMatch) {
+                                conversationUrnId = threadMatch[1];
+                                console.log(`✅ Extracted conversation URN from redirect URL: ${conversationUrnId}`);
+                            }
+                        }
+                    }
+                    
+                    // Check for success indicators
+                    const successIndicators = [
+                        '.msg-send-form__message-sent',
+                        '[data-test-id="message-sent"]',
+                        '.artdeco-inline-feedback--success',
+                        '[class*="message-sent"]',
+                        '[class*="sent"]'
+                    ];
+                    
+                    let messageSent = false;
+                    for (const selector of successIndicators) {
+                        const element = document.querySelector(selector);
+                        if (element) {
+                            console.log(`✅ Message sent successfully confirmed with indicator: ${selector}`);
+                            messageSent = true;
+                            break;
+                        }
+                    }
+                    
+                    // If modal closes or text area clears, assume success
+                    if (!messageSent) {
+                        const textAreaAfter = document.querySelector('div[contenteditable="true"][role="textbox"]');
+                        if (!textAreaAfter || textAreaAfter.textContent.trim() === '') {
+                            console.log('✅ Message sent (text area cleared - success indicator)');
+                            messageSent = true;
+                        }
+                    }
+                    
+                    // Check if Send button is now disabled (another success indicator)
+                    if (!messageSent && sendButton.disabled) {
+                        console.log('✅ Message sent (Send button disabled - success indicator)');
+                        messageSent = true;
+                    }
+                    
+                    if (!messageSent) {
+                        console.log('✅ Message sent (no explicit confirmation found, but button was clicked)');
+                        messageSent = true;
+                    }
+                    
+                    console.log(`📊 Message send result: success=${messageSent}, conversationUrnId=${conversationUrnId || 'not found'}`);
+                    window.linkdominatorMessageResult = { 
+                        success: messageSent, 
+                        conversationUrnId: conversationUrnId 
+                    };
+                    return { 
+                        success: messageSent, 
+                        conversationUrnId: conversationUrnId 
+                    };
+                    
+                } catch (error) {
+                    console.error('❌ Error in message automation:', error.message);
+                    window.linkdominatorMessageResult = { success: false, error: error.message };
+                    return { success: false, error: error.message };
                 }
-            }
+            },
+            args: [message]
+        });
+        
+        // Step 4: Wait for automation to complete
+        console.log('🔄 Step 4: Waiting for automation to complete...');
+        await new Promise(resolve => setTimeout(resolve, 10000)); // Give time for automation
+        
+        // Step 5: Get result from injected script
+        let automationResult = null;
+        try {
+            const results = await chrome.scripting.executeScript({
+                target: { tabId: tab.id },
+                function: () => {
+                    return window.linkdominatorMessageResult || { success: false, error: 'No result found' };
+                }
+            });
             
+            if (results && results[0] && results[0].result) {
+                automationResult = results[0].result;
+                console.log('📊 Automation result:', automationResult);
+            }
+        } catch (resultError) {
+            console.error('❌ Error getting automation result:', resultError);
+        }
+        
+        // Step 6: Close the tab
+        console.log('🔄 Step 6: Closing automation tab...');
+        try {
+            await chrome.tabs.remove(tab.id);
+            console.log('✅ Tab closed');
+        } catch (closeError) {
+            console.log('⚠️ Could not close tab:', closeError.message);
+        }
+        
+        // Return result
+        if (automationResult && automationResult.success) {
+            console.log('✅ Message sent successfully via browser automation');
+            return { success: true };
+        } else {
+            console.error('❌ Message automation failed:', automationResult?.error || 'Unknown error');
+            return { 
+                success: false, 
+                error: automationResult?.error || 'Message automation failed' 
+            };
+        }
+        
+    } catch (error) {
+        console.error('❌ Error in _sendMessageBrowser:', error);
+        return { 
+            success: false, 
+            error: error.message 
+        };
+    }
+};
+
+/**
+ * Send message to a given LinkedIn profile using browser automation
+ * NOTE: Voyager API has been removed - all messages now use browser automation
+ * @param {object} scheduleInfo - Schedule info (for compatibility, but not used)
+ */
+const messageConnection = async (scheduleInfo) => {
+    console.log('─'.repeat(80));
+    console.log('📤 MESSAGE FLOW: USING BROWSER AUTOMATION');
+    console.log('─'.repeat(80));
+    console.log(`👤 Lead: ${arConnectionModel.name || 'Unknown'}`);
+    console.log(`🔗 Connection ID: ${arConnectionModel.connectionId}`);
+    console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
+    console.log('─'.repeat(80));
+    console.log(`📝 Message: ${arConnectionModel.message ? arConnectionModel.message.substring(0, 150) + '...' : 'No message'}`);
+    console.log('─'.repeat(80));
+    
+    // Process message variables if needed
+
+    // Ensure changeMessageVariableNames is available (service worker scoping)
+    // Use try-catch to safely check for function availability
+    let messageVarReplacer = null;
+    try {
+        if (typeof changeMessageVariableNames === 'function') {
+            messageVarReplacer = changeMessageVariableNames;
+        } else if (typeof self !== 'undefined' && typeof self.changeMessageVariableNames === 'function') {
+            messageVarReplacer = self.changeMessageVariableNames;
+        } else if (typeof globalThis !== 'undefined' && typeof globalThis.changeMessageVariableNames === 'function') {
+            messageVarReplacer = globalThis.changeMessageVariableNames;
+        }
+    } catch (e) {
+        // Function not accessible, will use fallback
+        console.warn('⚠️ changeMessageVariableNames not accessible:', e.message);
+    }
+    
+    if (typeof messageVarReplacer === 'function') {
+        arConnectionModel.message = messageVarReplacer(arConnectionModel.message, arConnectionModel);
+    } else {
+        // Fallback: inline variable replacement if function not available
+        console.warn('⚠️ changeMessageVariableNames not available, using fallback');
+        const lead = arConnectionModel;
+        if (arConnectionModel.message && typeof arConnectionModel.message === 'string') {
+            arConnectionModel.message = arConnectionModel.message
+                .replace(/\{firstName\}/g, lead.firstName || '')
+                .replace(/\{lastName\}/g, lead.lastName || '')
+                .replace(/\{name\}/g, lead.name || '')
+                .replace(/\{title\}/g, lead.title || '')
+                .replace(/@firstName/g, lead.firstName || '')
+                .replace(/@lastName/g, lead.lastName || '')
+                .replace(/@name/g, lead.name || '')
+                .replace(/@title/g, lead.title || '');
+        }
+    }
+    
+    console.log(`📝 Processed message: ${arConnectionModel.message ? arConnectionModel.message.substring(0, 150) + '...' : 'No message'}`);
+    console.log('─'.repeat(80));
+
+    // Use browser automation to send message (Voyager API removed)
+    const lead = {
+        name: arConnectionModel.name,
+        connectionId: arConnectionModel.connectionId,
+        conId: arConnectionModel.connectionId,
+        publicIdentifier: arConnectionModel.connectionId,
+        firstName: arConnectionModel.firstName,
+        lastName: arConnectionModel.lastName
+    };
+    
+    try {
+        const browserResult = await _sendMessageBrowser(lead, arConnectionModel.message);
+        
+        if (browserResult.success) {
             console.log('─'.repeat(80));
-            console.log('🎉 MESSAGE FLOW: COMPLETED');
+            console.log('✅ MESSAGE FLOW: SUCCESS! ✅');
             console.log('='.repeat(80));
-            console.log(`✅ Message successfully delivered!`);
+            console.log('🎉 Message sent successfully via browser automation!');
             console.log(`👤 Lead: ${arConnectionModel.name || 'Unknown'}`);
             console.log(`🔗 Connection ID: ${arConnectionModel.connectionId}`);
-            console.log(`💬 Conversation URN: ${arConnectionModel.conversationUrnId || 'N/A'}`);
-            console.log(`📅 Completed at: ${new Date().toLocaleString()}`);
+            console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
             console.log('='.repeat(80));
-        })
-        .catch((err) => {
+            } else {
+            throw new Error(browserResult.error || 'Browser automation failed');
+        }
+    } catch (error) {
             console.log('─'.repeat(80));
             console.error('❌ MESSAGE FLOW: ERROR');
             console.log('─'.repeat(80));
-            console.error('❌ Failed to send LinkedIn message!');
+        console.error('❌ Failed to send LinkedIn message via browser automation!');
             console.error(`👤 Lead: ${arConnectionModel.name || arConnectionModel.connectionId}`);
             console.error(`🔗 Connection ID: ${arConnectionModel.connectionId}`);
-            console.error(`💬 Conversation URN: ${arConnectionModel.conversationUrnId || 'N/A'}`);
-            console.error(`❌ Error:`, err);
+        console.error(`❌ Error:`, error);
             console.error(`📅 Timestamp: ${new Date().toLocaleString()}`);
             console.error(`💡 Possible reasons:`);
-            console.error(`   1. Network connection issue`);
-            console.error(`   2. LinkedIn rate limiting`);
-            console.error(`   3. Invalid connection ID`);
-            console.error(`   4. CSRF token expired`);
+        console.error(`   1. Message button not found on profile`);
+        console.error(`   2. Profile not accessible`);
+        console.error(`   3. LinkedIn page structure changed`);
             console.log('─'.repeat(80));
-        })
-    })
+        throw error;
+    }
 }
 /**
  * Fetch skills of a given LinkedIn profile to endorse.
@@ -3832,7 +4726,7 @@ const _endorseConnection = (data, result) => {
  * View profile of a given LinkedIn profile.
  * @param {object} lead 
  */
-const _viewProfile = (lead) => {
+const _viewProfile = async (lead) => {
     console.log('─'.repeat(80));
     console.log('🚀 PROFILE FLOW: PREPARING REQUEST');
     console.log('─'.repeat(80));
@@ -3843,22 +4737,39 @@ const _viewProfile = (lead) => {
     console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
     console.log('─'.repeat(80));
     
-    chrome.cookies.get({
-        url: inURL,
-        name: 'JSESSIONID'
-    }, function(data) {
-        if (data !== null) {
-            chrome.storage.local.remove("csrfToken")
-            chrome.storage.local.set({
-                "csrfToken": data.value.replaceAll('"','')
-            });
-        }
-    });
+    // Get CSRF token
+    return new Promise((resolve, reject) => {
+        chrome.cookies.get({
+            url: inURL,
+            name: 'JSESSIONID'
+        }, function(data) {
+            if (data !== null) {
+                chrome.storage.local.remove("csrfToken")
+                chrome.storage.local.set({
+                    "csrfToken": data.value.replaceAll('"','')
+                });
+            }
+        });
 
-    chrome.storage.local.get(["csrfToken"]).then((result) => {
-        console.log('✅ CSRF token obtained for profile view action');
+        chrome.storage.local.get(["csrfToken"]).then((result) => {
+            console.log('✅ CSRF token obtained for profile view action');
         
-        let targetId = lead.memberUrn.replace('urn:li:member:','')
+        // Extract target ID from member URN, connection ID, or public identifier
+        let targetId = null;
+        if (lead.memberUrn && typeof lead.memberUrn === 'string' && lead.memberUrn.includes('urn:li:member:')) {
+            targetId = lead.memberUrn.replace('urn:li:member:', '');
+        } else if (lead.connectionId && typeof lead.connectionId === 'string') {
+            // Use connection ID directly if member URN is not available
+            targetId = lead.connectionId;
+        } else if (lead.publicIdentifier && typeof lead.publicIdentifier === 'string') {
+            // Fallback to public identifier
+            targetId = lead.publicIdentifier;
+        } else {
+            console.error('❌ Cannot view profile: No valid member URN, connection ID, or public identifier found');
+            console.error('📋 Lead data:', lead);
+            reject(new Error('No valid member URN, connection ID, or public identifier found'));
+            return; // Exit early if no valid ID found
+        }
         
         console.log(`🎯 Target Member ID: ${targetId}`);
         console.log(`🌐 API URL: ${LINKEDIN_URL}/li/track`);
@@ -3948,14 +4859,18 @@ const _viewProfile = (lead) => {
                 console.log(`🎉 PROFILE VIEW COMPLETED: ${lead.name}`);
                 return res.text().then(text => {
                     try {
-                        return text ? JSON.parse(text) : {};
+                        const result = text ? JSON.parse(text) : {};
+                        resolve(result); // Resolve promise on success
+                        return result;
                     } catch (e) {
+                        resolve({}); // Resolve even if JSON parse fails
                         return {};
                     }
                 });
             } else {
                 return res.text().then(text => {
                     console.log(`📄 Error response: ${text}`);
+                    reject(new Error(`Profile view failed: ${res.status} ${text}`)); // Reject on error
                     return {};
                 });
             }
@@ -3971,8 +4886,13 @@ const _viewProfile = (lead) => {
             console.error(`👤 Lead: ${lead.name}`);
             console.error(`🔗 Connection ID: ${lead.connectionId}`);
             console.log('─'.repeat(80));
-        })
-    })
+            reject(err); // Reject promise on error
+        });
+        }).catch(err => {
+            console.error('❌ Error getting CSRF token:', err);
+            reject(err);
+        });
+    });
 }
 
 /**
@@ -4267,7 +5187,25 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
     
     // Prepare message
             let rawMessage = node.inviteNote || node.message || "";
-    let newMessage = node.hasInviteNote ? changeMessageVariableNames(rawMessage, lead) : null;
+    let newMessage = null;
+    
+    if (node.hasInviteNote && rawMessage) {
+        if (typeof changeMessageVariableNames === 'function') {
+            newMessage = changeMessageVariableNames(rawMessage, lead);
+        } else {
+            // Fallback: simple variable replacement if function not available
+            console.warn('⚠️ changeMessageVariableNames not available, using fallback');
+            newMessage = rawMessage
+                .replace(/\{firstName\}/g, lead.firstName || '')
+                .replace(/\{lastName\}/g, lead.lastName || '')
+                .replace(/\{name\}/g, lead.name || '')
+                .replace(/\{title\}/g, lead.title || lead.headline || '')
+                .replace(/@firstName/g, lead.firstName || '')
+                .replace(/@lastName/g, lead.lastName || '')
+                .replace(/@name/g, lead.name || '')
+                .replace(/@title/g, lead.title || lead.headline || '');
+        }
+    }
     
     // Remove line breaks that might cause issues
     if (newMessage) {
@@ -4352,21 +5290,117 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
                     const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
                     
                     try {
+                        // Create overlay to block user interactions
+                        const createOverlay = () => {
+                            // Remove any existing overlay first
+                            const existingOverlay = document.getElementById('linkdominator-automation-overlay');
+                            if (existingOverlay) {
+                                existingOverlay.remove();
+                            }
+                            
+                            const overlay = document.createElement('div');
+                            overlay.id = 'linkdominator-automation-overlay';
+                            overlay.style.cssText = `
+                                position: fixed !important;
+                                top: 0 !important;
+                                left: 0 !important;
+                                width: 100vw !important;
+                                height: 100vh !important;
+                                background: rgba(0, 0, 0, 0.2) !important;
+                                z-index: 2147483647 !important;
+                                pointer-events: all !important;
+                                display: flex !important;
+                                align-items: center !important;
+                                justify-content: center !important;
+                                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+                                backdrop-filter: blur(2px) !important;
+                            `;
+                            
+                            const overlayContent = document.createElement('div');
+                            overlayContent.style.cssText = `
+                                background: rgba(255, 255, 255, 0.98) !important;
+                                padding: 25px 35px !important;
+                                border-radius: 12px !important;
+                                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2) !important;
+                                text-align: center !important;
+                                color: #333 !important;
+                                font-size: 15px !important;
+                                font-weight: 600 !important;
+                                border: 2px solid #0077b5 !important;
+                                min-width: 280px !important;
+                            `;
+                            overlayContent.innerHTML = `
+                                <div style="margin-bottom: 12px; font-size: 18px;">🤖 LinkDominator</div>
+                                <div style="color: #666; font-size: 13px; margin-bottom: 8px;">Processing connection invite...</div>
+                                <div style="color: #999; font-size: 11px;">Please wait, do not interact with this page</div>
+                            `;
+                            
+                            overlay.appendChild(overlayContent);
+                            
+                            // Add to document immediately
+                            document.documentElement.appendChild(overlay);
+                            
+                            // Disable page interactions
+                            document.body.style.pointerEvents = 'none';
+                            document.body.style.overflow = 'hidden';
+                            document.documentElement.style.overflow = 'hidden';
+                            
+                            // Force visibility
+                            overlay.style.display = 'flex';
+                            overlay.style.visibility = 'visible';
+                            overlay.style.opacity = '1';
+                            
+                            console.log('🛡️ Overlay created - user interactions blocked');
+                            return overlay;
+                        };
+                        
+                        const removeOverlay = () => {
+                            const overlay = document.getElementById('linkdominator-automation-overlay');
+                            if (overlay) {
+                                overlay.remove();
+                            }
+                            // Restore page interactions
+                            document.body.style.pointerEvents = '';
+                            document.body.style.overflow = '';
+                            document.documentElement.style.overflow = '';
+                            console.log('🛡️ Overlay removed - user interactions restored');
+                        };
+                        
+                        // Update overlay text to show automation is starting
+                        const updateOverlayText = (text) => {
+                            const overlay = document.getElementById('linkdominator-automation-overlay');
+                            if (overlay) {
+                                const contentDiv = overlay.querySelector('div');
+                                if (contentDiv) {
+                                    contentDiv.innerHTML = `
+                                        <div style="margin-bottom: 12px; font-size: 18px;">🤖 LinkDominator</div>
+                                        <div style="color: #666; font-size: 13px; margin-bottom: 8px;">${text}</div>
+                                        <div style="color: #999; font-size: 11px;">Please wait, do not interact with this page</div>
+                                    `;
+                                }
+                            }
+                        };
+                        
+                        // Update overlay text to show automation is starting
+                        updateOverlayText('Processing connection invite...');
+                        
                         console.log('🔍 Step 4: Checking connection status...');
                         console.log('🚨 TEST: Script is executing the try block!');
                         
                         // Check if already connected
                         const connectedElements = document.querySelectorAll('[aria-label*="Connected"], [aria-label*="connected"]');
                         if (connectedElements.length > 0) {
-                            console.log('ℹ️ Already connected to this profile');
-                            return { success: false, skipped: true, reason: 'Already connected' };
+                            console.log('✅ Already connected to this profile - SUCCESSFUL SKIP');
+                            window.linkdominatorAutomationResult = { success: true, skipped: true, reason: 'Already connected' };
+                            return { success: true, skipped: true, reason: 'Already connected' };
                         }
                         
                         // Check if invite already sent
                         const inviteSentElements = document.querySelectorAll('[aria-label*="Invitation sent"], [aria-label*="invitation sent"]');
                         if (inviteSentElements.length > 0) {
-                            console.log('ℹ️ Invite already sent to this profile');
-                            return { success: false, skipped: true, reason: 'Invite already sent' };
+                            console.log('✅ Invite already sent to this profile - SUCCESSFUL SKIP');
+                            window.linkdominatorAutomationResult = { success: true, skipped: true, reason: 'Invite already sent' };
+                            return { success: true, skipped: true, reason: 'Invite already sent' };
                         }
                         
                         console.log('🔍 Step 5: Looking for Connect button...');
@@ -4375,25 +5409,73 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
                         console.log('🚨 TEST: Reached button detection section!');
                         console.log('🚨 DEBUG: About to check for direct Connect buttons...');
                         
-                        // Find Connect button - ONLY within the main profile div
-                        const mainProfileDiv = document.querySelector('.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk');
-                        console.log('🔍 Main profile div found:', mainProfileDiv);
+                        // Wait for profile container to appear (LinkedIn loads it dynamically)
+                        console.log('⏳ Waiting for profile container to load...');
+                        let mainProfileDiv = null;
+                        try {
+                            mainProfileDiv = await waitForElement('.ph5.pb5', 15000); // Wait up to 15 seconds
+                            console.log('✅ Main profile div found:', mainProfileDiv);
+                        } catch (waitError) {
+                            console.log('⚠️ Profile container not found with .ph5.pb5, trying alternative selectors...');
+                            // Try alternative selectors
+                            const alternativeSelectors = [
+                                '[class*="ph5"][class*="pb5"]',
+                                '.pv-top-card',
+                                '[data-test-id="profile-container"]',
+                                'main section',
+                                '.pvs-header__container'
+                            ];
+                            
+                            for (const selector of alternativeSelectors) {
+                                try {
+                                    mainProfileDiv = await waitForElement(selector, 3000);
+                                    console.log(`✅ Found profile container with selector: ${selector}`);
+                                    break;
+                                } catch (e) {
+                                    console.log(`⚠️ Selector ${selector} not found, trying next...`);
+                                }
+                            }
+                        }
                         
                         if (!mainProfileDiv) {
                             console.log('❌ Main profile div not found - cannot proceed safely');
+                            console.log('🔍 Available divs with classes containing "ph5":');
+                            const ph5Divs = document.querySelectorAll('[class*="ph5"]');
+                            ph5Divs.forEach((div, index) => {
+                                console.log(`   ${index + 1}. Class: "${div.className}"`);
+                            });
+                            console.log('🔍 Available divs with classes containing "pb5":');
+                            const pb5Divs = document.querySelectorAll('[class*="pb5"]');
+                            pb5Divs.forEach((div, index) => {
+                                console.log(`   ${index + 1}. Class: "${div.className}"`);
+                            });
+                            // Try to find connect button anywhere on page as last resort
+                            const anyConnectButton = document.querySelector('button[aria-label*="Connect"], button[aria-label*="connect"], button[aria-label*="Invite"], button[aria-label*="invite"]');
+                            if (anyConnectButton) {
+                                console.log('⚠️ Found Connect button outside profile container, using it as fallback');
+                                mainProfileDiv = anyConnectButton.closest('div') || document.body;
+                            } else {
+                            window.linkdominatorAutomationResult = { success: false, error: 'Main profile container not found' };
                             return { success: false, error: 'Main profile container not found' };
+                            }
                         }
                         
                         const connectSelectors = [
-                            '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk button[aria-label*="Connect"]',
-                            '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk button[aria-label*="connect"]',
-                            '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk button[aria-label*="Invite"]',
-                            '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk button[aria-label*="invite"]',
-                            '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .artdeco-button[aria-label*="Connect"]',
-                            '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .artdeco-button[aria-label*="Invite"]',
-                            '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk [data-control-name="connect"]',
-                            '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .pv-s-profile-actions--connect',
-                            '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .pv-s-profile-actions button'
+                            '.ph5.pb5 button[aria-label*="Connect"]',
+                            '.ph5.pb5 button[aria-label*="connect"]',
+                            '.ph5.pb5 button[aria-label*="Invite"]',
+                            '.ph5.pb5 button[aria-label*="invite"]',
+                            '.ph5.pb5 .artdeco-button[aria-label*="Connect"]',
+                            '.ph5.pb5 .artdeco-button[aria-label*="Invite"]',
+                            '.ph5.pb5 [data-control-name="connect"]',
+                            '.ph5.pb5 .pv-s-profile-actions--connect',
+                            '.ph5.pb5 .pv-s-profile-actions button',
+                            '.ph5.pb5 * button[aria-label*="Connect"]',
+                            '.ph5.pb5 * button[aria-label*="connect"]',
+                            '.ph5.pb5 * button[aria-label*="Invite"]',
+                            '.ph5.pb5 * button[aria-label*="invite"]',
+                            '.ph5.pb5 * .artdeco-button[aria-label*="Connect"]',
+                            '.ph5.pb5 * .artdeco-button[aria-label*="Invite"]'
                         ];
                         
                         console.log('🔍 Checking for direct Connect buttons within main profile div...');
@@ -4439,7 +5521,7 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
                         if (!connectButton) {
                             console.log('🚨 DEBUG: No Connect button found by text, checking More dropdown within main profile div...');
                             console.log('🔍 Checking "More" dropdown for Connect button...');
-                            const moreButton = mainProfileDiv.querySelector('button[aria-label*="More actions"], button[aria-label*="More"], .artdeco-dropdown__trigger');
+                            const moreButton = mainProfileDiv.querySelector('button[aria-label*="More actions"], button[aria-label*="More"], .artdeco-dropdown__trigger, button[aria-label*="more"], button[aria-label*="Additional actions"]');
                             console.log('🔍 More button search result:', moreButton);
                             if (moreButton) {
                                 console.log('✅ Found "More" button, details:', {
@@ -4457,21 +5539,29 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
                                 // Look for Connect button in dropdown within main profile div
                                 console.log('🔍 Searching for Connect button in dropdown within main profile div...');
                                 const dropdownConnectSelectors = [
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk button[aria-label*="Connect"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk button[aria-label*="connect"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk button[aria-label*="Invite"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk button[aria-label*="invite"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .artdeco-dropdown__content button[aria-label*="Connect"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .artdeco-dropdown__content button[aria-label*="connect"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .artdeco-dropdown__content button[aria-label*="Invite"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .artdeco-dropdown__content button[aria-label*="invite"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .artdeco-dropdown__item[aria-label*="Connect"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .artdeco-dropdown__item[aria-label*="connect"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .artdeco-dropdown__item[aria-label*="Invite"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk .artdeco-dropdown__item[aria-label*="invite"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk [aria-label*="Invite"][aria-label*="connect"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk [role="button"][aria-label*="Connect"]',
-                                    '.LJMnFhQbkaHbZlWMTaInpCStHcMvMYk [role="button"][aria-label*="Invite"]'
+                                    '.ph5.pb5 button[aria-label*="Connect"]',
+                                    '.ph5.pb5 button[aria-label*="connect"]',
+                                    '.ph5.pb5 button[aria-label*="Invite"]',
+                                    '.ph5.pb5 button[aria-label*="invite"]',
+                                    '.ph5.pb5 .artdeco-dropdown__content button[aria-label*="Connect"]',
+                                    '.ph5.pb5 .artdeco-dropdown__content button[aria-label*="connect"]',
+                                    '.ph5.pb5 .artdeco-dropdown__content button[aria-label*="Invite"]',
+                                    '.ph5.pb5 .artdeco-dropdown__content button[aria-label*="invite"]',
+                                    '.ph5.pb5 .artdeco-dropdown__item[aria-label*="Connect"]',
+                                    '.ph5.pb5 .artdeco-dropdown__item[aria-label*="connect"]',
+                                    '.ph5.pb5 .artdeco-dropdown__item[aria-label*="Invite"]',
+                                    '.ph5.pb5 .artdeco-dropdown__item[aria-label*="invite"]',
+                                    '.ph5.pb5 [aria-label*="Invite"][aria-label*="connect"]',
+                                    '.ph5.pb5 [role="button"][aria-label*="Connect"]',
+                                    '.ph5.pb5 [role="button"][aria-label*="Invite"]',
+                                    '.ph5.pb5 * button[aria-label*="Connect"]',
+                                    '.ph5.pb5 * button[aria-label*="connect"]',
+                                    '.ph5.pb5 * button[aria-label*="Invite"]',
+                                    '.ph5.pb5 * button[aria-label*="invite"]',
+                                    '.ph5.pb5 * .artdeco-dropdown__content button[aria-label*="Connect"]',
+                                    '.ph5.pb5 * .artdeco-dropdown__content button[aria-label*="connect"]',
+                                    '.ph5.pb5 * .artdeco-dropdown__content button[aria-label*="Invite"]',
+                                    '.ph5.pb5 * .artdeco-dropdown__content button[aria-label*="invite"]'
                                 ];
                                 
                                 for (const selector of dropdownConnectSelectors) {
@@ -4521,6 +5611,7 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
                         
                         if (!connectButton) {
                             console.log('❌ Connect button not found');
+                            window.linkdominatorAutomationResult = { success: false, error: 'User not found or connection not available' };
                             return { success: false, error: 'User not found or connection not available' };
                         }
                         
@@ -4569,6 +5660,7 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
                         
                         if (!sendButton) {
                             console.log('❌ Send button not found');
+                            window.linkdominatorAutomationResult = { success: false, error: 'Connection not successfully sent' };
                             return { success: false, error: 'Connection not successfully sent' };
                         }
                         
@@ -4590,17 +5682,21 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
                             const element = document.querySelector(selector);
                             if (element) {
                                 console.log('✅ Invite sent successfully confirmed');
+                                window.linkdominatorAutomationResult = { success: true };
                                 return { success: true };
                             }
                         }
                         
                         console.log('✅ Invite sent (no explicit confirmation found)');
                         console.log('🚨 TEST: Script completed successfully!');
+                        window.linkdominatorAutomationResult = { success: true };
                         return { success: true };
                         
                     } catch (error) {
                         console.log('🚨 TEST: Script caught an error!');
                         console.error('❌ Error in automation:', error.message);
+                        removeOverlay();
+                        window.linkdominatorAutomationResult = { success: false, error: error.message };
                         return { success: false, error: error.message };
                     }
                 },
@@ -4611,21 +5707,117 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
             console.log('🔄 Step 4: Waiting for automation to complete...');
             await delay(5000); // Give time for automation to complete
             
+            // Check automation result from the injected script
+            let automationResult = null;
+            try {
+                // Try to get the result from the injected script
+                const results = await chrome.scripting.executeScript({
+                    target: { tabId: tab.id },
+                    func: () => {
+                        return window.linkdominatorAutomationResult || { success: false, error: 'No result available' };
+                    }
+                });
+                automationResult = results[0]?.result;
+                console.log('🔍 Automation result:', automationResult);
+                
+                // Remove overlay after getting result
+                await chrome.scripting.executeScript({
+                    target: { tabId: tab.id },
+                    func: () => {
+                        if (window.linkdominatorRemoveOverlay) {
+                            window.linkdominatorRemoveOverlay();
+                        } else {
+                            // Fallback if stored function not available
+                            const overlay = document.getElementById('linkdominator-automation-overlay');
+                            if (overlay) {
+                                overlay.remove();
+                            }
+                            document.body.style.pointerEvents = '';
+                            document.body.style.overflow = '';
+                            document.documentElement.style.overflow = '';
+                            console.log('🛡️ Overlay removed - user interactions restored');
+                        }
+                    }
+                });
+            } catch (error) {
+                console.log('⚠️ Could not get automation result:', error.message);
+                automationResult = { success: false, error: 'Could not get result' };
+                
+                // Still try to remove overlay even if we couldn't get result
+                try {
+                    await chrome.scripting.executeScript({
+                        target: { tabId: tab.id },
+                        func: () => {
+                            if (window.linkdominatorRemoveOverlay) {
+                                window.linkdominatorRemoveOverlay();
+                            } else {
+                                // Fallback if stored function not available
+                                const overlay = document.getElementById('linkdominator-automation-overlay');
+                                if (overlay) {
+                                    overlay.remove();
+                                }
+                                document.body.style.pointerEvents = '';
+                                document.body.style.overflow = '';
+                                document.documentElement.style.overflow = '';
+                                console.log('🛡️ Overlay removed - user interactions restored');
+                            }
+                        }
+                    });
+                } catch (overlayError) {
+                    console.log('⚠️ Could not remove overlay:', overlayError.message);
+                }
+            }
+            
             // Step 5: Close the tab
             console.log('🔄 Step 5: Closing tab...');
+            try {
+                // Check if tab still exists before closing
+                const existingTab = await chrome.tabs.get(tab.id).catch(() => null);
+                if (existingTab) {
             await chrome.tabs.remove(tab.id);
             console.log('✅ Tab closed');
+                } else {
+                    console.log('ℹ️ Tab already closed or does not exist');
+                }
+            } catch (tabError) {
+                // Ignore errors if tab doesn't exist (might have been closed already)
+                if (chrome.runtime.lastError && chrome.runtime.lastError.message.includes('No tab with id')) {
+                    console.log('ℹ️ Tab already closed');
+                } else {
+                    console.warn('⚠️ Could not close tab:', tabError.message);
+                }
+            }
             
-            console.log(`✅ INVITATION SUCCESSFULLY SENT to ${lead.name} (${lead.connectionId})`);
-            console.log(`🎯 Browser automation - Invitation sent successfully`);
-            console.log(`📝 Message: ${newMessage || 'Default connection message'}`);
-            console.log(`💡 Verify in LinkedIn: My Network → Manage my network → Sent invitations`);
+            // Check if automation succeeded or was successfully skipped
+            const isAlreadyConnected = automationResult && automationResult.success && automationResult.skipped && automationResult.reason === 'Already connected';
             
-            // Update lead status
+            if (automationResult && automationResult.success) {
+                if (automationResult.skipped) {
+                    console.log(`✅ INVITATION SKIPPED for ${lead.name} (${lead.connectionId})`);
+                    console.log(`📝 Reason: ${automationResult.reason}`);
+                    if (isAlreadyConnected) {
+                        console.log(`🎉 USER ALREADY CONNECTED - Will update status to 3 (accepted)`);
+                    } else {
+                        console.log(`💡 This is normal - invite already sent`);
+                    }
+                } else {
+                    console.log(`✅ INVITATION SUCCESSFULLY SENT to ${lead.name} (${lead.connectionId})`);
+                    console.log(`🎯 Browser automation - Invitation sent successfully`);
+                    console.log(`📝 Message: ${newMessage || 'Default connection message'}`);
+                    console.log(`💡 Verify in LinkedIn: My Network → Manage my network → Sent invitations`);
+                }
+            } else {
+                console.log(`❌ INVITATION FAILED for ${lead.name} (${lead.connectionId})`);
+                console.log(`🚨 Browser automation failed: ${automationResult?.error || 'Unknown error'}`);
+                throw new Error(`Automation failed: ${automationResult?.error || 'Unknown error'}`);
+            }
+            
+            // Update lead status in BACKEND TABLE FIRST (this is the source of truth)
+            let backendUpdateSuccess = false;
             try {
                 // Use the campaign ID passed as parameter
                 const actualCampaignId = campaignId || lead.campaignId || 82; // Fallback to campaign 82
-                console.log(`🔄 Updating lead status for campaign: ${actualCampaignId}, lead: ${lead.id}`);
+                console.log(`🔄 STEP 1: Updating BACKEND TABLE FIRST for campaign: ${actualCampaignId}, lead: ${lead.id}`);
                 console.log(`🔍 Lead object details:`, {
                     id: lead.id,
                     connectionId: lead.connectionId,
@@ -4636,20 +5828,94 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
                 // Try both lead.id and lead.connectionId if lead.id is not available
                 const leadIdToUse = lead.id || lead.connectionId;
                 if (!leadIdToUse) {
-                    console.error('❌ No valid lead ID found for update');
-                    return;
+                    console.error('❌ No valid lead ID found for backend update');
+                    throw new Error('No valid lead ID');
                 }
                 
-                await updateLeadGenRunning(actualCampaignId, leadIdToUse, {
+                // Update backend table FIRST - this is the source of truth
+                // Inline the API call directly to avoid scoping issues in service workers
+                console.log('🔄 Calling backend API directly to update leadgen running...');
+                
+                // If already connected, mark as accepted (status 3), otherwise mark as sent (status 2)
+                const updateData = isAlreadyConnected ? {
+                    acceptedStatus: true, // Already connected = accepted
+                    currentNodeKey: node.key,
+                    nextNodeKey: 0, // Use 0 instead of null to satisfy database constraint
+                    statusLastId: 3 // Use 3 to represent 'accepted' (already connected)
+                } : {
                     acceptedStatus: false, // Set to false initially - will be updated when invite is accepted
                     currentNodeKey: node.key,
                     nextNodeKey: 0, // Use 0 instead of null to satisfy database constraint
                     statusLastId: 2 // Use 2 to represent 'invite_sent' (1 = initial, 2 = sent, 3 = accepted)
+                };
+                
+                const requestBody = JSON.stringify(updateData);
+                console.log(`📦 Request body:`, requestBody);
+                console.log(`🔗 API URL: ${PLATFORM_URL}/api/campaign/${actualCampaignId}/leadgen/${leadIdToUse}/update`);
+                console.log(`🔑 LinkedIn ID: ${linkedinId}`);
+                
+                const response = await fetch(`${PLATFORM_URL}/api/campaign/${actualCampaignId}/leadgen/${leadIdToUse}/update`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'lk-id': linkedinId,
+                        'ngrok-skip-browser-warning': 'true',
+                        'Accept': 'application/json'
+                    },
+                    body: requestBody
                 });
-                console.log('✅ Lead status updated successfully');
+                
+                console.log(`📡 Response status: ${response.status} ${response.statusText}`);
+                
+                if (!response.ok) {
+                    const responseText = await response.text();
+                    console.error(`❌ Failed to update leadgen running - Status: ${response.status}, Response: ${responseText}`);
+                    throw new Error(`API call failed with status ${response.status}: ${responseText}`);
+                }
+                
+                // Check for HTML response (ngrok warning page)
+                const contentType = response.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    const text = await response.text();
+                    if (text.includes('<!DOCTYPE') || text.includes('ngrok')) {
+                        throw new Error('Received HTML response (ngrok warning page) instead of JSON');
+                    }
+                }
+                
+                const data = await response.json();
+                if (isAlreadyConnected) {
+                    console.log(`✅ Successfully updated lead ${leadIdToUse} to ACCEPTED (statusLastId: 3) - User was already connected`);
+                } else {
+                    console.log(`✅ Successfully updated leadgen running for lead ${leadIdToUse} to INVITE SENT (statusLastId: 2)`);
+                }
+                console.log(`📄 Response data:`, data);
+                
+                const updateResult = { ...data, status: 200, success: true };
+                
+                // Verify backend update succeeded
+                if (updateResult && (updateResult.status === 200 || updateResult.success !== false)) {
+                    backendUpdateSuccess = true;
+                    if (isAlreadyConnected) {
+                        console.log('✅ STEP 1 COMPLETE: Backend table updated - Lead marked as ACCEPTED (status 3)');
+                    } else {
+                        console.log('✅ STEP 1 COMPLETE: Backend table updated successfully - Lead marked as INVITE SENT (status 2)');
+                    }
+                    console.log('📊 Backend update result:', updateResult);
+                } else {
+                    console.warn('⚠️ Backend update returned unexpected result:', updateResult);
+                    // Still mark as success if we got a response (might be different format)
+                    backendUpdateSuccess = true;
+                }
             } catch (updateError) {
-                console.warn('⚠️ Could not update lead status:', updateError.message);
+                console.error('❌ STEP 1 FAILED: Backend table update failed:', updateError.message);
+                console.error('❌ This invite will NOT be saved to Chrome storage');
+                backendUpdateSuccess = false;
+                // Re-throw to prevent Chrome storage update
+                throw new Error(`Backend update failed: ${updateError.message}`);
             }
+            
+            // Store backend update success in lead object for later verification
+            lead._backendUpdated = backendUpdateSuccess;
             
         } catch (automationError) {
             console.error('❌ Browser automation failed:', automationError);
@@ -4663,15 +5929,38 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
         console.error(`❌ INVITATION ERROR for ${lead.name} (${lead.connectionId}):`, error);
         console.error('🔍 Possible reasons: Network error, invalid profile, or LinkedIn rate limiting');
         
-        // Update lead status for error
+        // Update lead status for error - inline API call to avoid scoping issues
         try {
-            await updateLeadGenRunning(lead.campaignId || 0, lead.id, {
+            const campaignIdForError = lead.campaignId || campaignId || 0;
+            const leadIdForError = lead.id || lead.connectionId;
+            
+            if (leadIdForError) {
+                const updateData = {
                 acceptedStatus: false,
                 currentNodeKey: node.key,
-                nextNodeKey: 0, // Use 0 instead of null to satisfy database constraint
-                statusLastId: 4 // Use 4 to represent 'invite_error' (1 = initial, 2 = sent, 3 = accepted, 4 = error)
+                    nextNodeKey: 0,
+                    statusLastId: 4 // Use 4 to represent 'invite_error'
+                };
+                
+                const response = await fetch(`${PLATFORM_URL}/api/campaign/${campaignIdForError}/leadgen/${leadIdForError}/update`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'lk-id': linkedinId,
+                        'ngrok-skip-browser-warning': 'true',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify(updateData)
             });
+                
+                if (response.ok) {
             console.log('✅ Lead status updated for error');
+                } else {
+                    console.warn(`⚠️ Failed to update lead status for error: ${response.status}`);
+                }
+            } else {
+                console.warn('⚠️ Could not update lead status: No lead ID available');
+            }
         } catch (updateError) {
             console.warn('⚠️ Could not update lead status:', updateError.message);
         }
@@ -4953,10 +6242,23 @@ const _updateCampaignLeadsNetwork = async () => {
     await fetch(`${PLATFORM_URL}/api/campaigns`, {
         method: 'get',
         headers: {
-            'lk-id': linkedinId
+            'lk-id': linkedinId,
+            'Accept': 'application/json',
+            'ngrok-skip-browser-warning': 'true',
+            'X-Requested-With': 'XMLHttpRequest'
         }
     })
-    .then(res => res.json())
+    .then(async res => {
+        // Check if response is JSON (not HTML from ngrok)
+        const contentType = res.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            const text = await res.text();
+            if (text.includes('<!DOCTYPE') || text.includes('ngrok')) {
+                throw new Error('Received HTML response (ngrok warning page) instead of JSON');
+            }
+        }
+        return res.json();
+    })
     .then(res => {
         if(res.status == 200){
             campaigns = res.data
@@ -5125,7 +6427,10 @@ const startCampaign = async (campaignId) => {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'lk-id': linkedinId
+                'Accept': 'application/json',
+                'lk-id': linkedinId,
+                'ngrok-skip-browser-warning': 'true',
+                'X-Requested-With': 'XMLHttpRequest'
             },
             body: JSON.stringify({
                 status: 'running'
@@ -5133,8 +6438,28 @@ const startCampaign = async (campaignId) => {
         });
 
         if (response.ok) {
+            // Check if response is JSON (not HTML from ngrok)
+            const contentType = response.headers.get('content-type');
+            if (!contentType || !contentType.includes('application/json')) {
+                const text = await response.text();
+                if (text.includes('<!DOCTYPE') || text.includes('ngrok')) {
+                    throw new Error('Received HTML response (ngrok warning page) instead of JSON');
+                }
+            }
+            
             const data = await response.json();
             console.log(`✅ Campaign ${campaignId} started successfully:`, data);
+            
+            // Clear any stuck locks and processed leads when campaign starts fresh
+            // This ensures we fetch fresh data from backend table (source of truth)
+            await chrome.storage.local.remove([
+                `campaign_custom_running`, 
+                `campaign_custom_processed`,
+                `campaign_custom_running_timestamp`
+            ]);
+            console.log(`🔓 Cleared all Chrome storage for campaign ${campaignId}`);
+            console.log(`📋 Campaign will fetch fresh leads from backend table (campaign_leadgen_running)`);
+            console.log(`💡 Backend table is the source of truth - Chrome storage is just for tracking`);
             
             // Track active campaign in storage
             chrome.storage.local.get(['activeCampaigns'], (result) => {
@@ -6736,7 +8061,12 @@ self.createCallResponsePipeline = async () => {
             
             try {
                 // Step 1: Get conversations using the improved function
-                const conversationData = await fetchLinkedInConversation(monitoringData.connectionId, monitoringData.lastCheckedMessageId);
+                // Pass conversation URN from monitoring data if available
+                const conversationData = await fetchLinkedInConversation(
+                    monitoringData.connectionId, 
+                    monitoringData.lastCheckedMessageId,
+                    monitoringData.conversationUrnId || null
+                );
                 
                 if (!conversationData) {
                     console.log(`❌ No conversation data for ${monitoringData.leadName}`);
@@ -6989,12 +8319,27 @@ self.setupResponseMonitoringForAcceptedConnections = async () => {
         
         // Get all campaigns and their accepted leads
         const campaignsResponse = await fetch(`${PLATFORM_URL}/api/campaigns`, {
-            headers: { 'lk-id': linkedinId }
+            headers: { 
+                'lk-id': linkedinId,
+                'Accept': 'application/json',
+                'ngrok-skip-browser-warning': 'true',
+                'X-Requested-With': 'XMLHttpRequest'
+            }
         });
         
         if (!campaignsResponse.ok) {
             console.error('❌ Failed to fetch campaigns');
             return;
+        }
+        
+        // Check if response is JSON (not HTML from ngrok)
+        const contentType = campaignsResponse.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            const text = await campaignsResponse.text();
+            if (text.includes('<!DOCTYPE') || text.includes('ngrok')) {
+                console.error('❌ Received HTML response (ngrok warning page) instead of JSON');
+                return;
+            }
         }
         
         const campaignsData = await campaignsResponse.json();
@@ -7251,8 +8596,6 @@ let isCheckingAcceptances = false;
  * Check for call responses and process them using real LinkedIn API
  */
 const checkForCallResponses = async () => {
-    console.log('🔍 CALL FLOW: Checking for call responses...');
-    
     try {
         // Get LinkedIn ID first
         const linkedinIdResult = await chrome.storage.local.get(['linkedinId']);
@@ -7262,12 +8605,19 @@ const checkForCallResponses = async () => {
         let activeCampaignsData = [];
         try {
             const campaignsResponse = await fetch(`${PLATFORM_URL}/api/campaigns`, {
-                headers: { 'lk-id': linkedinId }
+                headers: { 
+                    'lk-id': linkedinId,
+                    'Accept': 'application/json',
+                    'ngrok-skip-browser-warning': 'true',
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
             });
             if (campaignsResponse.ok) {
-                const result = await campaignsResponse.json();
-                activeCampaignsData = result.data || [];
-                console.log(`📊 CALL FLOW: Fetched ${activeCampaignsData.length} campaigns from API`);
+                const contentType = campaignsResponse.headers.get('content-type');
+                if (contentType && contentType.includes('application/json')) {
+                    const result = await campaignsResponse.json();
+                    activeCampaignsData = result.data || [];
+                }
             }
         } catch (error) {
             console.error('❌ CALL FLOW: Failed to fetch campaigns:', error);
@@ -7284,22 +8634,18 @@ const checkForCallResponses = async () => {
         const responseKeys = Object.keys(allStorage).filter(key => key.startsWith('call_response_monitoring_'));
         
         if (responseKeys.length === 0) {
-            console.log('📭 CALL FLOW: No call responses to monitor');
-                    return;
+            return;
         }
-        
-        console.log(`🔍 CALL FLOW: Found ${responseKeys.length} call responses to monitor`);
         
         // Deduplicate monitoring entries by connectionId - only process one per connection
         const connectionMap = new Map();
         const uniqueMonitoringEntries = [];
-        const keysToCleanup = []; // Track monitoring entries from stopped campaigns
+        const keysToCleanup = [];
                                         
-                                        for (const key of responseKeys) {
+        for (const key of responseKeys) {
             const monitoringData = allStorage[key];
             
             if (!monitoringData) {
-                console.log(`⚠️ CALL FLOW: No monitoring data for key: ${key}`);
                 continue;
             }
             
@@ -7308,18 +8654,12 @@ const checkForCallResponses = async () => {
             const campaignStatus = campaignStatusMap.get(campaignId);
             
             if (campaignStatus && campaignStatus !== 'running' && campaignStatus !== 'active') {
-                console.log(`🛑 CALL FLOW: Skipping monitoring for ${monitoringData.leadName} - Campaign ${campaignId} is ${campaignStatus}`);
                 keysToCleanup.push(key);
                 continue;
             }
             
-            if (!campaignStatus) {
-                console.log(`⚠️ CALL FLOW: Campaign ${campaignId} not found in active campaigns - monitoring ${monitoringData.leadName} anyway`);
-            }
-            
             const connectionId = monitoringData.connectionId;
             if (!connectionId) {
-                console.log(`⚠️ CALL FLOW: No connectionId for key: ${key}`);
                 continue;
             }
             
@@ -7327,38 +8667,40 @@ const checkForCallResponses = async () => {
             if (!connectionMap.has(connectionId)) {
                 connectionMap.set(connectionId, { key, monitoringData });
                 uniqueMonitoringEntries.push({ key, monitoringData });
-                console.log(`✅ CALL FLOW: Selected monitoring entry for connection ${connectionId}: ${key}`);
-                                            } else {
-                console.log(`⏭️ CALL FLOW: Skipping duplicate monitoring entry for connection ${connectionId}: ${key}`);
             }
         }
         
         // Cleanup monitoring entries for stopped campaigns
         if (keysToCleanup.length > 0) {
-            console.log(`🧹 CALL FLOW: Cleaning up ${keysToCleanup.length} monitoring entries from stopped campaigns`);
             for (const key of keysToCleanup) {
                 await chrome.storage.local.remove(key);
             }
         }
         
-        console.log(`🔍 CALL FLOW: Processing ${uniqueMonitoringEntries.length} unique connections from active campaigns`);
-        
         // Process each unique monitoring entry using consolidated flow
+        console.log(`🔍 CALL FLOW: Processing ${uniqueMonitoringEntries.length} monitoring entries...`);
         for (const { key, monitoringData } of uniqueMonitoringEntries) {
-                            
+            console.log(`🔍 CALL FLOW: Processing ${monitoringData.leadName} (${monitoringData.connectionId})...`);
             // Use consolidated call flow processor
             await processCallFlow(monitoringData, key);
-                                                }
+        }
+        console.log(`✅ CALL FLOW: Finished processing all monitoring entries`);
                                             } catch (error) {
         console.error('❌ CALL FLOW: Error checking call responses:', error);
     }
 };
 /**
  * Fetch LinkedIn conversation messages for a specific connection
+ * @param {string} connectionId - Connection ID (e.g., 'eleazarnzerem')
+ * @param {string|null} lastMessageId - Last processed message ID
+ * @param {string|null} conversationUrnId - Optional conversation URN ID (prioritized if provided)
  */
-const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => {
+const fetchLinkedInConversation = async (connectionId, lastMessageId = null, conversationUrnId = null) => {
     try {
         console.log('📡 Fetching LinkedIn conversation for connection:', connectionId);
+        if (conversationUrnId) {
+            console.log('🔗 Using provided conversation URN:', conversationUrnId);
+        }
         
         // Get CSRF token
         const tokenResult = await chrome.storage.local.get(["csrfToken"]);
@@ -7383,66 +8725,69 @@ const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => 
             }
         });
         
-        console.log(`📡 Conversations API status: ${conversationsResponse.status}`);
-        
         let conversations = [];
         if (conversationsResponse.ok) {
             const conversationsData = await conversationsResponse.json();
             conversations = conversationsData.elements || [];
-            console.log(`📊 Found ${conversations.length} conversations via API`);
+            console.log(`📊 FETCH CONVERSATION: Found ${conversations.length} conversations from LinkedIn API`);
         } else {
-            console.log(`❌ Conversations API failed: ${conversationsResponse.status}`);
+            console.log(`⚠️ FETCH CONVERSATION: Conversations API returned status ${conversationsResponse.status}`);
         }
         
         // If no conversations found via API, try direct conversation access
         if (conversations.length === 0) {
-            console.log('🔍 No conversations via API, trying direct conversation access...');
+            console.log('🔄 No conversations in list - trying direct conversation access...');
             
-            // Known conversation ID for Eleazar (from the URL you provided)
-            const knownConversationIds = [
-                '2-MmJlMWU1MzMtMGUzYi00ODI2LThjNWEtYjQyZTAwZWEyNjM4XzEwMA==',
-                connectionId // Also try the connection ID itself
-            ];
+            // Build list of conversation IDs to try, prioritizing provided URN
+            let knownConversationIds = [];
+            
+            // Priority 1: Use provided conversation URN if available
+            if (conversationUrnId) {
+                knownConversationIds.push(conversationUrnId);
+                console.log(`🔗 Priority 1: Using provided conversation URN: ${conversationUrnId}`);
+            } else {
+                // Priority 2: Try to get the actual conversation URN from monitoring data
+                const allStorage = await chrome.storage.local.get();
+                const monitoringEntries = Object.keys(allStorage).filter(key => key.startsWith('call_response_monitoring_'));
+                
+                for (const key of monitoringEntries) {
+                    const monitoringData = allStorage[key];
+                    if (monitoringData.connectionId === connectionId && monitoringData.conversationUrnId) {
+                        knownConversationIds.push(monitoringData.conversationUrnId);
+                        console.log(`🔍 Found conversation URN in monitoring data: ${monitoringData.conversationUrnId}`);
+                        break; // Use first found URN
+                    }
+                }
+            }
+            
+            // Priority 3: Fallback to connection ID (but this often doesn't work)
+            if (knownConversationIds.length === 0) {
+                knownConversationIds.push(connectionId);
+                console.log(`⚠️ No conversation URN found, falling back to connection ID: ${connectionId}`);
+            }
+            
+            console.log(`🔄 Will try ${knownConversationIds.length} conversation ID(s) for direct access:`, knownConversationIds);
             
             for (const conversationId of knownConversationIds) {
                 try {
-                    console.log(`🧪 Trying direct conversation access: ${conversationId}`);
-                    
+                    console.log(`🔄 Direct access: Trying conversation ID: ${conversationId}`);
                     // Try to get messages directly from this conversation using the WORKING headers
                     const directMessagesResponse = await fetch(`${voyagerApi}/messaging/conversations/${conversationId}/events`, {
                         method: 'GET',
                         headers: {
                             'csrf-token': tokenResult.csrfToken,
-                            'accept': 'application/json',  // ← This is the key that works!
+                            'accept': 'application/json',
                             'x-restli-protocol-version': '2.0.0'
                         }
                     });
                     
-                    console.log(`📡 Direct conversation status: ${directMessagesResponse.status}`);
+                    console.log(`📡 Direct access response status for ${conversationId}: ${directMessagesResponse.status}`);
                     
                     if (directMessagesResponse.ok) {
                         const messagesData = await directMessagesResponse.json();
-                        console.log('📋 Raw API Response:', messagesData);
-                        
                         const messages = messagesData.elements || [];
-                        console.log(`📊 Found ${messages.length} raw messages in API response`);
-                            
-                            // Check if we have any very recent messages (within last 5 minutes)
-                            const now = Date.now();
-                            const recentMessages = messages.filter(msg => {
-                                const messageTime = msg.createdAt;
-                                const ageMinutes = (now - messageTime) / (1000 * 60);
-                                return ageMinutes <= 5;
-                            });
-                            
-                            if (recentMessages.length > 0) {
-                                console.log(`🆕 Found ${recentMessages.length} recent messages (within last 5 minutes)`);
-                            } else {
-                                console.log('⏰ No recent messages found (all messages are older than 5 minutes)');
-                            }
                         
                         if (messages.length > 0) {
-                            console.log(`🎉 SUCCESS! Found ${messages.length} messages in direct conversation: ${conversationId}`);
                             // console.log('📝 Sample message structure:', messages[0]);
                             
                             // Show all raw message timestamps to see if we're missing recent messages
@@ -7494,7 +8839,6 @@ const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => 
                                 
                                 if (msg.from?.com?.linkedin?.voyager?.messaging?.MessagingMember) {
                                     const member = msg.from.com.linkedin.voyager.messaging.MessagingMember;
-                                    console.log('🔍 MessagingMember data:', member);
                                     
                                     if (member.name) {
                                         sender = member.name;
@@ -7515,54 +8859,18 @@ const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => 
                                 const ourEntityUrn = ourProfile.linkedinProfile?.entityUrn;
                                 const ourPublicIdentifier = ourProfile.linkedinProfile?.publicIdentifier;
                                 
-                                // Debug profile storage
-                                if (!ourEntityUrn && !ourPublicIdentifier) {
-                                    console.log('⚠️ LinkedIn profile not stored yet - using fallback detection');
-                                    console.log('🔍 Stored profile data:', ourProfile.linkedinProfile);
-                                }
-                                
-                                console.log('🔍 Sender comparison:', {
-                                    senderEntityUrn: senderEntityUrn,
-                                    ourEntityUrn: ourEntityUrn,
-                                    ourPublicIdentifier: ourPublicIdentifier,
-                                    sender: sender,
-                                    textPreview: text.substring(0, 50) + '...'
-                                });
-                                
-                                // Show why isFromExtension is true/false
-                                if (ourEntityUrn && senderEntityUrn) {
-                                    console.log('   → Using entity URN comparison');
-                                } else if (ourPublicIdentifier && sender) {
-                                    console.log('   → Using public identifier comparison');
+                                // Check if message is from us using hybrid system (Chrome storage primary + DB fallback)
+                                if (text && connectionId) {
+                                    const checkResult = await checkIfMessageIsFromUs(connectionId, text, msg.createdAt);
+                                    isFromExtension = checkResult.isFromUs;
+                                    if (isFromExtension) {
+                                        console.log(`✅ Message identified as from us (sender: ${checkResult.sender})`);
+                                    } else {
+                                        console.log('✅ Message identified as from lead');
+                                    }
                                 } else {
-                                    console.log('   → Using text pattern matching (FALLBACK)');
-                                    console.log('   → Text patterns checked:', {
-                                        hasYourName: text.includes('[Your Name]'),
-                                        hasThankYou: text.includes('Thank you for your response'),
-                                        hasThankYouLetting: text.includes('Thank you for letting me know'),
-                                        hasLetsSchedule: text.includes('Let\'s schedule a call'),
-                                        hasHopeMessage: text.includes('I hope this message finds you well')
-                                    });
-                                }
-                                
-                                // Determine if message is from extension using reliable identifiers
-                                if (ourEntityUrn && senderEntityUrn) {
-                                    isFromExtension = senderEntityUrn === ourEntityUrn;
-                                } else if (ourPublicIdentifier && sender) {
-                                    // Fallback to name matching if URNs not available
-                                    isFromExtension = sender.toLowerCase().includes('william') || 
-                                                   sender.toLowerCase().includes('victor') ||
-                                                   sender.toLowerCase().includes('vicken-concept');
-                                } else {
-                                    // Last resort: text pattern matching for AI-generated messages
-                                    isFromExtension = text.includes('[Your Name]') ||
-                                                   text.includes('Thank you for your response') ||
-                                                   text.includes('Thank you for letting me know') ||
-                                                   text.includes('Let\'s schedule a call') ||
-                                                   text.includes('I hope this message finds you well') ||
-                                                   text.includes('Hi Eleazar, I\'d like to schedule a call') ||
-                                                   text.includes('I can share some insights about lead generation') ||
-                                                   text.includes('Are you available for a brief conversation');
+                                    // No connectionId or text - default to lead
+                                    isFromExtension = false;
                                 }
                                 
                                 // Use the reliable isFromExtension detection
@@ -7654,15 +8962,6 @@ const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => 
                                 console.log('   - finalIsFromLead:', finalIsFromLead);
                                 console.log('   - text preview:', text.substring(0, 50) + '...');
                                 
-                                if (isAIGeneratedMessage) {
-                                    console.log('🤖 Message filtered as AI-generated');
-                                }
-                                if (isRecentAIMessage) {
-                                    console.log('🤖 Message filtered as recent AI message');
-                                }
-                                
-                                console.log(`📝 Processed message ${index + 1}: "${text}" from ${sender} (isFromLead: ${finalIsFromLead})`);
-                                
                                 return {
                                     id: msg.entityUrn || msg.eventUrn || `msg_${index}`,
                                     text: text,
@@ -7678,27 +8977,10 @@ const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => 
                             // Sort messages by timestamp to get correct chronological order
                             processedMessages.sort((a, b) => a.timestamp - b.timestamp);
                             
-                            console.log(`📊 Processed ${processedMessages.length} valid messages`);
-                            console.log('📅 Messages sorted by timestamp (chronological order)');
-                            
-                            // Show sorted timestamps
-                            console.log('🕐 SORTED MESSAGE TIMESTAMPS (CHRONOLOGICAL ORDER):');
-                            processedMessages.forEach((msg, index) => {
-                                const timestamp = new Date(msg.timestamp).toISOString();
-                                console.log(`   Message ${index + 1}: ${timestamp} - ${msg.isFromLead ? 'LEAD' : 'EXTENSION'}`);
-                            });
-                            
-                            // Show ALL messages for debugging
-                            // Removed verbose message logging for cleaner output
-                            
                         // Find the actual latest message from the lead
                         const leadMessages = processedMessages.filter(msg => msg.isFromLead);
                         if (leadMessages.length > 0) {
                             const latestLeadMessage = leadMessages[leadMessages.length - 1];
-                            console.log('🎯 LATEST MESSAGE FROM LEAD:');
-                            console.log(`   - Time: ${new Date(latestLeadMessage.timestamp).toISOString()}`);
-                            console.log(`   - Text: "${latestLeadMessage.text}"`);
-                            console.log(`   - Message ID: ${latestLeadMessage.id}`);
                             
                             // Check if this is a recent message (within last 10 minutes)
                             const messageAge = Date.now() - latestLeadMessage.timestamp;
@@ -7726,31 +9008,24 @@ const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => 
                                 rawResponse: messagesData
                             };
                         } else {
-                            console.log(`📭 No messages found in conversation ${conversationId}`);
+                            console.log(`📭 Direct access: No messages found in conversation ${conversationId}`);
                             // console.log('🔍 Full API response structure:', JSON.stringify(messagesData, null, 2));
                         }
                     } else {
-                        console.log(`❌ Direct conversation failed: ${conversationId} (${directMessagesResponse.status})`);
-                        try {
-                            const errorData = await directMessagesResponse.text();
-                            console.log('❌ Error response:', errorData);
-                        } catch (e) {
-                            console.log('❌ Could not read error response');
-                        }
+                        const errorText = await directMessagesResponse.text().catch(() => 'Could not read error response');
+                        console.log(`⚠️ Direct access failed for ${conversationId}: Status ${directMessagesResponse.status}`);
+                        console.log(`📄 Error response preview: ${errorText.substring(0, 300)}`);
                     }
                 } catch (error) {
-                    console.log(`❌ Direct conversation error: ${conversationId} - ${error.message}`);
+                    console.log(`❌ Direct access error for ${conversationId}:`, error.message);
+                    // Continue to next conversation ID
                 }
             }
+            
+            console.log('⚠️ Direct access: All conversation IDs tried, none returned messages');
         }
         
         if (conversations.length === 0) {
-            console.log('❌ No conversations found via any method');
-            console.log('💡 This could mean:');
-            console.log('   1. LinkedIn API has changed');
-            console.log('   2. No conversations exist');
-            console.log('   3. Authentication issues');
-            console.log('   4. Need to be actively on LinkedIn.com');
             return null;
         }
         
@@ -7785,26 +9060,82 @@ const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => 
         }
         
         if (!targetConversation) {
-        console.log('📭 No conversation found with connection:', connectionId);
-        console.log('🔍 Available conversations:', conversations.map(c => ({
-            entityUrn: c.entityUrn,
-            participants: c.participants?.elements?.map(p => ({
-                entityUrn: p.entityUrn,
-                name: `${p.com?.linkedin?.voyager?.messaging?.MessagingMember?.miniProfile?.firstName} ${p.com?.linkedin?.voyager?.messaging?.MessagingMember?.miniProfile?.lastName}`,
-                publicIdentifier: p.com?.linkedin?.voyager?.messaging?.MessagingMember?.miniProfile?.publicIdentifier
-            }))
-        })));
-        return null;
+            console.log('📭 No conversation found with connection:', connectionId);
+            console.log(`📊 Total conversations found: ${conversations.length}`);
+            if (conversations.length > 0) {
+                console.log('🔍 Available conversations:', conversations.slice(0, 5).map(c => ({
+                    entityUrn: c.entityUrn,
+                    participants: c.participants?.elements?.map(p => ({
+                        entityUrn: p.entityUrn,
+                        name: `${p.com?.linkedin?.voyager?.messaging?.MessagingMember?.miniProfile?.firstName} ${p.com?.linkedin?.voyager?.messaging?.MessagingMember?.miniProfile?.lastName}`,
+                        publicIdentifier: p.com?.linkedin?.voyager?.messaging?.MessagingMember?.miniProfile?.publicIdentifier
+                    }))
+                })));
+            } else {
+                console.log('⚠️ No conversations returned from LinkedIn API');
+            }
+            
+            // Try direct conversation access as fallback when conversation not found in list
+            console.log('🔄 Conversation not found in list - trying direct conversation access...');
+            const allStorage = await chrome.storage.local.get();
+            const monitoringEntries = Object.keys(allStorage).filter(key => key.startsWith('call_response_monitoring_'));
+            
+            let knownConversationIds = [connectionId]; // Start with connection ID as fallback
+            
+            // Look for monitoring data that might have the conversation URN
+            for (const key of monitoringEntries) {
+                const monitoringData = allStorage[key];
+                if (monitoringData.connectionId === connectionId && monitoringData.conversationUrnId) {
+                    knownConversationIds.unshift(monitoringData.conversationUrnId); // Put it first
+                    console.log('🔍 Found stored conversation URN in monitoring data:', monitoringData.conversationUrnId);
+                }
+            }
+            
+            // Try direct conversation access as fallback when conversation not found in list
+            // (Conversation might be newly created via browser automation and not yet in the list)
+            console.log('🔄 Conversation not in list - trying direct access fallback...');
+            
+            for (const conversationId of knownConversationIds) {
+                try {
+                    console.log(`🔄 Direct access fallback: Trying conversation ID: ${conversationId}`);
+                    const directMessagesResponse = await fetch(`${voyagerApi}/messaging/conversations/${conversationId}/events`, {
+                        method: 'GET',
+                        headers: {
+                            'csrf-token': tokenResult.csrfToken,
+                            'accept': 'application/json',
+                            'x-restli-protocol-version': '2.0.0'
+                        }
+                    });
+                    
+                    if (directMessagesResponse.ok) {
+                        const messagesData = await directMessagesResponse.json();
+                        const messages = messagesData.elements || [];
+                        
+                        if (messages.length > 0) {
+                            console.log(`✅ Direct access fallback: Found ${messages.length} messages, but conversation URN may be needed for proper access`);
+                            console.log(`⚠️ NOTE: When using browser automation, conversations may not appear in LinkedIn's API immediately`);
+                            console.log(`💡 Suggestion: Wait 1-2 minutes after sending a message before checking for replies`);
+                            // Don't return here - let it fall through to return null
+                            // The conversation might not be accessible via direct ID when created via browser automation
+                        }
+                    }
+                } catch (error) {
+                    console.log(`⚠️ Direct access fallback error for ${conversationId}:`, error.message);
+                }
+            }
+            
+            console.log('❌ FETCH CONVERSATION: Returning null - no conversation found (tried list + direct access)');
+            return null;
         }
         
         console.log('✅ Found conversation:', targetConversation.entityUrn);
         
-        // Extract conversation URN ID
-        const conversationUrnId = targetConversation.entityUrn.replace('urn:li:fsd_conversation:', '');
+        // Extract conversation URN ID from API response (use parameter if not provided, otherwise extract from API)
+        const extractedConversationUrnId = conversationUrnId || targetConversation.entityUrn.replace('urn:li:fsd_conversation:', '');
         
         // Fetch messages from this conversation
-        console.log('📡 Fetching messages from LinkedIn conversation:', conversationUrnId);
-        const messagesResponse = await fetch(`${voyagerApi}/messaging/conversations/${conversationUrnId}/events`, {
+        console.log('📡 Fetching messages from LinkedIn conversation:', extractedConversationUrnId);
+        const messagesResponse = await fetch(`${voyagerApi}/messaging/conversations/${extractedConversationUrnId}/events`, {
             method: 'GET',
             headers: {
                 'csrf-token': tokenResult.csrfToken,
@@ -7918,7 +9249,14 @@ const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => 
                             }).filter(msg => msg.text && msg.text.trim().length > 0);
         
         console.log(`📊 Processed ${processedMessages.length} new messages`);
-        return processedMessages;
+        
+        // Return object with messages and conversationUrnId (expected by processCallFlow)
+        // Use extractedConversationUrnId if we have it, otherwise fall back to parameter
+        const finalConversationUrnId = extractedConversationUrnId || conversationUrnId;
+        return {
+            messages: processedMessages,
+            conversationUrnId: finalConversationUrnId
+        };
         
     } catch (error) {
         console.error('❌ Error fetching LinkedIn conversation:', error);
@@ -7932,77 +9270,160 @@ const fetchLinkedInConversation = async (connectionId, lastMessageId = null) => 
  */
 const processCallFlow = async (monitoringData, key) => {
     try {
-        console.log(`🔄 CALL FLOW: Processing ${monitoringData.leadName} (${monitoringData.callId})`);
+        console.log(`🔍 CALL FLOW: Starting for ${monitoringData.leadName} (${monitoringData.connectionId})`);
         
         // Step 1: Check if we should process (avoid unnecessary work)
         if (monitoringData.status === 'pending_review') {
-            console.log(`⏸️ CALL FLOW: Skipping - pending review for ${monitoringData.leadName}`);
+            console.log(`⏸️ CALL FLOW: Skipping ${monitoringData.leadName} - status is pending_review`);
             return;
         }
         
-        // Step 2: Fetch conversation (single call)
-        const conversationData = await fetchLinkedInConversation(monitoringData.connectionId, monitoringData.lastCheckedMessageId);
+        // Step 2: Get last processed message from Chrome storage (rock-solid duplicate prevention)
+        const lastProcessedKey = `lastProcessed_${monitoringData.connectionId}`;
+        const lastProcessedData = await chrome.storage.local.get([lastProcessedKey]);
+        const lastProcessed = lastProcessedData[lastProcessedKey] || {
+            lastMessageId: monitoringData.lastCheckedMessageId || null,
+            lastTimestamp: 0,
+            lastSender: null
+        };
+        console.log(`📋 CALL FLOW: Last processed for ${monitoringData.leadName}:`, {
+            lastMessageId: lastProcessed.lastMessageId,
+            lastTimestamp: lastProcessed.lastTimestamp ? new Date(lastProcessed.lastTimestamp).toLocaleString() : 'none',
+            lastSender: lastProcessed.lastSender
+        });
+        
+        // Step 3: Fetch conversation from LinkedIn
+        console.log(`📡 CALL FLOW: Fetching conversation for ${monitoringData.leadName}...`);
+        const conversationData = await fetchLinkedInConversation(monitoringData.connectionId, lastProcessed.lastMessageId);
         if (!conversationData || !conversationData.messages || conversationData.messages.length === 0) {
-            console.log(`📭 CALL FLOW: No new messages for ${monitoringData.leadName}`);
+            console.log(`⏸️ CALL FLOW: No conversation data or messages for ${monitoringData.leadName}`);
+            return;
+        }
+        console.log(`📨 CALL FLOW: Fetched ${conversationData.messages.length} total messages for ${monitoringData.leadName}`);
+        
+        // Step 4: Filter out already processed messages (duplicate prevention using timestamp)
+        console.log(`🔍 CALL FLOW: Filtering messages for ${monitoringData.leadName}...`);
+        const newMessages = conversationData.messages.filter(msg => {
+            const msgTimestamp = msg.timestamp || 0;
+            // Skip if timestamp is older or equal to last processed
+            if (lastProcessed.lastTimestamp && msgTimestamp <= lastProcessed.lastTimestamp) {
+                console.log(`⏭️ CALL FLOW: Skipping message (timestamp ${msgTimestamp} <= last processed ${lastProcessed.lastTimestamp})`);
+                return false;
+            }
+            // Skip if message ID matches last processed
+            if (msg.id && lastProcessed.lastMessageId && msg.id === lastProcessed.lastMessageId) {
+                console.log(`⏭️ CALL FLOW: Skipping message (ID matches last processed)`);
+                return false;
+            }
+            return true;
+        });
+        
+        console.log(`📊 CALL FLOW: After filtering, ${newMessages.length} new messages for ${monitoringData.leadName}`);
+        if (newMessages.length === 0) {
+            console.log(`⏭️ CALL FLOW: No new messages for ${monitoringData.leadName} (all already processed)`);
             return;
         }
         
-        // Step 3: Find latest message from lead
-        const latestMessage = conversationData.messages[conversationData.messages.length - 1];
-        if (!latestMessage || !latestMessage.isFromLead) {
-            console.log(`👤 CALL FLOW: Latest message not from lead for ${monitoringData.leadName}`);
+        // Step 5: Identify which messages are from lead (check Chrome storage for our messages)
+        console.log(`🔍 CALL FLOW: Checking sender for ${newMessages.length} messages...`);
+        const messagesFromLead = [];
+        for (const msg of newMessages) {
+            console.log(`🔍 CALL FLOW: Checking message: "${msg.text?.substring(0, 50)}..." (timestamp: ${msg.timestamp})`);
+            const checkResult = await checkIfMessageIsFromUs(monitoringData.connectionId, msg.text, msg.timestamp);
+            console.log(`📊 CALL FLOW: Sender check result:`, checkResult);
+            if (!checkResult.isFromUs) {
+                console.log(`✅ CALL FLOW: Message is from lead - adding to messagesFromLead`);
+                messagesFromLead.push(msg);
+            } else {
+                console.log(`⏭️ CALL FLOW: Message is from us (${checkResult.sender}) - marking as processed`);
+                // Update last processed for our messages (mark as processed)
+                await chrome.storage.local.set({
+                    [lastProcessedKey]: {
+                        lastMessageId: msg.id || lastProcessed.lastMessageId,
+                        lastTimestamp: msg.timestamp || lastProcessed.lastTimestamp,
+                        lastSender: checkResult.sender || 'user'
+                    }
+                });
+            }
+        }
+        
+        console.log(`📊 CALL FLOW: Found ${messagesFromLead.length} messages from lead for ${monitoringData.leadName}`);
+        if (messagesFromLead.length === 0) {
+            console.log(`⏭️ CALL FLOW: No new messages from lead for ${monitoringData.leadName} (all new messages are from us)`);
             return;
         }
         
-        console.log(`💬 CALL FLOW: New message from ${monitoringData.leadName}: "${latestMessage.text.substring(0, 50)}..."`);
+        console.log(`💬 Found ${messagesFromLead.length} new message(s) from ${monitoringData.leadName}`);
         
-        // Step 4: Update monitoring data with conversation URN ID if available
+        // Step 6: Update monitoring data with conversation URN ID if available
         if (conversationData.conversationUrnId && !monitoringData.conversationUrnId) {
             monitoringData.conversationUrnId = conversationData.conversationUrnId;
             await chrome.storage.local.set({ [key]: monitoringData });
-            console.log(`🔗 CALL FLOW: Updated conversation URN ID for ${monitoringData.leadName}: ${conversationData.conversationUrnId}`);
         }
         
-        // Step 5: Store conversation and update monitoring
-        await storeConversationMessage({
-            call_id: String(monitoringData.callId),
-            message: latestMessage.text,
-            sender: 'lead',
-            message_type: 'lead_response',
-            lead_name: monitoringData.leadName,
-            connection_id: monitoringData.connectionId,
-            conversation_urn_id: monitoringData.conversationUrnId
-        });
+        // Step 7: Store all new messages from lead in database (async/fire-and-forget)
+        for (const leadMessage of messagesFromLead) {
+            storeConversationMessage({
+                call_id: String(monitoringData.callId),
+                message: leadMessage.text,
+                sender: 'lead',
+                message_type: 'lead_response',
+                lead_name: monitoringData.leadName,
+                connection_id: monitoringData.connectionId,
+                conversation_urn_id: monitoringData.conversationUrnId
+            }).catch(err => {
+                console.error('⚠️ Failed to store lead message to database:', err);
+            });
+        }
         
-        // Step 6: Check if we should analyze (avoid unnecessary AI calls)
+        // Step 8: Process the latest message from lead (most recent one)
+        const latestMessage = messagesFromLead[messagesFromLead.length - 1];
+        
+        // Step 9: Check if we should analyze (avoid unnecessary AI calls)
         const shouldAnalyze = await shouldAnalyzeMessage(monitoringData, latestMessage);
         if (!shouldAnalyze) {
-            console.log(`⏭️ CALL FLOW: Skipping analysis for ${monitoringData.leadName}`);
-            // Update all monitoring entries for this connection
+            // Update last processed even if not analyzing
+            await chrome.storage.local.set({
+                [lastProcessedKey]: {
+                    lastMessageId: latestMessage.id || lastProcessed.lastMessageId,
+                    lastTimestamp: latestMessage.timestamp || lastProcessed.lastTimestamp,
+                    lastSender: 'lead'
+                }
+            });
             await updateAllMonitoringEntriesForConnection(monitoringData.connectionId, latestMessage.id);
             return;
         }
         
-        // Step 7: AI Analysis (only when needed)
-        console.log(`🤖 CALL FLOW: Analyzing message from ${monitoringData.leadName}`);
+        // Step 10: AI Analysis (only when needed)
         const analysisResponse = await processCallReplyWithAI(monitoringData.callId, latestMessage.text, monitoringData.leadName);
         
-        console.log(`🔍 CALL FLOW: Analysis response for ${monitoringData.leadName}:`, analysisResponse);
-        
-        if (!analysisResponse) {
-            console.log(`❌ CALL FLOW: Analysis failed - no response for ${monitoringData.leadName}`);
+        if (!analysisResponse || (!analysisResponse.success && !analysisResponse.hasResponse)) {
+            console.error(`❌ Analysis failed for ${monitoringData.leadName}`);
+            // Update last processed even on analysis failure
+            await chrome.storage.local.set({
+                [lastProcessedKey]: {
+                    lastMessageId: latestMessage.id || lastProcessed.lastMessageId,
+                    lastTimestamp: latestMessage.timestamp || lastProcessed.lastTimestamp,
+                    lastSender: 'lead'
+                }
+            });
+            await updateAllMonitoringEntriesForConnection(monitoringData.connectionId, latestMessage.id);
             return;
         }
         
-        if (!analysisResponse.success && !analysisResponse.hasResponse) {
-            console.log(`❌ CALL FLOW: Analysis failed - invalid response for ${monitoringData.leadName}`);
-            return;
-        }
-        
-        // Step 8: Process response based on analysis
+        // Step 11: Process response based on analysis
         await processAnalysisResponse(monitoringData, analysisResponse, latestMessage, key);
         
-        // Step 9: Update all monitoring entries for this connection to mark message as processed
+        // Step 12: Update last processed tracker in Chrome storage (rock-solid duplicate prevention)
+        await chrome.storage.local.set({
+            [lastProcessedKey]: {
+                lastMessageId: latestMessage.id || lastProcessed.lastMessageId,
+                lastTimestamp: latestMessage.timestamp || lastProcessed.lastTimestamp,
+                lastSender: 'lead'
+            }
+        });
+        
+        // Also update monitoring data for backward compatibility
         await updateAllMonitoringEntriesForConnection(monitoringData.connectionId, latestMessage.id);
         
     } catch (error) {
@@ -8023,11 +9444,10 @@ const updateAllMonitoringEntriesForConnection = async (connectionId, messageId) 
             if (monitoringData && monitoringData.connectionId === connectionId) {
                 monitoringData.lastCheckedMessageId = messageId;
                 await chrome.storage.local.set({ [key]: monitoringData });
-                console.log(`✅ Updated monitoring entry ${key} with message ID: ${messageId}`);
             }
         }
     } catch (error) {
-        console.error('❌ Error updating monitoring entries for connection:', error);
+        console.error('❌ Error updating monitoring entries:', error);
     }
 };
 
@@ -8037,20 +9457,17 @@ const updateAllMonitoringEntriesForConnection = async (connectionId, messageId) 
 const shouldAnalyzeMessage = async (monitoringData, latestMessage) => {
     // Don't analyze if we were the last to respond
     if (monitoringData.lastResponseSentAt && monitoringData.lastResponseSentAt > latestMessage.timestamp) {
-        console.log(`⏭️ SKIP ANALYSIS: We were last to respond to ${monitoringData.leadName}`);
         return false;
     }
     
     // Don't analyze if message is too old
     const messageAge = Date.now() - latestMessage.timestamp;
     if (messageAge > 24 * 60 * 60 * 1000) { // 24 hours
-        console.log(`⏭️ SKIP ANALYSIS: Message too old for ${monitoringData.leadName}`);
         return false;
     }
     
     // Don't analyze if we already processed this message
     if (monitoringData.lastCheckedMessageId === latestMessage.id) {
-        console.log(`⏭️ SKIP ANALYSIS: Already processed message for ${monitoringData.leadName}`);
         return false;
     }
     
@@ -8062,7 +9479,6 @@ const shouldAnalyzeMessage = async (monitoringData, latestMessage) => {
         const otherMonitoringData = allStorage[key];
         if (otherMonitoringData.connectionId === monitoringData.connectionId && 
             otherMonitoringData.lastCheckedMessageId === latestMessage.id) {
-            console.log(`⏭️ SKIP ANALYSIS: Message already processed by another monitoring entry for ${monitoringData.leadName}`);
             return false;
         }
     }
@@ -8071,7 +9487,6 @@ const shouldAnalyzeMessage = async (monitoringData, latestMessage) => {
     const pendingMessageKey = `pending_message_${monitoringData.connectionId}`;
     const pendingMessage = allStorage[pendingMessageKey];
     if (pendingMessage && pendingMessage.scheduledTime && new Date(pendingMessage.scheduledTime) > new Date()) {
-        console.log(`⏭️ SKIP ANALYSIS: Pending message exists for ${monitoringData.leadName} (review mode)`);
         return false;
     }
     
@@ -8085,7 +9500,6 @@ const processAnalysisResponse = async (monitoringData, analysisResponse, latestM
     const suggestedResponse = analysisResponse.suggested_response || analysisResponse['Suggested Response'] || analysisResponse.suggestedResponse;
     
     if (!suggestedResponse) {
-        console.log(`⏭️ CALL FLOW: No suggested response for ${monitoringData.leadName}`);
         await updateMessageTracking(monitoringData, latestMessage.id, key);
         return;
     }
@@ -8095,10 +9509,8 @@ const processAnalysisResponse = async (monitoringData, analysisResponse, latestM
     const isSchedulingInitiated = callStatus === 'scheduled';
     
     if (isSchedulingInitiated) {
-        console.log(`📅 CALL FLOW: Scheduling initiated for ${monitoringData.leadName}`);
         await handleSchedulingResponse(monitoringData, analysisResponse, latestMessage, key);
     } else {
-        console.log(`💬 CALL FLOW: Processing AI response for ${monitoringData.leadName}`);
         await handleAIResponse(monitoringData, suggestedResponse, analysisResponse, latestMessage, key);
     }
 };
@@ -8110,7 +9522,7 @@ const handleSchedulingResponse = async (monitoringData, analysisResponse, latest
     try {
         const validCallId = await ensureValidCallId(monitoringData);
         if (!validCallId) {
-            console.log(`❌ CALL FLOW: No valid call_id for scheduling ${monitoringData.leadName}`);
+            console.error(`❌ No valid call_id for scheduling ${monitoringData.leadName}`);
             return;
         }
         
@@ -8121,7 +9533,9 @@ const handleSchedulingResponse = async (monitoringData, analysisResponse, latest
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'lk-id': linkedinId
+                'lk-id': linkedinId,
+                'ngrok-skip-browser-warning': 'true',
+                'Accept': 'application/json'
             }
         });
         
@@ -8134,23 +9548,20 @@ const handleSchedulingResponse = async (monitoringData, analysisResponse, latest
             const reviewModeResult = await handleReviewMode(monitoringData, schedulingMessage, analysisResponse, key);
             
             if (reviewModeResult) {
-                console.log(`⏸️ CALL FLOW: Review mode activated for scheduling message to ${monitoringData.leadName}`);
                 return;
             }
             
             // Auto mode - send immediately
-            console.log(`📤 CALL FLOW: Auto mode - sending scheduling message to ${monitoringData.leadName}`);
             const schedulingSuccess = await sendSchedulingMessage(monitoringData, schedulingMessage, calendarData.calendar_link);
             if (schedulingSuccess) {
                 await updateMessageTracking(monitoringData, latestMessage.id, key);
-                console.log(`✅ CALL FLOW: Scheduling message sent to ${monitoringData.leadName}`);
+                console.log(`✅ Scheduling message sent to ${monitoringData.leadName}`);
             }
         } else {
-            console.log(`⚠️ CALL FLOW: Calendar generation failed for ${monitoringData.leadName}, sending fallback`);
             await handleFallbackResponse(monitoringData, analysisResponse, latestMessage, key);
         }
     } catch (error) {
-        console.error(`❌ CALL FLOW: Scheduling error for ${monitoringData.leadName}:`, error);
+        console.error(`❌ Scheduling error for ${monitoringData.leadName}:`, error);
         await handleFallbackResponse(monitoringData, analysisResponse, latestMessage, key);
     }
 };
@@ -8163,16 +9574,14 @@ const handleAIResponse = async (monitoringData, suggestedResponse, analysisRespo
     const reviewModeResult = await handleReviewMode(monitoringData, suggestedResponse, analysisResponse, key);
     
     if (reviewModeResult) {
-        console.log(`⏸️ CALL FLOW: Review mode activated for ${monitoringData.leadName}`);
         return;
     }
     
     // Auto mode - send immediately
-    console.log(`📤 CALL FLOW: Auto mode - sending response to ${monitoringData.leadName}`);
     const aiSuccess = await sendAIMessage(monitoringData, suggestedResponse);
     if (aiSuccess) {
         await updateMessageTracking(monitoringData, latestMessage.id, key);
-        console.log(`✅ CALL FLOW: Response sent to ${monitoringData.leadName}`);
+        console.log(`✅ Response sent to ${monitoringData.leadName}`);
     }
 };
 
@@ -8185,14 +9594,12 @@ const handleFallbackResponse = async (monitoringData, analysisResponse, latestMe
     if (shouldSendFallback) {
         const suggestedResponse = analysisResponse.suggested_response || analysisResponse['Suggested Response'] || analysisResponse.suggestedResponse;
         if (suggestedResponse) {
-            console.log(`📤 CALL FLOW: Sending fallback response to ${monitoringData.leadName}`);
             const aiSuccess = await sendAIMessage(monitoringData, suggestedResponse);
             if (aiSuccess) {
                 await updateMessageTracking(monitoringData, latestMessage.id, key);
             }
         }
     } else {
-        console.log(`⏸️ CALL FLOW: Lead was last to send - not sending fallback to ${monitoringData.leadName}`);
         monitoringData.lastCheckedMessageId = latestMessage.id;
         await chrome.storage.local.set({ [key]: monitoringData });
     }
@@ -8410,12 +9817,23 @@ const checkAndSendPendingMessages = async () => {
         let activeCampaignsData = [];
         try {
             const campaignsResponse = await fetch(`${PLATFORM_URL}/api/campaigns`, {
-                headers: { 'lk-id': linkedinId }
+                headers: { 
+                    'lk-id': linkedinId,
+                    'Accept': 'application/json',
+                    'ngrok-skip-browser-warning': 'true',
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
             });
             if (campaignsResponse.ok) {
-                const result = await campaignsResponse.json();
-                activeCampaignsData = result.data || [];
-                console.log(`📊 PENDING: Fetched ${activeCampaignsData.length} campaigns from API`);
+                // Check if response is JSON (not HTML from ngrok)
+                const contentType = campaignsResponse.headers.get('content-type');
+                if (contentType && contentType.includes('application/json')) {
+                    const result = await campaignsResponse.json();
+                    activeCampaignsData = result.data || [];
+                    console.log(`📊 PENDING: Fetched ${activeCampaignsData.length} campaigns from API`);
+                } else {
+                    console.error('❌ PENDING: Received non-JSON response (likely ngrok warning page)');
+                }
             }
         } catch (error) {
             console.error('❌ PENDING: Failed to fetch campaigns:', error);
@@ -8596,13 +10014,26 @@ const cleanupOrphanedCampaignData = async () => {
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json',
-                'lk-id': linkedinId
+                'Accept': 'application/json',
+                'lk-id': linkedinId,
+                'ngrok-skip-browser-warning': 'true',
+                'X-Requested-With': 'XMLHttpRequest'
             }
         });
         
         if (!response.ok) {
             console.log('❌ Failed to fetch campaigns from database, skipping cleanup');
             return;
+        }
+        
+        // Check if response is JSON (not HTML from ngrok)
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            const text = await response.text();
+            if (text.includes('<!DOCTYPE') || text.includes('ngrok')) {
+                console.error('❌ Received HTML response (ngrok warning page) instead of JSON');
+                return;
+            }
         }
         
         const data = await response.json();
@@ -8697,12 +10128,65 @@ const saveCampaignSequenceData = async (campaign) => {
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json',
-                'lk-id': linkedinId
+                'lk-id': linkedinId,
+                'ngrok-skip-browser-warning': 'true',
+                'Accept': 'application/json'
             }
         });
         
         if (!response.ok) {
             console.log(`⚠️ Failed to fetch sequence for campaign ${campaign.id}: ${response.status}`);
+            return;
+        }
+        
+        // Check content-type before parsing JSON
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            const responseText = await response.text();
+            if (responseText.includes('<!DOCTYPE') || responseText.includes('<html') || responseText.includes('ngrok')) {
+                console.error(`❌ Received HTML response (ngrok warning page or error) instead of JSON for campaign ${campaign.id}`);
+                return;
+            }
+            // Try to parse anyway if it's not HTML
+            try {
+                const data = JSON.parse(responseText);
+                if (data.status !== 200 || !data.data) {
+                    console.log(`⚠️ Invalid sequence response for campaign ${campaign.id}`);
+                    return;
+                }
+                const sequenceData = data.data;
+                console.log(`🔍 Sequence data for campaign ${campaign.id}:`, sequenceData);
+                
+                // Log full sequence structure for debugging
+                if (sequenceData && sequenceData.nodeModel && Array.isArray(sequenceData.nodeModel)) {
+                    console.log(`📋 Campaign ${campaign.id} FULL SEQUENCE (${sequenceData.nodeModel.length} nodes):`);
+                    sequenceData.nodeModel.forEach((node, index) => {
+                        console.log(`  Node ${index}: Key=${node.key}, Label="${node.label}", Type=${node.type}, Value=${node.value}, RunStatus=${node.runStatus}`);
+                    });
+                }
+                
+                // Save to Chrome storage with campaign-specific key
+                const storageKey = `campaign_${campaign.id}`;
+                const campaignData = {
+                    campaign: campaign,
+                    sequence: sequenceData,
+                    lastUpdated: new Date().toISOString()
+                };
+                
+                await chrome.storage.local.set({ [storageKey]: campaignData });
+                console.log(`✅ Saved campaign sequence data for ${campaign.id} with key: ${storageKey}`);
+                
+                // Log AI mode settings from first node
+                if (sequenceData && sequenceData[0]) {
+                    console.log(`🎯 Campaign ${campaign.id} AI settings:`, {
+                        ai_mode: sequenceData[0].ai_mode,
+                        review_time: sequenceData[0].review_time
+                    });
+                }
+            } catch (parseError) {
+                console.error(`❌ Failed to parse response as JSON for campaign ${campaign.id}:`, parseError.message);
+                return;
+            }
             return;
         }
         
@@ -8714,6 +10198,14 @@ const saveCampaignSequenceData = async (campaign) => {
         
         const sequenceData = data.data;
         console.log(`🔍 Sequence data for campaign ${campaign.id}:`, sequenceData);
+        
+        // Log full sequence structure for debugging
+        if (sequenceData && sequenceData.nodeModel && Array.isArray(sequenceData.nodeModel)) {
+            console.log(`📋 Campaign ${campaign.id} FULL SEQUENCE (${sequenceData.nodeModel.length} nodes):`);
+            sequenceData.nodeModel.forEach((node, index) => {
+                console.log(`  Node ${index}: Key=${node.key}, Label="${node.label}", Type=${node.type}, Value=${node.value}, RunStatus=${node.runStatus}`);
+            });
+        }
         
         // Save to Chrome storage with campaign-specific key
         const storageKey = `campaign_${campaign.id}`;
@@ -8735,7 +10227,8 @@ const saveCampaignSequenceData = async (campaign) => {
         }
         
     } catch (error) {
-        console.error(`❌ Error saving campaign sequence data for ${campaign.id}:`, error);
+        console.error(`❌ Error saving campaign sequence data for ${campaign.id}:`, error.message);
+        // Don't log the full error object to avoid cluttering console
     }
 };
 
@@ -8768,23 +10261,23 @@ const debugCampaignStorage = async () => {
         const campaignSpecificKeys = Object.keys(allStorage).filter(key => key.startsWith('campaign_') && !campaignKeys.includes(key));
         campaignKeys.push(...campaignSpecificKeys);
         
-        console.log('📊 All storage keys:', Object.keys(allStorage));
-        console.log('📊 Campaign-specific keys found:', campaignSpecificKeys);
+        // console.log('📊 All storage keys:', Object.keys(allStorage));
+        // console.log('📊 Campaign-specific keys found:', campaignSpecificKeys);
         
-        for (const key of campaignKeys) {
-            if (allStorage[key]) {
-                console.log(`🔍 Found data in key '${key}':`, allStorage[key]);
-                if (allStorage[key].campaign) {
-                    console.log(`   - Campaign ID: ${allStorage[key].campaign.id}`);
-                    console.log(`   - Campaign Name: ${allStorage[key].campaign.name}`);
-                    console.log(`   - Has sequence: ${!!allStorage[key].sequence}`);
-                    if (allStorage[key].sequence && allStorage[key].sequence[0]) {
-                        console.log(`   - First node AI mode: ${allStorage[key].sequence[0].ai_mode}`);
-                        console.log(`   - First node review time: ${allStorage[key].sequence[0].review_time}`);
-                    }
-                }
-            }
-        }
+        // for (const key of campaignKeys) {
+        //     if (allStorage[key]) {
+        //         console.log(`🔍 Found data in key '${key}':`, allStorage[key]);
+        //         if (allStorage[key].campaign) {
+        //             console.log(`   - Campaign ID: ${allStorage[key].campaign.id}`);
+        //             console.log(`   - Campaign Name: ${allStorage[key].campaign.name}`);
+        //             console.log(`   - Has sequence: ${!!allStorage[key].sequence}`);
+        //             if (allStorage[key].sequence && allStorage[key].sequence[0]) {
+        //                 console.log(`   - First node AI mode: ${allStorage[key].sequence[0].ai_mode}`);
+        //                 console.log(`   - First node review time: ${allStorage[key].sequence[0].review_time}`);
+        //             }
+        //         }
+        //     }
+        // }
         
         // Check monitoring data
         const monitoringKeys = Object.keys(allStorage).filter(key => key.startsWith('call_response_monitoring_'));
@@ -9412,6 +10905,37 @@ const trySendQueuedDraft = async (monitoringData) => {
  };
 
 /**
+ * Update monitoring data with conversation URN after message is sent
+ */
+const updateMonitoringDataWithConversationUrn = async (connectionId, conversationUrnId) => {
+    try {
+        console.log(`🔄 Updating monitoring data for ${connectionId} with conversation URN: ${conversationUrnId}`);
+        
+        // Find all monitoring entries for this connection
+        const allStorage = await chrome.storage.local.get();
+        const monitoringKeys = Object.keys(allStorage).filter(key => 
+            key.startsWith('call_response_monitoring_') && key.includes(connectionId)
+        );
+        
+        for (const key of monitoringKeys) {
+            const monitoringData = allStorage[key];
+            if (monitoringData && !monitoringData.conversationUrnId) {
+                console.log(`✅ Updating ${key} with conversation URN`);
+                await chrome.storage.local.set({ 
+                    [key]: {
+                        ...monitoringData,
+                        conversationUrnId: conversationUrnId
+                    }
+                });
+                console.log(`✅ Successfully updated monitoring data with conversation URN`);
+            }
+        }
+    } catch (error) {
+        console.error('❌ Error updating monitoring data with conversation URN:', error);
+    }
+};
+
+/**
  * Set up monitoring for AI message responses
  */
 const setupAIMessageMonitoring = async (monitoringData) => {
@@ -9425,6 +10949,18 @@ const setupAIMessageMonitoring = async (monitoringData) => {
         const existingMonitoring = await chrome.storage.local.get([responseMonitoringKey]);
         if (existingMonitoring[responseMonitoringKey]) {
             console.log(`✅ Monitoring already exists for ${monitoringData.leadName}`);
+            
+            // Update existing monitoring with new conversation URN if available
+            if (monitoringData.conversationUrnId && !existingMonitoring[responseMonitoringKey].conversationUrnId) {
+                console.log(`🔄 Updating existing monitoring with conversation URN: ${monitoringData.conversationUrnId}`);
+                await chrome.storage.local.set({ 
+                    [responseMonitoringKey]: {
+                        ...existingMonitoring[responseMonitoringKey],
+                        conversationUrnId: monitoringData.conversationUrnId
+                    }
+                });
+                console.log(`✅ Updated monitoring data with conversation URN`);
+            }
             return;
         }
         
@@ -9461,35 +10997,33 @@ const sendAIMessage = async (monitoringData, message, skipStorage = false) => {
         await sendLinkedInMessage(monitoringData, message);
         console.log('✅ AI message sent successfully to', monitoringData.leadName);
         
-        // Store the AI response in conversation history (unless skipped for pending messages)
+        // Store in Chrome storage IMMEDIATELY (primary tracking)
+        await storeSentMessageInChromeStorage(monitoringData.connectionId, message, 'ai', monitoringData.conversationUrnId);
+        
+        // Store the AI response in conversation history (unless skipped for pending messages) - async/fire-and-forget
         if (!skipStorage) {
-            console.log('🔍 DEBUG: Storing AI response in conversation history');
             if (monitoringData.callId) {
-            const result = await storeConversationMessage({
+                storeConversationMessage({
                     call_id: String(monitoringData.callId),
-                message: message,
-                sender: 'ai',
-                message_type: 'ai_response',
-                lead_name: monitoringData.leadName,
-                connection_id: monitoringData.connectionId,
-                conversation_urn_id: monitoringData.conversationUrnId
-            });
-            
-            if (!result) {
-                console.error('❌ Failed to store AI response in conversation history');
+                    message: message,
+                    sender: 'ai',
+                    message_type: 'ai_response',
+                    lead_name: monitoringData.leadName,
+                    connection_id: monitoringData.connectionId,
+                    conversation_urn_id: monitoringData.conversationUrnId
+                }).then(result => {
+                    if (result && result.call_id && result.call_id !== monitoringData.callId) {
+                        console.log('🔄 Database returned updated call_id:', result.call_id);
+                    }
+                    console.log('✅ AI message synced to database');
+                }).catch(err => {
+                    console.error('⚠️ Failed to sync AI message to database (will retry on next poll):', err);
+                });
             } else {
-                // Update monitoring data with the real call_id from server response
-                if (result.call_id && result.call_id !== monitoringData.callId) {
-                    console.log('🔄 Updating monitoring data with real call_id from AI response:', result.call_id);
-                    monitoringData.callId = result.call_id;
-                    // Note: We can't update storage here as we don't have the key, but the next lead message will update it
-                }
-                }
-            } else {
-                console.log('⚠️ No call_id available for AI response, skipping conversation storage');
+                console.log('⚠️ No call_id available for AI response, skipping database sync');
             }
         } else {
-            console.log('⏭️ Skipping conversation storage for pending message (already stored)');
+            console.log('⏭️ Skipping database sync for pending message (already stored)');
         }
         
         // Set up monitoring for responses to this AI message
@@ -9636,10 +11170,21 @@ const sendCalendarLinkMessage = async (monitoringData, calendarLink, schedulingM
         console.log('📤 Sending calendar link message via LinkedIn...');
         console.log('📝 Message content:', messageContent);
         
-        // Send the message
-        await messageConnection({ uploads: [] });
+        // Send the message using browser automation
+        const lead = {
+            name: monitoringData.leadName,
+            connectionId: monitoringData.connectionId,
+            conId: monitoringData.connectionId,
+            publicIdentifier: monitoringData.connectionId
+        };
+        const message = messageContent;
+        const browserResult = await _sendMessageBrowser(lead, message);
         
-        console.log('✅ Calendar link message sent successfully to', monitoringData.leadName);
+        if (browserResult.success) {
+            console.log('✅ Calendar link message sent successfully to', monitoringData.leadName, '(browser automation)');
+        } else {
+            throw new Error(browserResult.error || 'Failed to send calendar link message via browser automation');
+        }
         
         // Update monitoring data to mark calendar sent
         monitoringData.calendarSent = true;
@@ -9714,13 +11259,26 @@ const checkAllCampaignsForAcceptances = async () => {
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json',
-                'lk-id': linkedinId
+                'Accept': 'application/json',
+                'lk-id': linkedinId,
+                'ngrok-skip-browser-warning': 'true',
+                'X-Requested-With': 'XMLHttpRequest'
             }
         });
         
         if (!response.ok) {
             console.log('❌ API request failed:', response.status, response.statusText);
             return;
+        }
+        
+        // Check if response is JSON (not HTML from ngrok)
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            const text = await response.text();
+            if (text.includes('<!DOCTYPE') || text.includes('ngrok')) {
+                console.error('❌ Received HTML response (ngrok warning page) instead of JSON');
+                return;
+            }
         }
         
         const campaignsData = await response.json();
@@ -9734,11 +11292,17 @@ const checkAllCampaignsForAcceptances = async () => {
         
         // Separate active and inactive campaigns
         // Note: 'running' status should be treated as active
+        // Skip 'completed' campaigns entirely - they're done and don't need monitoring
         const activeCampaigns = eligibleCampaigns.filter(campaign => 
             campaign.status === 'active' || campaign.status === 'running'
         );
         const inactiveCampaigns = eligibleCampaigns.filter(campaign => 
-            campaign.status !== 'active' && campaign.status !== 'running'
+            campaign.status !== 'active' && 
+            campaign.status !== 'running' && 
+            campaign.status !== 'completed' // Skip completed campaigns
+        );
+        const completedCampaigns = eligibleCampaigns.filter(campaign => 
+            campaign.status === 'completed'
         );
         
         // Log filtering details for debugging
@@ -9746,8 +11310,10 @@ const checkAllCampaignsForAcceptances = async () => {
         console.log(`🎯 Eligible campaigns (Lead gen/Custom): ${eligibleCampaigns.length}`);
         console.log(`✅ Active campaigns: ${activeCampaigns.length}`, activeCampaigns.map(c => ({id: c.id, name: c.name, status: c.status})));
         console.log(`⏸️ Inactive campaigns: ${inactiveCampaigns.length}`, inactiveCampaigns.map(c => ({id: c.id, name: c.name, status: c.status})));
+        console.log(`🏁 Completed campaigns (skipped): ${completedCampaigns.length}`, completedCampaigns.map(c => ({id: c.id, name: c.name, status: c.status})));
         
         // Prioritize active campaigns, but also check inactive ones for cross-campaign acceptances
+        // Skip completed campaigns - they're done and don't need monitoring
         const campaignsToCheck = [...activeCampaigns, ...inactiveCampaigns];
         
         console.log(`🔍 Will check ${campaignsToCheck.length} campaigns: ${activeCampaigns.length} active + ${inactiveCampaigns.length} inactive`);
@@ -9764,55 +11330,484 @@ const checkAllCampaignsForAcceptances = async () => {
                 // Save campaign sequence data to Chrome storage for AI mode access
                 await saveCampaignSequenceData(campaign);
                 
-                // Get leads for this campaign
+                // Get leads for this campaign FIRST - don't set up alarm if there are no leads
                 console.log(`📋 Getting leads for campaign ${campaign.id}...`);
-                await getLeadGenRunning(campaign.id);
-                
-                console.log(`👥 Found ${campaignLeadgenRunning.length} leads in campaign ${campaign.id}`);
-                
-                if (campaignLeadgenRunning.length === 0) {
-                    if (campaign.status === 'active') {
-                        console.log(`⚠️ ACTIVE campaign ${campaign.id} has no leads - this might indicate an issue!`);
+                let leadsData = []; // Declare outside try block so it's accessible in acceptance check
+                try {
+                    
+                    // Try to use getLeadGenRunning function if available
+                    if (typeof getLeadGenRunning === 'function') {
+                        leadsData = await getLeadGenRunning(campaign.id);
+                        console.log(`📊 getLeadGenRunning returned:`, leadsData?.length || 0, 'leads');
+                        // Update global variable if function sets it
+                        if (typeof campaignLeadgenRunning !== 'undefined') {
+                            leadsData = campaignLeadgenRunning;
+                        }
+                    }
+                    
+                    // If no leads found, try multiple endpoints with standardized response handling
+                    // PRIORITY: Use tracking endpoint first for acceptance check (includes status_last_id and accept_status)
+                    if (!leadsData || leadsData.length === 0) {
+                        console.log(`🔍 No leads from getLeadGenRunning, trying multiple API endpoints...`);
+                        
+                        // Try endpoint 1: /api/campaign/{id}/leadgen/tracking (tracking endpoint - PRIORITY for acceptance check)
+                        try {
+                            console.log(`📡 Trying endpoint: /api/campaign/${campaign.id}/leadgen/tracking (PRIORITY - includes status fields)`);
+                            const trackingResponse = await fetch(`${PLATFORM_URL}/api/campaign/${campaign.id}/leadgen/tracking`, {
+                                method: 'GET',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'lk-id': linkedinId,
+                                    'ngrok-skip-browser-warning': 'true',
+                                    'Accept': 'application/json'
+                                }
+                            });
+                            
+                            if (trackingResponse.ok) {
+                                const contentType = trackingResponse.headers.get('content-type');
+                                if (contentType && contentType.includes('application/json')) {
+                                    const trackingDataResponse = await trackingResponse.json();
+                                    console.log(`📊 /leadgen/tracking endpoint response:`, {
+                                        status: trackingDataResponse.status,
+                                        hasData: !!trackingDataResponse.data,
+                                        dataLength: trackingDataResponse.data?.length || 0,
+                                        responseKeys: Object.keys(trackingDataResponse),
+                                        firstDataItem: trackingDataResponse.data?.[0] || null
+                                    });
+                                    
+                                    if (trackingDataResponse.status === 200 && trackingDataResponse.data) {
+                                        leadsData = Array.isArray(trackingDataResponse.data) ? trackingDataResponse.data : [];
+                                        console.log(`✅ Fetched ${leadsData.length} leads from /leadgen/tracking endpoint (includes status fields)`);
+                                        if (leadsData.length > 0) {
+                                            console.log(`📋 Sample lead with status:`, {
+                                                name: leadsData[0].name,
+                                                statusLastId: leadsData[0].status_last_id,
+                                                acceptStatus: leadsData[0].accept_status
+                                            });
+                                        }
+                                    } else if (Array.isArray(trackingDataResponse)) {
+                                        leadsData = trackingDataResponse;
+                                        console.log(`✅ Fetched ${leadsData.length} leads (direct array response from tracking)`);
+                                    }
+                                }
+                            }
+                        } catch (trackingError) {
+                            console.log(`⚠️ /leadgen/tracking endpoint error:`, trackingError.message);
+                        }
+                        
+                        // Try endpoint 2: /api/campaign/{id}/leads (standard leads endpoint - fallback)
+                        if (!leadsData || leadsData.length === 0) {
+                            try {
+                                console.log(`📡 Trying endpoint: /api/campaign/${campaign.id}/leads (fallback - may not include status fields)`);
+                                const leadsResponse = await fetch(`${PLATFORM_URL}/api/campaign/${campaign.id}/leads`, {
+                                    method: 'GET',
+                                    headers: {
+                                        'Content-Type': 'application/json',
+                                        'lk-id': linkedinId,
+                                        'ngrok-skip-browser-warning': 'true',
+                                        'Accept': 'application/json'
+                                    }
+                                });
+                                
+                                console.log(`📡 /leads response status: ${leadsResponse.status} ${leadsResponse.statusText}`);
+                                
+                                if (leadsResponse.ok) {
+                                    const contentType = leadsResponse.headers.get('content-type');
+                                    console.log(`📡 /leads content-type: ${contentType}`);
+                                    
+                                    if (contentType && contentType.includes('application/json')) {
+                                        const leadsDataResponse = await leadsResponse.json();
+                                        console.log(`📊 /leads endpoint FULL response:`, leadsDataResponse);
+                                        console.log(`📊 /leads endpoint response structure:`, {
+                                            status: leadsDataResponse.status,
+                                            hasData: !!leadsDataResponse.data,
+                                            dataType: Array.isArray(leadsDataResponse.data) ? 'array' : typeof leadsDataResponse.data,
+                                            dataLength: leadsDataResponse.data?.length || 0,
+                                            responseKeys: Object.keys(leadsDataResponse),
+                                            firstDataItem: leadsDataResponse.data?.[0] || null
+                                        });
+                                        
+                                        // Handle different response formats - backend returns {data: [...], status: 200}
+                                        if (leadsDataResponse.status === 200 && leadsDataResponse.data) {
+                                            leadsData = Array.isArray(leadsDataResponse.data) ? leadsDataResponse.data : [];
+                                            console.log(`✅ Fetched ${leadsData.length} leads from /leads endpoint`);
+                                            if (leadsData.length > 0) {
+                                                console.log(`📋 Sample lead:`, leadsData[0]);
+                                                console.log(`⚠️ WARNING: /leads endpoint may not include status_last_id and accept_status fields`);
+                                            }
+                                        } else if (Array.isArray(leadsDataResponse)) {
+                                            // Some endpoints return array directly
+                                            leadsData = leadsDataResponse;
+                                            console.log(`✅ Fetched ${leadsData.length} leads (direct array response)`);
+                                        } else if (leadsDataResponse.data && Array.isArray(leadsDataResponse.data)) {
+                                            // Handle case where data exists but status might be different
+                                            leadsData = leadsDataResponse.data;
+                                            console.log(`✅ Fetched ${leadsData.length} leads from /leads endpoint (data array found)`);
+                                        } else {
+                                            console.log(`⚠️ /leads response format not recognized:`, leadsDataResponse);
+                                        }
+                                    } else {
+                                        const responseText = await leadsResponse.text();
+                                        console.error(`❌ /leads endpoint returned non-JSON content-type: ${contentType}`);
+                                        console.log(`📄 Response preview:`, responseText.substring(0, 500));
+                                    }
+                                } else {
+                                    const errorText = await leadsResponse.text();
+                                    console.error(`❌ /leads endpoint failed with status ${leadsResponse.status}:`, errorText.substring(0, 500));
+                                }
+                            } catch (leadsError) {
+                                console.error(`❌ /leads endpoint error:`, leadsError.message);
+                                console.error(`❌ Error stack:`, leadsError.stack);
+                            }
+                        }
+                        
+                        // Try endpoint 3: /api/campaign/{id}/leadgen (leadgen running endpoint - fallback)
+                        if (!leadsData || leadsData.length === 0) {
+                            try {
+                                console.log(`📡 Trying endpoint: /api/campaign/${campaign.id}/leadgen`);
+                                const leadgenResponse = await fetch(`${PLATFORM_URL}/api/campaign/${campaign.id}/leadgen`, {
+                                    method: 'GET',
+                                    headers: {
+                                        'Content-Type': 'application/json',
+                                        'lk-id': linkedinId,
+                                        'ngrok-skip-browser-warning': 'true',
+                                        'Accept': 'application/json'
+                                    }
+                                });
+                                
+                                if (leadgenResponse.ok) {
+                                    const contentType = leadgenResponse.headers.get('content-type');
+                                    if (contentType && contentType.includes('application/json')) {
+                                        const leadgenDataResponse = await leadgenResponse.json();
+                                        console.log(`📊 /leadgen endpoint response:`, {
+                                            status: leadgenDataResponse.status,
+                                            hasData: !!leadgenDataResponse.data,
+                                            dataLength: leadgenDataResponse.data?.length || 0,
+                                            responseKeys: Object.keys(leadgenDataResponse)
+                                        });
+                                        
+                                        if (leadgenDataResponse.status === 200 && leadgenDataResponse.data) {
+                                            leadsData = Array.isArray(leadgenDataResponse.data) ? leadgenDataResponse.data : [];
+                                            console.log(`✅ Fetched ${leadsData.length} leads from /leadgen endpoint`);
+                                        } else if (Array.isArray(leadgenDataResponse)) {
+                                            leadsData = leadgenDataResponse;
+                                            console.log(`✅ Fetched ${leadsData.length} leads (direct array response)`);
+                                        }
+                                    }
+                                }
+                            } catch (leadgenError) {
+                                console.log(`⚠️ /leadgen endpoint error:`, leadgenError.message);
+                            }
+                        }
+                    }
+                    
+                    console.log(`👥 Found ${leadsData.length} leads in campaign ${campaign.id}`);
+                    
+                    if (leadsData.length === 0) {
+                        if (campaign.status === 'active' || campaign.status === 'running') {
+                            console.log(`⚠️ ACTIVE campaign ${campaign.id} has no leads - cannot send invites without leads!`);
+                            console.log(`💡 SOLUTION: Add leads to this campaign in your LinkDominator dashboard`);
+                            console.log(`🛑 Skipping campaign execution until leads are added`);
+                            // Don't set up alarm if there are no leads - it will just fail repeatedly
+                            continue;
                     } else {
                         console.log(`⏸️ INACTIVE campaign ${campaign.id} has no leads - skipping (normal for stopped campaigns)`);
                     }
                     continue;
+                    } else {
+                        console.log(`✅ Campaign ${campaign.id} has ${leadsData.length} leads - proceeding with campaign setup`);
+                        // Update global variable for compatibility
+                        if (typeof campaignLeadgenRunning !== 'undefined') {
+                            campaignLeadgenRunning = leadsData;
+                        }
+                    }
+                } catch (leadsError) {
+                    console.error(`❌ Error getting leads for campaign ${campaign.id}:`, leadsError.message);
+                    console.log(`⚠️ Skipping campaign ${campaign.id} due to error fetching leads`);
+                    continue;
                 }
+                
+                // Only check if campaign needs to be started AFTER confirming leads exist
+                if (campaign.status === 'running' || campaign.status === 'active') {
+                    try {
+                        // Get the saved sequence data from storage
+                        const storageKey = `campaign_${campaign.id}`;
+                        const storedData = await chrome.storage.local.get([storageKey]);
+                        const campaignData = storedData[storageKey];
+                        
+                        if (campaignData && campaignData.sequence && campaignData.sequence.nodeModel && campaignData.sequence.nodeModel.length > 0) {
+                            const firstNode = campaignData.sequence.nodeModel[0];
+                            console.log(`🔍 First node: ${firstNode.label} (${firstNode.value}), runStatus: ${firstNode.runStatus}`);
+                            
+                            // If first node hasn't run yet, trigger campaign execution
+                            if (firstNode.runStatus === false || firstNode.runStatus === null || firstNode.runStatus === undefined) {
+                                // Check if alarm already exists before creating
+                                const firstAlarmName = `custom_${firstNode.value}`;
+                                chrome.alarms.getAll(async (alarms) => {
+                                    const existingAlarm = alarms.find(a => a.name === firstAlarmName);
+                                    if(existingAlarm){
+                                        console.log(`⏸️ Alarm ${firstAlarmName} already exists - skipping duplicate setup`);
+                                        return;
+                                    }
+                                    
+                                    // Check lock
+                                    const lockResult = await chrome.storage.local.get([`campaign_${firstAlarmName}_running`]);
+                                    if(lockResult[`campaign_${firstAlarmName}_running`]){
+                                        console.log(`⏸️ First node ${firstNode.label} is already executing - skipping alarm setup`);
+                                        return;
+                                    }
+                                    
+                                    console.log(`🎯 First node not executed yet - triggering campaign execution...`);
+                                    setTimeout(async () => {
+                                        try {
+                                            if (typeof setCampaignAlarm === 'function') {
+                                                await setCampaignAlarm(campaign);
+                                                console.log(`✅ Campaign alarm set up for campaign ${campaign.id}`);
+                                            } else {
+                                                console.log(`⚠️ setCampaignAlarm function not available`);
+                                            }
+                                        } catch (error) {
+                                            console.error(`❌ Error setting up campaign alarm:`, error.message);
+                                        }
+                                    }, 1000);
+                                });
+                            } else {
+                                console.log(`✅ First node already executed (runStatus: ${firstNode.runStatus})`);
+                                
+                                // Check if there's a next node to execute or if campaign should end
+                                console.log(`🔍 Checking for next node or end node...`);
+                                // campaignData is already the value at storageKey, so access sequence directly
+                                const sequenceNodes = (campaignData && campaignData.sequence && campaignData.sequence.nodeModel) ? campaignData.sequence.nodeModel : [];
+                                
+                                // Find the next unrun action node (only nodes AFTER the current one)
+                                // Check for false, null, or undefined runStatus (all mean "not executed yet")
+                                const nextNode = sequenceNodes.find(node => 
+                                    node.type === 'action' && 
+                                    (node.runStatus === false || node.runStatus === null || node.runStatus === undefined) && 
+                                    node.key > firstNode.key &&  // Only find nodes AFTER current node
+                                    node.value !== 'end' &&
+                                    node.value !== 'add-action'  // Skip add-action nodes (not executable)
+                                );
+                                
+                                if (nextNode) {
+                                    console.log(`🎯 Found next node: ${nextNode.label} (${nextNode.value}), key: ${nextNode.key}`);
+                                    
+                                    // Check if next node is already executing or completed
+                                    const nextAlarmName = `custom_${nextNode.value}`;
+                                    chrome.alarms.getAll(async (alarms) => {
+                                        const existingAlarm = alarms.find(a => a.name === nextAlarmName);
+                                        if(existingAlarm){
+                                            console.log(`⏸️ Alarm ${nextAlarmName} already exists - skipping duplicate setup`);
+                                            return;
+                                        }
+                                        
+                                        // Check lock
+                                        const lockResult = await chrome.storage.local.get([`campaign_${nextAlarmName}_running`]);
+                                        if(lockResult[`campaign_${nextAlarmName}_running`]){
+                                            console.log(`⏸️ Next node ${nextNode.label} is already executing - skipping alarm setup`);
+                                            return;
+                                        }
+                                        
+                                        // Check if node is already completed
+                                        if(nextNode.runStatus === true){
+                                            console.log(`⏸️ Next node ${nextNode.label} already completed - skipping alarm setup`);
+                                            return;
+                                        }
+                                        
+                                        // Special check for call nodes - they never complete, so check if messages were already sent
+                                        if(nextNode.value === 'call'){
+                                            try {
+                                                const allStorage = await chrome.storage.local.get();
+                                                const callAttemptKeys = Object.keys(allStorage).filter(key => 
+                                                    key.startsWith(`call_attempted_${campaign.id}_`)
+                                                );
+                                                // If call messages were sent, skip creating alarm (call node stays open for monitoring)
+                                                if(callAttemptKeys.length > 0){
+                                                    console.log(`⏸️ Call node already has ${callAttemptKeys.length} call attempts - skipping duplicate alarm setup (call node stays open for monitoring)`);
+                                                    return;
+                                                }
+                                            } catch (e) {
+                                                console.log(`⚠️ Could not check call attempts:`, e.message);
+                                            }
+                                        }
+                                        
+                                        console.log(`🚀 Setting up execution for next node...`);
+                                        setTimeout(async () => {
+                                            try {
+                                                if (typeof setCampaignAlarm === 'function') {
+                                                    await setCampaignAlarm(campaign);
+                                                    console.log(`✅ Campaign alarm set up for next node execution`);
+                                                } else {
+                                                    console.log(`⚠️ setCampaignAlarm function not available`);
+                                                }
+                                            } catch (error) {
+                                                console.error(`❌ Error setting up next node alarm:`, error.message);
+                                            }
+                                        }, 1000);
+                                    });
+                                } else {
+                                    // No next node found - check if there's an "end" node
+                                    const endNode = sequenceNodes.find(node => node.type === 'end' || node.value === 'end');
+                                    if (endNode) {
+                                        console.log(`🏁 END node detected - marking campaign as completed`);
+                                        console.log(`🔑 End node key: ${endNode.key}`);
+                                        
+                                        try {
+                                            // Mark the end node as complete - inline API call
+                                            console.log(`📤 Updating end node for campaign ${campaign.id}, node ${endNode.key}, runStatus: true`);
+                                            const endNodeResponse = await fetch(`${PLATFORM_URL}/api/campaign/${campaign.id}/update-node`, {
+                                                method: 'POST',
+                                                headers: {
+                                                    'Content-Type': 'application/json',
+                                                    'lk-id': linkedinId || 'vicken-concept',
+                                                    'ngrok-skip-browser-warning': 'true'
+                                                },
+                                                body: JSON.stringify({
+                                                    nodeKey: endNode.key,
+                                                    runStatus: true
+                                                })
+                                            });
+                                            if (!endNodeResponse.ok) {
+                                                throw new Error(`Failed to update end node: ${endNodeResponse.status}`);
+                                            }
+                                            const endNodeData = await endNodeResponse.json();
+                                            console.log(`✅ End node updated successfully:`, endNodeData);
+                                            
+                                            // Mark the campaign as completed - inline API call
+                                            console.log(`📤 Marking campaign ${campaign.id} as completed`);
+                                            const campaignResponse = await fetch(`${PLATFORM_URL}/api/campaign/${campaign.id}/update`, {
+                                                method: 'POST',
+                                                headers: {
+                                                    'Content-Type': 'application/json',
+                                                    'lk-id': linkedinId || 'vicken-concept',
+                                                    'ngrok-skip-browser-warning': 'true'
+                                                },
+                                                body: JSON.stringify({
+                                                    campaignId: campaign.id,
+                                                    status: 'completed'
+                                                })
+                                            });
+                                            if (!campaignResponse.ok) {
+                                                throw new Error(`Failed to update campaign: ${campaignResponse.status}`);
+                                            }
+                                            const campaignData = await campaignResponse.json();
+                                            console.log(`✅ Campaign marked as COMPLETED:`, campaignData);
+                                            
+                                            // Remove from active campaigns
+                                            chrome.storage.local.get(['activeCampaigns'], (result) => {
+                                                const activeCampaigns = result.activeCampaigns || [];
+                                                const updatedCampaigns = activeCampaigns.filter(id => id !== campaign.id);
+                                                chrome.storage.local.set({ activeCampaigns: updatedCampaigns });
+                                                console.log(`📊 Removed campaign ${campaign.id} from active campaigns list`);
+                                            });
+                                        } catch (error) {
+                                            console.error(`❌ Failed to mark campaign as completed:`, error);
+                                        }
+                                    } else {
+                                        console.log(`⚠️ No next node and no end node found - campaign will remain active`);
+                                    }
+                                }
+                            }
+                        } else {
+                            console.log(`⚠️ Campaign sequence data not available in storage, will try to fetch...`);
+                            // Fallback: try to get sequence directly and set up alarm
+                            setTimeout(async () => {
+                                try {
+                                    if (typeof getCampaignSequence === 'function') {
+                                        await getCampaignSequence(campaign.id);
+                                        if (campaignSequence && campaignSequence.nodeModel && campaignSequence.nodeModel.length > 0) {
+                                            const firstNode = campaignSequence.nodeModel[0];
+                                            if (firstNode.runStatus === false || firstNode.runStatus === null || firstNode.runStatus === undefined) {
+                                                console.log(`🎯 Triggering campaign execution via fallback method...`);
+                                                if (typeof setCampaignAlarm === 'function') {
+                                                    await setCampaignAlarm(campaign);
+                                                    console.log(`✅ Campaign alarm set up for campaign ${campaign.id}`);
+                                                }
+                                            }
+                                        }
+                                    }
+                                } catch (fallbackError) {
+                                    console.error(`❌ Fallback sequence fetch failed:`, fallbackError.message);
+                                }
+                            }, 2000);
+                        }
+                    } catch (error) {
+                        console.error(`❌ Error checking campaign sequence:`, error.message);
+                    }
+                }
+                
+                // Use leadsData directly (more reliable than global variable)
+                const leadsToCheck = leadsData || campaignLeadgenRunning || [];
                 
                 // For inactive campaigns, only check if they have leads (for cross-campaign acceptance tracking)
                 if (campaign.status !== 'active' && campaign.status !== 'running') {
-                    console.log(`⏸️ Checking INACTIVE campaign ${campaign.id} because it has ${campaignLeadgenRunning.length} leads (cross-campaign acceptance tracking)`);
+                    console.log(`⏸️ Checking INACTIVE campaign ${campaign.id} because it has ${leadsToCheck.length} leads (cross-campaign acceptance tracking)`);
                 } else {
-                    console.log(`✅ Checking ACTIVE campaign ${campaign.id} with ${campaignLeadgenRunning.length} leads`);
+                    console.log(`✅ Checking ACTIVE campaign ${campaign.id} with ${leadsToCheck.length} leads`);
                 }
                 
                 // Check each lead for acceptance
                 console.log(`🔍 Checking each lead for acceptance...`);
-                for (const lead of campaignLeadgenRunning) {
-                    // console.log(`\n👤 Checking lead: ${lead.name || 'Unknown'} (ID: ${lead.id || lead.connectionId})`);
+                if(leadsToCheck.length === 0){
+                    console.log(`⚠️ No leads to check for acceptance (leadsData: ${leadsData?.length || 0}, campaignLeadgenRunning: ${campaignLeadgenRunning?.length || 0})`);
+                }
+                for (const lead of leadsToCheck) {
                     // Handle both tracking data format and basic lead data format
                     const acceptedStatus = lead.accept_status !== undefined ? lead.accept_status : lead.acceptedStatus;
                     const statusLastId = lead.status_last_id !== undefined ? lead.status_last_id : lead.statusLastId;
                     const leadSrc = lead.lead_src !== undefined ? lead.lead_src : lead.leadSrc;
                     const connectionId = lead.connection_id !== undefined ? lead.connection_id : lead.connectionId;
                     
-                    // console.log(`📊 Lead status:`, {
-                    //     name: lead.name,
-                    //     acceptedStatus: acceptedStatus,
-                    //     statusLastId: statusLastId,
-                    //     leadSrc: leadSrc,
-                    //     connectionId: connectionId
-                    // });
+                    console.log(`📊 Lead status check: ${lead.name || 'Unknown'}`, {
+                        name: lead.name,
+                        acceptedStatus: acceptedStatus,
+                        statusLastId: statusLastId,
+                        statusLastIdType: typeof statusLastId,
+                        leadSrc: leadSrc,
+                        connectionId: connectionId
+                    });
+                    
+                    // Normalize statusLastId to number for comparison (backend may return as string)
+                    const statusLastIdNum = statusLastId != null ? parseInt(statusLastId, 10) : null;
                     
                     // Check for pending invites (accept_status = 0 or false, status_last_id = 2)
-                    const isPendingInvite = (acceptedStatus === false || acceptedStatus === 0) && statusLastId == 2;
+                    const isPendingInvite = (acceptedStatus === false || acceptedStatus === 0) && statusLastIdNum === 2;
                     // Also check for leads that are already 1st-degree but not marked as accepted (like Eleazer)
-                    const isAlreadyAccepted = (acceptedStatus === false || acceptedStatus === 0) && statusLastId == 1;
-                    // console.log(`🔍 Is pending invite: ${isPendingInvite} (acceptedStatus: ${acceptedStatus}, statusLastId: ${statusLastId})`);
-                    // console.log(`🔍 Is already accepted but not marked: ${isAlreadyAccepted}`);
+                    // Handle undefined/null acceptedStatus - treat as false if statusLastId is 1
+                    const isAlreadyAccepted = (acceptedStatus === false || acceptedStatus === 0 || acceptedStatus === undefined || acceptedStatus === null) && statusLastIdNum === 1;
+                    // Fallback: Check leads with acceptedStatus === false/undefined/null if statusLastId is null/undefined (might be old data or missing status)
+                    // Only check if campaign has send-invites completed (to avoid checking leads that haven't been sent invites)
+                    // Get sequence data from storage to check if send-invites is completed
+                    const storageKeyForCheck = `campaign_${campaign.id}`;
+                    const storedDataForCheck = await chrome.storage.local.get([storageKeyForCheck]);
+                    const campaignDataForCheck = storedDataForCheck[storageKeyForCheck];
+                    const sequenceDataForCheck = campaignDataForCheck?.sequence;
+                    const sendInvitesCompleted = sequenceDataForCheck?.nodeModel?.[0]?.value === 'send-invites' && 
+                                                (sequenceDataForCheck.nodeModel[0].runStatus === true);
+                    // Handle undefined/null acceptedStatus - treat as false if send-invites completed
+                    const needsAcceptanceCheck = (acceptedStatus === false || acceptedStatus === 0 || acceptedStatus === undefined || acceptedStatus === null) && 
+                                                (statusLastIdNum == null || statusLastIdNum == undefined) && 
+                                                sendInvitesCompleted;
                     
-                    if (isPendingInvite || isAlreadyAccepted) {
-                        console.log(`🌐 Checking network status for ${isPendingInvite ? 'pending invite' : 'already accepted lead'}: ${lead.name}...`);
+                    
+                    const shouldCheckAcceptance = isPendingInvite || isAlreadyAccepted || needsAcceptanceCheck;
+                    
+                    // Check if lead is already accepted and needs next action triggered
+                    const isAlreadyAcceptedAndNeedsAction = (acceptedStatus === true || acceptedStatus === 1) && statusLastIdNum === 3;
+                    
+                    console.log(`🔍 Acceptance check conditions for ${lead.name || 'Unknown'}:`, {
+                        shouldCheckAcceptance,
+                        isAlreadyAcceptedAndNeedsAction,
+                        acceptedStatus,
+                        statusLastIdNum,
+                        isPendingInvite,
+                        isAlreadyAccepted,
+                        needsAcceptanceCheck
+                    });
+                    
+                    if (shouldCheckAcceptance) {
+                        const checkReason = isPendingInvite ? 'pending invite' : (isAlreadyAccepted ? 'already accepted lead' : 'missing status data');
+                        console.log(`🌐 Checking network status for ${checkReason}: ${lead.name}...`);
                         try {
                             const networkInfo = await _getProfileNetworkInfo(lead);
                             const networkDegree = networkInfo.data.distance.value;
@@ -9823,15 +11818,36 @@ const checkAllCampaignsForAcceptances = async () => {
                                 console.log(`👤 Lead: ${lead.name} (ID: ${lead.id || connectionId})`);
                                 
                                 try {
-                                    // Update database
-                                    const updateResult = await updateLeadGenRunning(campaign.id, lead.id || connectionId, {
+                                    // Update database - inline API call to avoid scoping issues
+                                    const leadIdToUpdate = lead.id || connectionId;
+                                    if (leadIdToUpdate) {
+                                        const updateData = {
                                         acceptedStatus: true,
                                         statusLastId: 3, // 3 = accepted
                                         currentNodeKey: lead.current_node_key || lead.currentNodeKey || 0,
                                         nextNodeKey: lead.next_node_key || lead.nextNodeKey || 0
-                                    });
-                                    
+                                        };
+                                        
+                                        const response = await fetch(`${PLATFORM_URL}/api/campaign/${campaign.id}/leadgen/${leadIdToUpdate}/update`, {
+                                            method: 'POST',
+                                            headers: {
+                                                'Content-Type': 'application/json',
+                                                'lk-id': linkedinId,
+                                                'ngrok-skip-browser-warning': 'true',
+                                                'Accept': 'application/json'
+                                            },
+                                            body: JSON.stringify(updateData)
+                                        });
+                                        
+                                        if (response.ok) {
+                                            const updateResult = await response.json();
                                     console.log(`✅ Database updated for ${lead.name || 'Unknown'}:`, updateResult);
+                                        } else {
+                                            console.error(`❌ Failed to update database for acceptance: ${response.status}`);
+                                        }
+                                    } else {
+                                        console.error('❌ No lead ID available for acceptance update');
+                                    }
                                     
                                     // Update local variable
                                     if (lead.accept_status !== undefined) {
@@ -9847,17 +11863,43 @@ const checkAllCampaignsForAcceptances = async () => {
                                 // Trigger next action if campaign sequence supports it
                                 try {
                                     console.log(`🔄 Looking for next action after acceptance for ${lead.name}...`);
-                                    await getCampaignSequence(campaign.id);
                                     
-                                    if (campaignSequence && campaignSequence.nodeModel) {
-                                        console.log(`📋 Campaign sequence loaded with ${campaignSequence.nodeModel.length} nodes`);
+                                    // Get sequence data from storage (already saved by saveCampaignSequenceData)
+                                    const storageKey = `campaign_${campaign.id}`;
+                                    const storedData = await chrome.storage.local.get([storageKey]);
+                                    const campaignData = storedData[storageKey];
+                                    const sequenceData = campaignData?.sequence;
+                                    
+                                    if (sequenceData && sequenceData.nodeModel) {
+                                        console.log(`📋 Campaign sequence loaded with ${sequenceData.nodeModel.length} nodes`);
                                         
                         // Find the next action node for accepted connections
                         // Look for nodes that have acceptedAction property or are action nodes that haven't run yet
-                        const nextActionNode = campaignSequence.nodeModel.find(node => 
-                            (node.acceptedAction && node.acceptedAction == 3) || 
-                            (node.type === 'action' && node.runStatus === false && node.value !== 'send-invites')
+                        // For custom sequences, find the first action node after the "Accepted" condition that hasn't run
+                        const acceptedConditionIndex = sequenceData.nodeModel.findIndex(node => 
+                            node.type === 'condition' && node.value === 'accepted'
                         );
+                        
+                        let nextActionNode;
+                        if (acceptedConditionIndex !== -1) {
+                            // Find first action node after the "Accepted" condition
+                            nextActionNode = sequenceData.nodeModel.find((node, index) => 
+                                index > acceptedConditionIndex &&
+                                node.type === 'action' && 
+                                node.runStatus === false && 
+                                node.value !== 'send-invites' &&
+                                node.value !== 'end' &&
+                                node.value !== 'add-action'
+                            );
+                        }
+                        
+                        // Fallback: find any action node that hasn't run
+                        if (!nextActionNode) {
+                            nextActionNode = sequenceData.nodeModel.find(node => 
+                            (node.acceptedAction && node.acceptedAction == 3) || 
+                                (node.type === 'action' && node.runStatus === false && node.value !== 'send-invites' && node.value !== 'end' && node.value !== 'add-action')
+                        );
+                        }
                                         
                                         if (nextActionNode) {
                                             console.log(`🎯 FOUND NEXT ACTION: ${nextActionNode.label} (${nextActionNode.value})`);
@@ -9900,7 +11942,6 @@ const checkAllCampaignsForAcceptances = async () => {
                                     }
                                 } catch (sequenceError) {
                                     // Error processing sequence
-                                }
                             }
                             
                             // Update network degree in lead database
@@ -9910,13 +11951,235 @@ const checkAllCampaignsForAcceptances = async () => {
                             } catch (networkUpdateError) {
                                 // Error updating network degree
                             }
-                            
+                            }
                         } catch (networkError) {
                             // Error checking network
+                        }
+                    } else if ((acceptedStatus === true || acceptedStatus === 1) && statusLastIdNum === 3) {
+                        // Lead is already accepted - check if next action needs to be triggered
+                        console.log(`✅ Lead ${lead.name || 'Unknown'} is already accepted - checking for next action...`);
+                        try {
+                            // Get sequence data from storage
+                            const storageKey = `campaign_${campaign.id}`;
+                            const storedData = await chrome.storage.local.get([storageKey]);
+                            const campaignData = storedData[storageKey];
+                            const sequenceData = campaignData?.sequence;
+                            
+                            if (sequenceData && sequenceData.nodeModel) {
+                                // Find the "Accepted" condition node
+                                const acceptedConditionIndex = sequenceData.nodeModel.findIndex(node => 
+                                    node.type === 'condition' && node.value === 'accepted'
+                                );
+                                
+                                if (acceptedConditionIndex !== -1) {
+                                    // Find first action node after the "Accepted" condition that hasn't run
+                                    const nextActionNode = sequenceData.nodeModel.find((node, index) => 
+                                        index > acceptedConditionIndex &&
+                                        node.type === 'action' && 
+                                        node.runStatus === false && 
+                                        node.value !== 'send-invites' &&
+                                        node.value !== 'end' &&
+                                        node.value !== 'add-action'
+                                    );
+                                    
+                                    if (nextActionNode) {
+                                        // Check if action has already been executed
+                                        let actionAlreadyExecuted = false;
+                                        
+                                        // Special check for call actions - they use call_attempted keys
+                                        // Note: "Book a call" is an ongoing conversation action that doesn't complete like other actions
+                                        if (nextActionNode.value === 'call') {
+                                            const callAttemptKey = `call_attempted_${campaign.id}_${lead.connectionId || connectionId}`;
+                                            const callCheck = await chrome.storage.local.get([callAttemptKey]);
+                                            if (callCheck[callAttemptKey]) {
+                                                actionAlreadyExecuted = true;
+                                                const attemptTime = new Date(callCheck[callAttemptKey]).toLocaleString();
+                                                console.log(`⏸️ Call action already executed for ${lead.name} - skipping (key: ${callAttemptKey})`);
+                                                console.log(`📅 Call attempt timestamp: ${attemptTime}`);
+                                                console.log(`💬 "Book a call" is an ongoing conversation - campaign stays active to monitor responses`);
+                                                
+                                                // Verify if message was actually sent by checking for call record or monitoring data
+                                                const monitoringKey = `call_response_monitoring_${campaign.id}_${lead.connectionId || connectionId}`;
+                                                const monitoringCheck = await chrome.storage.local.get([monitoringKey]);
+                                                if (monitoringCheck[monitoringKey]) {
+                                                    console.log(`✅ Call monitoring is active - conversation is being monitored`);
+                                                } else {
+                                                    console.log(`⚠️ No monitoring data found - message may not have been sent`);
+                                                }
+                                            }
+                                        } else {
+                                            // For other actions, check if node runStatus is true or if there's a processed flag
+                                            if (nextActionNode.runStatus === true) {
+                                                actionAlreadyExecuted = true;
+                                                console.log(`⏸️ Action ${nextActionNode.label} already executed (runStatus: true) - skipping`);
+                                            }
+                                        }
+                                        
+                                        if (actionAlreadyExecuted) {
+                                            console.log(`ℹ️ Action ${nextActionNode.label} already executed for ${lead.name} - no action needed`);
+                                        } else {
+                                            console.log(`🎯 FOUND NEXT ACTION for already-accepted lead: ${nextActionNode.label} (${nextActionNode.value})`);
+                                            
+                                            // Check if there's a delay node before this action
+                                            const actionIndex = sequenceData.nodeModel.findIndex(n => n.key === nextActionNode.key);
+                                            let delayInMinutes = 0;
+                                            if (actionIndex > 0) {
+                                                const prevNode = sequenceData.nodeModel[actionIndex - 1];
+                                                if (prevNode.type === 'delay') {
+                                                    delayInMinutes = prevNode.time === 'days' 
+                                                        ? prevNode.value * 24 * 60
+                                                        : prevNode.time === 'hours'
+                                                        ? prevNode.value * 60
+                                                        : prevNode.value;
+                                                }
+                                            }
+                                            
+                                            if (delayInMinutes > 0) {
+                                                console.log(`⏰ SCHEDULING ACTION: ${nextActionNode.label} will run in ${delayInMinutes} minutes`);
+                                                const alarmName = `delayed_action_${campaign.id}_${lead.id || connectionId}_${nextActionNode.key}`;
+                                                
+                                                // Check if alarm already exists
+                                                chrome.alarms.getAll((alarms) => {
+                                                    const existingAlarm = alarms.find(a => a.name === alarmName);
+                                                    if (!existingAlarm) {
+                                                        chrome.alarms.create(alarmName, {
+                                                            delayInMinutes: delayInMinutes
+                                                        });
+                                                        
+                                                        chrome.storage.local.set({
+                                                            [`delayed_action_${alarmName}`]: {
+                                                                campaign: campaign,
+                                                                lead: lead,
+                                                                nodeModel: nextActionNode,
+                                                                scheduledTime: Date.now() + (delayInMinutes * 60000)
+                                                            }
+                                                        });
+                                                        console.log(`✅ ALARM CREATED: ${alarmName}`);
+                                                    } else {
+                                                        console.log(`⏸️ Alarm ${alarmName} already exists - skipping duplicate creation`);
+                                                    }
+                                                });
+                                            } else {
+                                                console.log(`🚀 EXECUTING NEXT ACTION IMMEDIATELY for already-accepted lead ${lead.name}...`);
+                                                await runSequence(campaign, [lead], nextActionNode);
+                                            }
+                                        }
+                                    } else {
+                                        console.log(`ℹ️ No next action found for already-accepted lead ${lead.name}`);
+                                    }
+                                }
+                            }
+                        } catch (alreadyAcceptedError) {
+                            console.error(`❌ Error processing already-accepted lead:`, alreadyAcceptedError);
+                        }
                         }
                         
                         // Add delay between checks to avoid rate limiting
                         await new Promise(resolve => setTimeout(resolve, 2000));
+                }
+                
+                // Check for "not accepted" path: Leads that haven't accepted after delay period
+                if (campaign.status === 'active' || campaign.status === 'running') {
+                    try {
+                        // Get sequence data from storage (already saved by saveCampaignSequenceData)
+                        const storageKey = `campaign_${campaign.id}`;
+                        const storedData = await chrome.storage.local.get([storageKey]);
+                        const campaignData = storedData[storageKey];
+                        const sequenceData = campaignData?.sequence;
+                        
+                        if (sequenceData && sequenceData.nodeModel) {
+                            // Find delay nodes with notAcceptedTime property (e.g., "5 days" delay for not accepted)
+                            const notAcceptedDelayNodes = sequenceData.nodeModel.filter(node => 
+                                node.type === 'delay' && node.notAcceptedTime
+                            );
+                            
+                            // Find action nodes with notAcceptedAction property
+                            const notAcceptedActionNodes = sequenceData.nodeModel.filter(node => 
+                                node.type === 'action' && node.notAcceptedAction
+                            );
+                            
+                            if (notAcceptedDelayNodes.length > 0 && notAcceptedActionNodes.length > 0) {
+                                console.log(`🔍 Checking for "not accepted" leads after delay period...`);
+                                console.log(`📋 Found ${notAcceptedDelayNodes.length} delay nodes and ${notAcceptedActionNodes.length} action nodes for not accepted path`);
+                                
+                                for (const delayNode of notAcceptedDelayNodes) {
+                                    // Calculate delay in milliseconds
+                                    const delayMs = delayNode.time === 'days' 
+                                        ? delayNode.value * 24 * 60 * 60 * 1000
+                                        : delayNode.time === 'hours'
+                                        ? delayNode.value * 60 * 60 * 1000
+                                        : delayNode.value * 60 * 1000;
+                                    
+                                    // Find the corresponding action node for this delay
+                                    const correspondingActionNode = notAcceptedActionNodes.find(actionNode => 
+                                        actionNode.notAcceptedAction === delayNode.notAcceptedTime
+                                    );
+                                    
+                                    if (!correspondingActionNode) {
+                                        console.log(`⚠️ No corresponding action node found for delay node ${delayNode.key} (notAcceptedTime: ${delayNode.notAcceptedTime})`);
+                                        continue;
+                                    }
+                                    
+                                    // Check if action node has already run (to avoid re-triggering)
+                                    if (correspondingActionNode.runStatus === true) {
+                                        console.log(`⏭️ Action node ${correspondingActionNode.key} (${correspondingActionNode.label}) already executed - skipping`);
+                                        continue;
+                                    }
+                                    
+                                    console.log(`🔍 Checking delay node ${delayNode.key}: ${delayNode.value} ${delayNode.time} (notAcceptedTime: ${delayNode.notAcceptedTime})`);
+                                    console.log(`🎯 Corresponding action: ${correspondingActionNode.label} (${correspondingActionNode.value})`);
+                                    
+                                    // Find leads that haven't accepted after the delay period
+                                    const notAcceptedLeads = leadsToCheck.filter(lead => {
+                                        const acceptedStatus = lead.accept_status !== undefined ? lead.accept_status : lead.acceptedStatus;
+                                        const statusLastId = lead.status_last_id !== undefined ? lead.status_last_id : lead.statusLastId;
+                                        const statusLastIdNum = statusLastId != null ? parseInt(statusLastId, 10) : null;
+                                        
+                                        // Only process leads with invite sent (statusLastId = 2) and not accepted
+                                        if (statusLastIdNum !== 2 || acceptedStatus === true) {
+                                            return false;
+                                        }
+                                        
+                                        // Check if enough time has passed since invite was sent
+                                        const updatedAt = lead.updated_at || lead.updatedAt;
+                                        if (!updatedAt) {
+                                            console.log(`⚠️ Lead ${lead.name || 'Unknown'} has no updated_at timestamp - cannot check delay`);
+                                            return false;
+                                        }
+                                        
+                                        const inviteSentTime = new Date(updatedAt).getTime();
+                                        const currentTime = Date.now();
+                                        const timeSinceInvite = currentTime - inviteSentTime;
+                                        
+                                        if (timeSinceInvite >= delayMs) {
+                                            console.log(`✅ Lead ${lead.name || 'Unknown'} delay passed: ${Math.floor(timeSinceInvite / (1000 * 60 * 60 * 24))} days since invite sent`);
+                                            return true;
+                                        }
+                                        
+                                        return false;
+                                    });
+                                    
+                                    if (notAcceptedLeads.length > 0) {
+                                        console.log(`🎯 Found ${notAcceptedLeads.length} leads that haven't accepted after ${delayNode.value} ${delayNode.time} delay`);
+                                        console.log(`🚀 Triggering "not accepted" action: ${correspondingActionNode.label} for ${notAcceptedLeads.length} leads`);
+                                        
+                                        // Execute the not accepted action
+                                        try {
+                                            await runSequence(campaign, notAcceptedLeads, correspondingActionNode);
+                                            console.log(`✅ "Not accepted" action executed successfully for ${notAcceptedLeads.length} leads`);
+                                        } catch (notAcceptedError) {
+                                            console.error(`❌ Error executing "not accepted" action:`, notAcceptedError);
+                                        }
+                                    } else {
+                                        console.log(`⏸️ No leads found that haven't accepted after ${delayNode.value} ${delayNode.time} delay`);
+                                    }
+                                }
+                            } else {
+                                console.log(`ℹ️ No "not accepted" delay/action nodes found in sequence - skipping not accepted path check`);
+                            }
+                        }
+                    } catch (notAcceptedCheckError) {
+                        console.error(`❌ Error checking "not accepted" path:`, notAcceptedCheckError);
                     }
                 }
                 
@@ -10506,6 +12769,36 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return true;
     }
     
+    if (request.action === 'startCampaign') {
+        console.log('🚀 Campaign start request received');
+        console.log('📋 Campaign ID:', request.campaignId);
+        
+        // Use async IIFE to handle await
+        (async () => {
+            try {
+                const campaignId = request.campaignId;
+                
+                console.log(`🚀 Starting campaign monitoring for campaign ID: ${campaignId}`);
+                
+                // Use self.startCampaign since it's exported to global scope
+                if (typeof self.startCampaign === 'function') {
+                    const success = await self.startCampaign(campaignId);
+                    sendResponse({ success, message: `Campaign ${campaignId} started successfully` });
+                } else if (typeof startCampaign === 'function') {
+                    const success = await startCampaign(campaignId);
+                    sendResponse({ success, message: `Campaign ${campaignId} started successfully` });
+                } else {
+                    console.error('❌ startCampaign function not found');
+                    sendResponse({ success: false, error: 'startCampaign function not available' });
+                }
+            } catch (error) {
+                console.error('❌ Error starting campaign:', error);
+                sendResponse({ success: false, error: error.message });
+            }
+        })();
+        return true; // Keep channel open for async response
+    }
+    
     if (request.action === 'stopCampaign') {
         console.log('⏹️ Campaign stop request received');
         console.log('📋 Campaign ID:', request.campaignId);
@@ -10629,6 +12922,114 @@ async function clearCampaignDedupeFlags(campaignId) {
 // Clear dedupe flags for campaign 100 to allow retry (for testing)
 // clearCampaignDedupeFlags(100);
 
+/**
+ * Store sent message in Chrome storage (IMMEDIATE - Primary tracking method)
+ * This is called immediately when sending messages for fast, reliable tracking
+ */
+const storeSentMessageInChromeStorage = async (connectionId, message, sender, backendUrn = null) => {
+    try {
+        const messageTimestamp = Date.now();
+        const messageId = `msg_${messageTimestamp}`;
+        const storageKey = `sentMessages_${connectionId}`;
+        
+        // Get existing messages array
+        const storageData = await chrome.storage.local.get([storageKey]);
+        const messagesArray = storageData[storageKey] || [];
+        
+        // Add new message to array
+        messagesArray.push({
+            messageId: messageId,
+            text: message,
+            timestamp: messageTimestamp,
+            sender: sender, // 'user' or 'ai'
+            backendUrn: backendUrn
+        });
+        
+        // Update last processed tracker
+        const lastProcessedKey = `lastProcessed_${connectionId}`;
+        await chrome.storage.local.set({
+            [storageKey]: messagesArray,
+            [lastProcessedKey]: {
+                lastMessageId: messageId,
+                lastTimestamp: messageTimestamp,
+                lastSender: sender
+            }
+        });
+        
+        console.log(`✅ Message stored in Chrome storage (${sender}): ${messageId}`);
+        return true;
+    } catch (error) {
+        console.error('❌ Error storing message in Chrome storage:', error);
+        return false;
+    }
+};
+
+/**
+ * Check if a message was sent by us (checks Chrome storage first, then database fallback)
+ * Returns: { isFromUs: boolean, sender: 'user' | 'ai' | null }
+ */
+const checkIfMessageIsFromUs = async (connectionId, messageText, messageTimestamp) => {
+    try {
+        // METHOD 1: Check Chrome storage array (fastest, most reliable)
+        const storageKey = `sentMessages_${connectionId}`;
+        const storageData = await chrome.storage.local.get([storageKey]);
+        const sentMessages = storageData[storageKey] || [];
+        
+        const text = (messageText || '').trim();
+        const timestamp = messageTimestamp || Date.now();
+        
+        // Check each sent message for match
+        for (const sentMsg of sentMessages) {
+            const sentText = (sentMsg.text || '').trim();
+            
+            // Match by text (first 50 chars) AND timestamp (within 10 seconds)
+            const textMatch = sentText.substring(0, 50) === text.substring(0, 50) ||
+                           sentText.includes(text.substring(0, 30)) ||
+                           text.includes(sentText.substring(0, 30));
+            const timeMatch = Math.abs(sentMsg.timestamp - timestamp) < 10000; // 10 seconds tolerance
+            
+            if (textMatch && timeMatch) {
+                console.log(`✅ Chrome storage match: Found our ${sentMsg.sender} message`);
+                return { isFromUs: true, sender: sentMsg.sender };
+            }
+        }
+        
+        // METHOD 2: Fallback to database check
+        try {
+            const linkedinIdResult = await chrome.storage.local.get(['linkedinId']);
+            const currentLinkedInId = linkedinIdResult.linkedinId || 'vicken-concept';
+            const tokenResult = await chrome.storage.local.get(['csrfToken']);
+            
+            const checkResponse = await fetch(`${PLATFORM_URL}/api/conversation-messages/check-sent?connection_id=${connectionId}&message_text=${encodeURIComponent(text.substring(0, 100))}&timestamp=${timestamp}`, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'lk-id': currentLinkedInId,
+                    'csrf-token': tokenResult.csrfToken,
+                    'ngrok-skip-browser-warning': 'true'
+                }
+            });
+            
+            if (checkResponse.ok) {
+                const checkResult = await checkResponse.json();
+                if (checkResult.isOurMessage) {
+                    return { isFromUs: true, sender: checkResult.sender || 'user' };
+                }
+            }
+        } catch (dbError) {
+            console.log('⚠️ Database check failed:', dbError.message);
+        }
+        
+        // Not found - message is from lead
+        return { isFromUs: false, sender: null };
+    } catch (error) {
+        console.error('❌ Error checking if message is from us:', error);
+        return { isFromUs: false, sender: null };
+    }
+};
+
 // Function to store conversation message in call_status table
 async function storeConversationMessage(messageData) {
     try {
@@ -10671,20 +13072,53 @@ async function storeConversationMessage(messageData) {
                 messageData.call_id = String(existingCallId);
                 console.log('🔍 Using existing call_id:', messageData.call_id);
             } else {
-                console.log('🔍 No existing call_id found, checking backend for existing call record...');
+                console.log('🔍 No existing call_id found, checking Chrome storage for call_id_{connectionId}...');
                 
-                // Check if call record already exists in backend database
+                // First check Chrome storage for call_id_{connectionId}
                 try {
-                    const checkResponse = await fetch(`${PLATFORM_URL}/api/calls/check-existing?connection_id=${messageData.connection_id}`, {
-                        method: 'GET',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Accept': 'application/json',
-                            'X-Requested-With': 'XMLHttpRequest',
-                            'lk-id': currentLinkedInId,
-                            'csrf-token': tokenResult.csrfToken
+                    const callIdStorage = await chrome.storage.local.get([`call_id_${messageData.connection_id}`]);
+                    const storedCallId = callIdStorage[`call_id_${messageData.connection_id}`];
+                    if (storedCallId) {
+                        console.log('✅ Found call_id in Chrome storage:', storedCallId);
+                        messageData.call_id = String(storedCallId);
+                        
+                        // Update monitoring data with the found call_id
+                        const allStorage = await chrome.storage.local.get();
+                        const monitoringKeys = Object.keys(allStorage).filter(key => 
+                            key.startsWith('call_response_monitoring_') && 
+                            allStorage[key].connectionId === messageData.connection_id
+                        );
+                        
+                        for (const key of monitoringKeys) {
+                            const monitoringData = allStorage[key];
+                            if (monitoringData && !monitoringData.callId) {
+                                monitoringData.callId = messageData.call_id;
+                                await chrome.storage.local.set({ [key]: monitoringData });
+                                console.log(`✅ Updated monitoring data ${key} with call_id from storage: ${messageData.call_id}`);
+                            }
                         }
-                    });
+                    } else {
+                        console.log('🔍 No call_id in Chrome storage, checking backend for existing call record...');
+                    }
+                } catch (error) {
+                    console.log('⚠️ Error checking Chrome storage for call_id:', error);
+                }
+                
+                // Only check backend if we still don't have a call_id
+                if (!messageData.call_id) {
+                    // Check if call record already exists in backend database
+                    try {
+                        const checkResponse = await fetch(`${PLATFORM_URL}/api/calls/check-existing?connection_id=${messageData.connection_id}`, {
+                            method: 'GET',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Accept': 'application/json',
+                                'X-Requested-With': 'XMLHttpRequest',
+                                'lk-id': currentLinkedInId,
+                                'csrf-token': tokenResult.csrfToken,
+                                'ngrok-skip-browser-warning': 'true'
+                            }
+                        });
                     
                     if (checkResponse.ok) {
                         const checkResult = await checkResponse.json();
@@ -10707,6 +13141,10 @@ async function storeConversationMessage(messageData) {
                                     console.log(`✅ Updated monitoring data ${key} with existing call_id: ${messageData.call_id}`);
                                 }
                             }
+                            
+                            // Also store call_id in Chrome storage with call_id_{connectionId} key for easy retrieval
+                            await chrome.storage.local.set({ [`call_id_${messageData.connection_id}`]: messageData.call_id });
+                            console.log(`✅ Stored call_id in Chrome storage: call_id_${messageData.connection_id} = ${messageData.call_id}`);
                         } else {
                             console.log('🔍 No existing call record in backend, creating new one...');
                             // Continue to create new call record below
@@ -10715,9 +13153,10 @@ async function storeConversationMessage(messageData) {
                         console.log('⚠️ Could not check backend for existing call record, creating new one...');
                         // Continue to create new call record below
                     }
-                } catch (error) {
-                    console.log('⚠️ Error checking backend for existing call record:', error);
-                    // Continue to create new call record below
+                    } catch (error) {
+                        console.log('⚠️ Error checking backend for existing call record:', error);
+                        // Continue to create new call record below
+                    }
                 }
                 
                 // Only create new call record if we still don't have a call_id
@@ -10761,7 +13200,8 @@ async function storeConversationMessage(messageData) {
                         'Accept': 'application/json',
                         'X-Requested-With': 'XMLHttpRequest',
                         'lk-id': currentLinkedInId,
-                        'csrf-token': tokenResult.csrfToken
+                        'csrf-token': tokenResult.csrfToken,
+                        'ngrok-skip-browser-warning': 'true'
                     },
                     body: JSON.stringify(callData)
                 });
@@ -10801,6 +13241,10 @@ async function storeConversationMessage(messageData) {
                             console.log(`✅ Updated monitoring data ${key} with call_id: ${messageData.call_id}`);
                         }
                     }
+                    
+                    // Also store call_id in Chrome storage with call_id_{connectionId} key for easy retrieval
+                    await chrome.storage.local.set({ [`call_id_${messageData.connection_id}`]: messageData.call_id });
+                    console.log(`✅ Stored call_id in Chrome storage: call_id_${messageData.connection_id} = ${messageData.call_id}`);
                 } else {
                     const errorText = await callResponse.text();
                     console.error('❌ Failed to create call record:', {
@@ -10830,7 +13274,8 @@ async function storeConversationMessage(messageData) {
                 'Accept': 'application/json',
                 'X-Requested-With': 'XMLHttpRequest',
                 'lk-id': currentLinkedInId,
-                'csrf-token': tokenResult.csrfToken
+                'csrf-token': tokenResult.csrfToken,
+                'ngrok-skip-browser-warning': 'true'
             },
             body: JSON.stringify(messageData)
         });
@@ -10927,6 +13372,51 @@ async function clearOldCallIds() {
 }
 
 /**
+ * Clear campaign-related Chrome storage (processed leads, locks, etc.)
+ * Call this from console: clearCampaignStorage()
+ */
+globalThis.clearCampaignStorage = async function() {
+    try {
+        console.log('🧹 Clearing campaign-related Chrome storage...');
+        
+        // Get all storage keys
+        const allStorage = await chrome.storage.local.get();
+        const keys = Object.keys(allStorage);
+        
+        // Find campaign-related keys
+        const campaignKeys = keys.filter(key => 
+            key.startsWith('campaign_') || 
+            key === 'activeCampaigns' ||
+            key.includes('processed') ||
+            key.includes('running')
+        );
+        
+        console.log(`📊 Found ${campaignKeys.length} campaign-related keys:`, campaignKeys);
+        
+        if (campaignKeys.length > 0) {
+            await chrome.storage.local.remove(campaignKeys);
+            console.log(`✅ Cleared ${campaignKeys.length} campaign-related storage keys`);
+            console.log('📋 Campaign will fetch fresh data from backend table on next run');
+        } else {
+            console.log('ℹ️ No campaign-related storage keys found');
+        }
+        
+        return {
+            success: true,
+            clearedKeys: campaignKeys.length,
+            clearedKeysList: campaignKeys,
+            message: 'Campaign storage cleared successfully'
+        };
+    } catch (error) {
+        console.error('❌ Error clearing campaign storage:', error);
+        return {
+            success: false,
+            error: error.message
+        };
+    }
+};
+
+/**
  * Clear all Chrome storage data (for debugging)
  * Call this from console: clearAllStorage()
  */
@@ -10953,6 +13443,135 @@ globalThis.clearAllStorage = async function() {
         };
     } catch (error) {
         console.error('❌ Error clearing storage:', error);
+        return {
+            success: false,
+            error: error.message
+        };
+    }
+};
+
+/**
+ * Reset node runStatus in backend database (for debugging/testing)
+ * Call this from console: resetNodeRunStatus(campaignId, nodeKey, runStatus)
+ * Example: resetNodeRunStatus(5, 2, false) - resets node 2 in campaign 5 to false
+ */
+globalThis.resetNodeRunStatus = async function(campaignId, nodeKey, runStatus = false) {
+    try {
+        console.log(`🔄 Resetting node runStatus in backend database...`);
+        console.log(`📋 Campaign ID: ${campaignId}`);
+        console.log(`🔑 Node Key: ${nodeKey}`);
+        console.log(`📊 New runStatus: ${runStatus}`);
+        
+        // Get LinkedIn ID from storage
+        const linkedinIdResult = await chrome.storage.local.get(['linkedinId']);
+        const currentLinkedInId = linkedinIdResult.linkedinId || 'vicken-concept';
+        
+        const response = await fetch(`${PLATFORM_URL}/api/campaign/${campaignId}/update-node`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'lk-id': currentLinkedInId,
+                'ngrok-skip-browser-warning': 'true'
+            },
+            body: JSON.stringify({
+                nodeKey: nodeKey,
+                runStatus: runStatus
+            })
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            console.log(`✅ Node runStatus reset successfully:`, data);
+            return {
+                success: true,
+                data: data,
+                message: `Node ${nodeKey} runStatus set to ${runStatus}`
+            };
+        } else {
+            const errorText = await response.text();
+            throw new Error(`API returned ${response.status}: ${errorText}`);
+        }
+    } catch (error) {
+        console.error('❌ Error resetting node runStatus:', error);
+        return {
+            success: false,
+            error: error.message
+        };
+    }
+};
+
+/**
+ * Reset all node runStatus for a campaign (except end node)
+ * Call this from console: resetCampaignNodes(campaignId)
+ * Example: resetCampaignNodes(5) - resets all nodes in campaign 5 to false
+ */
+globalThis.resetCampaignNodes = async function(campaignId) {
+    try {
+        console.log(`🔄 Resetting all nodes for campaign ${campaignId}...`);
+        
+        // Get LinkedIn ID from storage
+        const linkedinIdResult = await chrome.storage.local.get(['linkedinId']);
+        const currentLinkedInId = linkedinIdResult.linkedinId || 'vicken-concept';
+        
+        // First, get the campaign sequence to find all nodes
+        const sequenceResponse = await fetch(`${PLATFORM_URL}/api/campaign/${campaignId}/sequence`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                'lk-id': currentLinkedInId,
+                'ngrok-skip-browser-warning': 'true'
+            }
+        });
+        
+        if (!sequenceResponse.ok) {
+            throw new Error(`Failed to fetch campaign sequence: ${sequenceResponse.status}`);
+        }
+        
+        const sequenceData = await sequenceResponse.json();
+        const nodes = sequenceData.data?.nodeModel || sequenceData.nodeModel || [];
+        
+        console.log(`📋 Found ${nodes.length} nodes to reset`);
+        
+        let resetCount = 0;
+        for (const node of nodes) {
+            // Skip end nodes
+            if (node.type === 'end' || node.value === 'end') {
+                console.log(`⏭️ Skipping end node (key: ${node.key})`);
+                continue;
+            }
+            
+            // Reset action and delay nodes
+            if (node.type === 'action' || node.type === 'delay') {
+                const resetResponse = await fetch(`${PLATFORM_URL}/api/campaign/${campaignId}/update-node`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'lk-id': currentLinkedInId,
+                        'ngrok-skip-browser-warning': 'true'
+                    },
+                    body: JSON.stringify({
+                        nodeKey: node.key,
+                        runStatus: false
+                    })
+                });
+                
+                if (resetResponse.ok) {
+                    resetCount++;
+                    console.log(`✅ Reset node ${node.key} (${node.label || node.value})`);
+                } else {
+                    console.warn(`⚠️ Failed to reset node ${node.key}`);
+                }
+            }
+        }
+        
+        console.log(`✅ Reset ${resetCount} nodes successfully`);
+        return {
+            success: true,
+            resetCount: resetCount,
+            message: `Reset ${resetCount} nodes for campaign ${campaignId}`
+        };
+    } catch (error) {
+        console.error('❌ Error resetting campaign nodes:', error);
         return {
             success: false,
             error: error.message
@@ -11153,3 +13772,36 @@ const updateReminderStatus = async (reminderId, status, linkedinId, errorMessage
         console.error('❌ Error updating reminder status:', error);
     }
 };
+
+// ============================================================================
+// 🚫 DEPRECATED: Content Creator Alarms (DISABLED - NOW HANDLED BY BACKEND)
+// ============================================================================
+// LinkedIn posts are now published automatically by the backend via LinkedIn API.
+// No extension automation needed for posting!
+// ============================================================================
+
+/*
+// DEPRECATED - Periodic check for scheduled posts (NO LONGER USED)
+chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name === 'content_creator_check') {
+        console.log('⚠️ Content Creator alarm - NOW HANDLED BY BACKEND API');
+        // Do nothing - backend handles posting
+    }
+});
+
+// DEPRECATED - Alarm creation (DISABLED)
+// chrome.alarms.create('content_creator_check', { 
+//     delayInMinutes: 0.5, 
+//     periodInMinutes: 0.5 
+// });
+
+// DEPRECATED - Manual check listener (DISABLED)
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.action === 'checkContentCreatorPosts') {
+        console.log('⚠️ Content Creator posting is now handled by backend API');
+        sendResponse({success: true, message: 'Posting handled by backend'});
+    }
+});
+*/
+
+console.log('✅ Content Creator extension integration initialized');

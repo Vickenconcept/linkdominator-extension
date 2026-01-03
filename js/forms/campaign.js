@@ -41,11 +41,42 @@ var campaignList = `
 </div>
 `
 $('body').append(campaignList)
+
+// Load campaigns when modal is shown
+$('#campaignList').on('shown.bs.modal', function() {
+    console.log('📋 Campaign modal shown, loading campaigns...');
+    loadCampaigns();
+});
+
+function loadCampaigns() {
+    // Show loading state
+    $('#campaign-tbody').html('<tr><td colspan="4" class="text-center"><i class="fas fa-spinner fa-spin"></i> Loading campaigns...</td></tr>');
+    
+    // Load campaigns
+    if (typeof getCampaigns === 'function') {
+        console.log('✅ Calling getCampaigns()');
+        getCampaigns();
+    } else {
+        console.error('❌ getCampaigns function not found!');
+        $('#campaign-tbody').html('<tr><td colspan="4" class="text-center text-danger">Error: getCampaigns function not available. Please refresh the page.</td></tr>');
+    }
+}
+
 $('body').on('click', '#campaign-menu-click', function(){
+    console.log('🔍 Campaign menu clicked');
+    if (typeof window.closeAllModals === 'function') {
+        window.closeAllModals();
+    }
     if ($('#accessCheck').val() == 401) {
         $('.modal-body').html('<h5><center><strong> UNAUTHORISED </strong></center></h5>')
+        return;
     }
-    $('#campaignList').modal({backdrop:'static', keyboard:false, show:true})
+    
+    // Small delay to ensure previous modal closes before opening new one
+    setTimeout(function() {
+    // Open modal (campaigns will load via shown.bs.modal event)
+    $('#campaignList').modal({backdrop:'static', keyboard:false, show:true});
+    }, 300);
 })
 
 $('body').on('change','.runSwitch',function(ev){

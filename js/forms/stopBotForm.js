@@ -34,6 +34,27 @@ var stopBotList = `
 `;
 
 $('body').append(stopBotList);
+
+// Global function to close all open modals
+if (typeof window.closeAllModals === 'undefined') {
+    window.closeAllModals = function() {
+        $('.modal.show').modal('hide');
+        $('.modal.in').modal('hide');
+        // Also handle Bootstrap 4+ style
+        $('.modal').each(function() {
+            if ($(this).hasClass('show')) {
+                $(this).modal('hide');
+            }
+        });
+    };
+}
+
 $('body').on('click','#stop-bot',function(){
+    if (typeof window.closeAllModals === 'function') {
+        window.closeAllModals();
+    }
+    // Small delay to ensure previous modal closes before opening new one
+    setTimeout(function() {
     $('#stopBotList').modal({backdrop:'static', keyboard:false, show:true});
+    }, 300);
 })

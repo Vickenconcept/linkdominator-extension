@@ -403,6 +403,9 @@ var messageTargetUserForm = `
 
 $('body').append(messageTargetUserForm)
 $('body').on('click', '#message-target-menu-click', function(){
+    if (typeof window.closeAllModals === 'function') {
+        window.closeAllModals();
+    }
     console.log('🔍 Opening Message Targeted Users modal...');
     
     // Initialize storage if not exists
@@ -467,11 +470,13 @@ $('body').on('click', '#message-target-menu-click', function(){
     }
 
     // Show modal
+    setTimeout(function() {
     $('#messageTargetUserForm').modal({
         backdrop: 'static', 
         keyboard: false, 
         show: true
     });
+    }, 300);
 });
 $('body').on('click','.mtu-pm-btn',function(){
     let msgField = $('#mtu-personalMessage')

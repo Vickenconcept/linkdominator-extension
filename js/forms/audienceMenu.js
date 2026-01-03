@@ -30,13 +30,33 @@ var audienceMenu = `
 `;
 
 $('body').append(audienceMenu)
+// Global function to close all open modals (if not already defined)
+if (typeof window.closeAllModals === 'undefined') {
+    window.closeAllModals = function() {
+        $('.modal.show').modal('hide');
+        $('.modal.in').modal('hide');
+        // Also handle Bootstrap 4+ style
+        $('.modal').each(function() {
+            if ($(this).hasClass('show')) {
+                $(this).modal('hide');
+            }
+        });
+    };
+}
+
 $('body').on('click', '#audience-creation-menu-click', function(){
+    if (typeof window.closeAllModals === 'function') {
+        window.closeAllModals();
+    }
     if ($('#accessCheck').val() == 401){
         $('.modal-body').html('<h5><center><strong> UNAUTHORISED </strong></center></h5>')
     }
     $('.newAudience-notice').hide()
     $('#displayNewAudienceStatus').empty()
+    // Small delay to ensure previous modal closes before opening new one
+    setTimeout(function() {
     $('#audienceMenu').modal({backdrop:'static', keyboard:false, show:true})
+    }, 300);
 })
 $('body').on('click','.openAudienceForm',function(){
     $('#afs-connSecondCheck').prop('checked', true);
