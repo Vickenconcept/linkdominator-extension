@@ -317,17 +317,18 @@ var audienceCreationForm = `
                                     <div class="col-md-12">
                                         <div class="form-group">
                                             <label class="font-weight-bold c-header">Add users who liked</label>
-                                            <div class="custom-control custom-radio custom-control-inline">
+                                            <!-- <div class="custom-control custom-radio custom-control-inline">
                                                 <input type="radio" class="custom-control-input afs-liked-check"
                                                     id="afs-liked-none" name="user_liked" value="none">
                                                 <label class="custom-control-label" for="afs-liked-none">None</label>
-                                            </div>
+                                            </div> -->
                                             <div class="custom-control custom-radio custom-control-inline">
                                                 <input type="radio" class="custom-control-input afs-liked-check" 
-                                                    id="afs-liked-post" name="user_liked" value="post">
+                                                    id="afs-liked-post" name="user_liked" value="post" checked>
                                                 <label class="custom-control-label" for="afs-liked-post">Post</label>
                                             </div>
-                                            <div class="custom-control custom-radio custom-control-inline">
+                                            <!-- Commented out - Article and Video options not currently used in payload -->
+                                            <!-- <div class="custom-control custom-radio custom-control-inline">
                                                 <input type="radio" class="custom-control-input afs-liked-check" 
                                                     id="afs-liked-article" name="user_liked" value="article">
                                                 <label class="custom-control-label" for="afs-liked-article">Article</label>
@@ -336,15 +337,16 @@ var audienceCreationForm = `
                                                 <input type="radio" class="custom-control-input afs-liked-check" 
                                                     id="afs-liked-video" name="user_liked" value="video">
                                                 <label class="custom-control-label" for="afs-liked-video">Video</label>
-                                            </div>
+                                            </div> -->
                                         </div>
                                         <div class="form-group">
-                                            <input type="number" class="form-control afs-user-like afs-post-validate" id="afs-liked-postid" 
-                                                placeholder="Enter post ID... Ex: 6361143641800568832">
-                                            <input type="number" class="form-control afs-user-like afs-post-validate" id="afs-liked-articleid" 
+                                            <input type="text" class="form-control afs-user-like afs-post-validate" id="afs-liked-postid" 
+                                                placeholder="Enter post URL or ID... Ex: https://www.linkedin.com/feed/update/urn:li:activity:7414954869389848576/ or 7414954869389848576" style="display: block;">
+                                            <!-- Commented out - Article and Video inputs not currently used -->
+                                            <!-- <input type="number" class="form-control afs-user-like afs-post-validate" id="afs-liked-articleid" 
                                                 placeholder="Enter article ID... Ex: 8936076462107920273">
                                             <input type="number" class="form-control afs-user-like afs-post-validate" id="afs-liked-videoid" 
-                                                placeholder="Enter video ID... Ex: 6362398753827098625">
+                                                placeholder="Enter video ID... Ex: 6362398753827098625"> -->
                                         </div>
                                     </div>
                                 </div>
@@ -352,17 +354,19 @@ var audienceCreationForm = `
                                     <div class="col-md-12">
                                         <div class="form-group">
                                             <label class="font-weight-bold c-header">Add users who commented on</label>
-                                            <div class="custom-control custom-radio custom-control-inline">
+                                            <!-- Commented out - None, Article, and Video options not currently used -->
+                                            <!-- <div class="custom-control custom-radio custom-control-inline">
                                                 <input type="radio" class="custom-control-input afs-commented-check" 
                                                     id="afs-commented-none" name="user_commented" value="none">
                                                 <label class="custom-control-label" for="afs-commented-none">None</label>
-                                            </div>
+                                            </div> -->
                                             <div class="custom-control custom-radio custom-control-inline">
                                                 <input type="radio" class="custom-control-input afs-commented-check" 
-                                                    id="afs-commented-post" name="user_commented" value="post">
+                                                    id="afs-commented-post" name="user_commented" value="post" checked>
                                                 <label class="custom-control-label" for="afs-commented-post">Post</label>
                                             </div>
-                                            <div class="custom-control custom-radio custom-control-inline">
+                                            <!-- Commented out - Article and Video options not currently used -->
+                                            <!-- <div class="custom-control custom-radio custom-control-inline">
                                                 <input type="radio" class="custom-control-input afs-commented-check" 
                                                     id="afs-commented-article" name="user_commented" value="article">
                                                 <label class="custom-control-label" for="afs-commented-article">Article</label>
@@ -371,15 +375,16 @@ var audienceCreationForm = `
                                                 <input type="radio" class="custom-control-input afs-commented-check" 
                                                     id="afs-commented-video" name="user_commented" value="video">
                                                 <label class="custom-control-label" for="afs-commented-video">Video</label>
-                                            </div>
+                                            </div> -->
                                         </div>
                                         <div class="form-group">
-                                            <input type="number" class="form-control afs-user-commented afs-post-validate" id="afs-commented-postid" 
-                                                placeholder="Enter post ID... Ex: 6361143641800568832">
-                                            <input type="number" class="form-control afs-user-commented afs-post-validate" id="afs-commented-articleid" 
+                                            <input type="text" class="form-control afs-user-commented afs-post-validate" id="afs-commented-postid" 
+                                                placeholder="Enter post URL or ID... Ex: https://www.linkedin.com/feed/update/urn:li:activity:7414954869389848576/ or 7414954869389848576" style="display: block;">
+                                            <!-- Commented out - Article and Video inputs not currently used -->
+                                            <!-- <input type="number" class="form-control afs-user-commented afs-post-validate" id="afs-commented-articleid" 
                                                 placeholder="Enter article ID... Ex: 8936076462107920273">
                                             <input type="number" class="form-control afs-user-commented afs-post-validate" id="afs-commented-videoid" 
-                                                placeholder="Enter video ID... Ex: 6362398753827098625">
+                                                placeholder="Enter video ID... Ex: 6362398753827098625"> -->
                                         </div>
                                     </div>
                                 </div>
@@ -528,6 +533,15 @@ var audienceCreationForm = `
 
 $('body').append(audienceCreationForm)
 $('body').on('click','.closeAudienceForm',function(){
+    // Reset form to clean slate - clear all inputs and messages
+    $('#audience-name').val('')
+    $('#afs-liked-postid').val('')
+    $('#afs-commented-postid').val('')
+    $('#afc-error-notice').html('')
+    $('.newAudience-notice').hide()
+    $('#afc-displayNewAudienceStatus').empty()
+    $('.newAudienceAction').attr('disabled', false)
+    
     $('#audienceCreationForm').modal('hide')
     // Refresh audience list when returning to menu
     if(typeof getAudienceNameList === 'function') {

@@ -83,6 +83,34 @@ span.float-btn:active{
   padding-top: 10rem;
   padding-bottom: 10rem;
 }
+
+/* Authorization button styles */
+#authorize-button-container {
+  animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+#authorize-linkedin-btn:hover {
+  background: #f0f0f0 !important;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(0,0,0,0.15) !important;
+}
+
+#authorize-linkedin-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important;
+}
+}
 .menus span:hover {
   background-color: rgba(0, 119, 181, 0.08);
   color: #0077b5;

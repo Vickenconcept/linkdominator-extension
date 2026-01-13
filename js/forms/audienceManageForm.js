@@ -325,7 +325,7 @@ $('body').on('click','.get-audience-list', function(){
             method: 'get',
             dataType: 'json',
             headers: {
-                'lk-id': linkedinId,
+                'lk-id': (typeof window.getLinkedInIdForApi === 'function' ? window.getLinkedInIdForApi() : (linkedinId || window.linkedinId || $('#me-publicIdentifier').val())),
                 'Accept': 'application/json',
                 'Content-Type': 'application/json',
                 'ngrok-skip-browser-warning': 'true',

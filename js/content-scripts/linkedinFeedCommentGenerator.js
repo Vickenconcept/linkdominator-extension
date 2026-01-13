@@ -502,7 +502,7 @@
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'lk-id': linkedInId,
+                    'lk-id': (typeof window.getLinkedInIdForApi === 'function' ? window.getLinkedInIdForApi() : linkedInId),
                     'ngrok-skip-browser-warning': 'true'
                 },
                 body: JSON.stringify({

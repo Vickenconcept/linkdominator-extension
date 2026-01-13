@@ -22,7 +22,216 @@ var voyagerSingleSearchUrl=`${voyagerApi}/voyagerSearchDashReusableTypeahead?dec
 var voyagerBlockSearchUrl=`${voyagerApi}/search/dash/clusters?decorationId=com.linkedin.voyager.dash.deco.search.SearchClusterCollection-160&origin=GLOBAL_SEARCH_HEADER&q=all`;
 var voyagerGroupMemberSearchUrl=`${voyagerApi}/groups/groups`;
 var linkedinId='';
-var profileUrn=''
+var profileUrn='';
+
+// Make linkedinId globally available
+window.linkedinId = linkedinId;
+
+/**
+ * Get LinkedIn ID with multiple fallback methods
+ * This ensures the LinkedIn ID is always available for API calls
+ * GLOBAL FUNCTION - Available to all scripts in the extension
+ */
+window.getLinkedInIdForApi = function() {
+    // Method 1: Use global linkedinId variable
+    if (linkedinId) {
+        return linkedinId;
+    }
+    
+    // Method 2: Use window.linkedinId
+    if (window.linkedinId) {
+        return window.linkedinId;
+    }
+    
+    // Method 3: Get from DOM element
+    if (typeof $ !== 'undefined' && $('#me-publicIdentifier').length) {
+        const id = $('#me-publicIdentifier').val();
+        if (id) {
+            linkedinId = id;
+            window.linkedinId = id;
+            return id;
+        }
+    }
+    
+    // Method 4: Try to get from localStorage or sessionStorage
+    try {
+        const storedId = localStorage.getItem('linkedinId') || sessionStorage.getItem('linkedinId');
+        if (storedId) {
+            linkedinId = storedId;
+            window.linkedinId = storedId;
+            return storedId;
+        }
+    } catch (e) {
+        console.warn('Could not access storage:', e);
+    }
+    
+    console.warn('⚠️ LinkedIn ID not found. User may need to refresh the page.');
+    return null;
+};
+
+// Also make it available as a non-window function for backward compatibility
+function getLinkedInIdForApi() {
+    return window.getLinkedInIdForApi();
+}
+
+/**
+ * Sync LinkedIn ID with backend when 401 occurs
+ * This automatically updates the user's linkedin_id in the database
+ */
+async function syncLinkedInIdWithBackend(linkedinPublicId) {
+    try {
+        console.log('🔄 Attempting to sync LinkedIn ID with backend...', linkedinPublicId);
+        
+        if (!linkedinPublicId) {
+            console.error('❌ LinkedIn public ID is required for sync');
+            return false;
+        }
+        
+        const platformUrl = typeof PLATFORM_URL !== 'undefined' ? PLATFORM_URL : 'https://app.linkdominator.com';
+        const syncUrl = `${platformUrl}/api/auth/sync-linkedin-id`;
+        
+        console.log('📡 Calling sync endpoint:', syncUrl);
+        
+        const response = await fetch(syncUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'ngrok-skip-browser-warning': 'true'
+            },
+            body: JSON.stringify({
+                linkedin_public_id: linkedinPublicId
+            })
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            console.log('✅ LinkedIn ID synced successfully:', data);
+            return true;
+        } else {
+            const errorData = await response.json().catch(() => ({}));
+            console.warn('⚠️ LinkedIn ID sync failed:', errorData.message || 'Unknown error');
+            return false;
+        }
+    } catch (error) {
+        console.error('❌ Error syncing LinkedIn ID:', error);
+        return false;
+    }
+}
+
+// Make sync function globally available
+window.syncLinkedInIdWithBackend = syncLinkedInIdWithBackend;
+
+/**
+ * Sync LinkedIn ID with backend when 401 occurs
+ * This automatically updates the user's linkedin_id in the database
+ */
+async function syncLinkedInIdWithBackend(linkedinPublicId) {
+    try {
+        console.log('🔄 Attempting to sync LinkedIn ID with backend...', linkedinPublicId);
+        
+        if (!linkedinPublicId) {
+            console.error('❌ LinkedIn public ID is required for sync');
+            return false;
+        }
+        
+        const platformUrl = typeof PLATFORM_URL !== 'undefined' ? PLATFORM_URL : 'https://app.linkdominator.com';
+        const syncUrl = `${platformUrl}/api/auth/sync-linkedin-id`;
+        
+        console.log('📡 Calling sync endpoint:', syncUrl);
+        
+        const response = await fetch(syncUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'ngrok-skip-browser-warning': 'true'
+            },
+            body: JSON.stringify({
+                linkedin_public_id: linkedinPublicId
+            })
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            console.log('✅ LinkedIn ID synced successfully:', data);
+            return true;
+        } else {
+            const errorData = await response.json().catch(() => ({}));
+            console.warn('⚠️ LinkedIn ID sync failed:', errorData.message || 'Unknown error');
+            return false;
+        }
+    } catch (error) {
+        console.error('❌ Error syncing LinkedIn ID:', error);
+        return false;
+    }
+}
+
+// Make sync function globally available
+window.syncLinkedInIdWithBackend = syncLinkedInIdWithBackend;
+
+/**
+ * Global API request wrapper that automatically adds lk-id header
+ * Use this for all API calls to ensure authentication
+ */
+window.apiRequestWithAuth = async function(url, options = {}) {
+    const currentLinkedInId = window.getLinkedInIdForApi();
+    
+    if (!currentLinkedInId) {
+        console.error('❌ LinkedIn ID not available for API call');
+        throw new Error('LinkedIn ID not found. Please refresh the page to re-authenticate.');
+    }
+    
+    // Merge headers
+    const headers = {
+        'Content-Type': 'application/json',
+        'lk-id': currentLinkedInId,
+        'ngrok-skip-browser-warning': 'true',
+        ...options.headers
+    };
+    
+    // Make the request
+    const response = await fetch(url, {
+        ...options,
+        headers: headers
+    });
+    
+    // Handle 401 errors
+    if (response.status === 401) {
+        const errorData = await response.json().catch(() => ({}));
+        const error = new Error(errorData.message || 'User not found or unauthorized');
+        error.errorCode = 'UNAUTHORIZED';
+        error.errorType = 'unauthorized';
+        error.helpMessage = 'Your LinkedIn account may not be connected to this platform. Please connect your LinkedIn account in the dashboard.';
+        throw error;
+    }
+    
+    return response;
+};
+
+/**
+ * Global jQuery AJAX wrapper that automatically adds lk-id header
+ * Use this for all jQuery AJAX calls to ensure authentication
+ */
+window.ajaxWithAuth = function(options) {
+    const currentLinkedInId = window.getLinkedInIdForApi();
+    
+    if (!currentLinkedInId) {
+        console.error('❌ LinkedIn ID not available for API call');
+        if (options.error) {
+            options.error({ message: 'LinkedIn ID not found. Please refresh the page.' }, 'error', '');
+        }
+        return;
+    }
+    
+    // Add lk-id header in beforeSend if it exists, otherwise create it
+    const originalBeforeSend = options.beforeSend || function() {};
+    options.beforeSend = function(request) {
+        request.setRequestHeader('lk-id', currentLinkedInId);
+        request.setRequestHeader('ngrok-skip-browser-warning', 'true');
+        originalBeforeSend.call(this, request);
+    };
+    
+    return $.ajax(options);
+};
 
 
 var jsession = getCookie('JSESSIONID');
@@ -86,8 +295,14 @@ const getUserProfile = async () => {
           <input type="hidden" value="${publicIdentifier}" id="me-publicIdentifier">
         `;
         $('#profileSpot').append(userData);
-        linkedinId = $('#me-publicIdentifier').val()
-        profileUrn = rootPath.entityUrn.replace('urn:li:fs_miniProfile:','')
+        linkedinId = $('#me-publicIdentifier').val();
+        // Make linkedinId globally available for all scripts
+        window.linkedinId = linkedinId;
+        profileUrn = rootPath.entityUrn.replace('urn:li:fs_miniProfile:','');
+        
+        console.log('✅ LinkedIn ID set:', linkedinId);
+        console.log('✅ Window LinkedIn ID set:', window.linkedinId);
+        
         connectionStat();
         userPermissions();
     
@@ -260,11 +475,30 @@ const sendMiniStats = async (totalConnection, numTotalSentInvitations, profileVi
 
 const userPermissions = async () => {
   try {
+    // Ensure linkedinId is available before making API call
+    let currentLinkedInId = getLinkedInIdForApi();
+    
+    if (!currentLinkedInId) {
+      console.warn('⚠️ LinkedIn ID not available yet. Waiting for authentication...');
+      // Wait a bit and try again
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      currentLinkedInId = getLinkedInIdForApi();
+      
+      if (!currentLinkedInId) {
+        console.error('❌ LinkedIn ID still not available after waiting. User may need to refresh the page.');
+        console.error('💡 Please ensure you are logged into LinkedIn and refresh the page.');
+        $('body').append(`<input type="hidden" id="accessCheck" value="401">`);
+        return;
+      }
+    }
+    
+    console.log('🔑 Checking permissions with LinkedIn ID:', currentLinkedInId);
+    
     const response = await fetch(`${filterApi}/accessCheck`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
-        'lk-id': linkedinId
+        'lk-id': currentLinkedInId
       }
     });
 
@@ -275,8 +509,66 @@ const userPermissions = async () => {
     const data = await response.json();
     
     if (data.status == 401) {
+      console.error('❌ Access denied (401). Attempting to automatically sync LinkedIn ID...');
+      
+      // Try to automatically sync LinkedIn ID with backend
+      const syncSuccess = await syncLinkedInIdWithBackend(currentLinkedInId);
+      
+      if (syncSuccess) {
+        // Wait a moment for database update to propagate
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        
+        // Re-check authorization after sync
+        console.log('🔄 Re-checking authorization after sync...');
+        const retryResponse = await fetch(`${filterApi}/accessCheck`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+            'lk-id': currentLinkedInId
+          }
+        });
+        
+        if (retryResponse.ok) {
+          const retryData = await retryResponse.json();
+          if (retryData.status !== 401) {
+            console.log('✅✅✅ Authorization successful after automatic sync!');
+            // Remove the 401 flag
+            $('#accessCheck').remove();
+            // Hide authorization button if it was shown
+            if ($('#authorize-button-container').length) {
+              $('#authorize-button-container').hide();
+              $('#menus span').css('opacity', '1').css('pointer-events', 'auto');
+            }
+            // Continue with normal initialization
+            onMounted();
+            getAutoRespondMessages();
+            getAIContents();
+            getSNLeadList();
+            getCampaigns();
+            return; // Success, exit early
+          }
+        }
+      }
+      
+      // If still 401 after sync attempt, show authorization button
+      console.error('❌ Still unauthorized after sync attempt. User may need to connect account in dashboard.');
       $('body').append(`<input type="hidden" id="accessCheck" value="${data.status}">`);
+      
+      // Show authorization button in sidebar
+      setTimeout(() => {
+        if ($('#authorize-button-container').length) {
+          $('#authorize-button-container').show();
+          // Disable menu items
+          $('#menus span').css('opacity', '0.5').css('pointer-events', 'none');
+        }
+      }, 500);
     } else {
+      // Hide authorization button if authorized
+      if ($('#authorize-button-container').length) {
+        $('#authorize-button-container').hide();
+        // Enable menu items
+        $('#menus span').css('opacity', '1').css('pointer-events', 'auto');
+      }
       onMounted();
       getAutoRespondMessages();
       getAIContents();
@@ -285,6 +577,10 @@ const userPermissions = async () => {
     }
   } catch (error) {
     console.error('❌ Error in userPermissions:', error);
+    // Set accessCheck to 401 if it's an unauthorized error
+    if (error.message.includes('401') || error.message.includes('Unauthorized')) {
+      $('body').append(`<input type="hidden" id="accessCheck" value="401">`);
+    }
     // Don't throw the error to prevent unhandled promise rejection
   }
 }

@@ -15,7 +15,7 @@ const apiRequest = async (url, options = {}) => {
         headers: {
             'Content-Type': 'application/json',
             'Accept': 'application/json',
-            'lk-id': linkedinId,
+            'lk-id': (typeof window.getLinkedInIdForApi === 'function' ? window.getLinkedInIdForApi() : (linkedinId || window.linkedinId || $('#me-publicIdentifier').val())),
             // Add headers to help bypass ngrok warning page
             'ngrok-skip-browser-warning': 'true',
             'X-Requested-With': 'XMLHttpRequest'
@@ -340,7 +340,7 @@ const createLeadGenRunning = campaignId => {
     fetch(`${PLATFORM_URL}/api/campaign/${campaignId}/leadgen/store`, {
         method: 'post',
         headers: {
-            'lk-id': linkedinId,
+            'lk-id': (typeof window.getLinkedInIdForApi === 'function' ? window.getLinkedInIdForApi() : (linkedinId || window.linkedinId || $('#me-publicIdentifier').val())),
         },
     })
     .then(res => res.json())

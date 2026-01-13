@@ -433,7 +433,12 @@ const getAIContents = () => {
     $.ajax({
         method: 'get',
         beforeSend: function(req) {
-            req.setRequestHeader('lk-id', linkedinId);
+            const currentLinkedInId = (typeof window.getLinkedInIdForApi === 'function' ? window.getLinkedInIdForApi() : (linkedinId || window.linkedinId || $('#me-publicIdentifier').val()));
+            if (!currentLinkedInId) {
+                console.error('❌ LinkedIn ID not available for API call');
+                return;
+            }
+            req.setRequestHeader('lk-id', currentLinkedInId);
             req.setRequestHeader('ngrok-skip-browser-warning', 'true');
         },
         url: url,

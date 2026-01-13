@@ -3,7 +3,16 @@ let allowedImageTypes = ['png','jpg','jpeg']
 
 const helper = {
     toJson(str) {
-        if(str) return JSON.parse(str);
+        if(str) {
+            try {
+                return JSON.parse(str);
+            } catch(e) {
+                console.warn('Failed to parse JSON:', e);
+                return { status: false, image: [], file: [] };
+            }
+        }
+        // Return default object if str is falsy
+        return { status: false, image: [], file: [] };
     },
     truncateString(str, len) {
         if (str) {
@@ -292,7 +301,7 @@ window.fetchPhantomSearchResults = async (options = {}) => {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
-            'lk-id': linkedinIdValue,
+            'lk-id': (typeof window.getLinkedInIdForApi === 'function' ? window.getLinkedInIdForApi() : linkedinIdValue),
             'ngrok-skip-browser-warning': 'true' // Bypass ngrok warning page
         },
         body: JSON.stringify({
@@ -484,7 +493,7 @@ window.fetchAudiencesFromAPI = async () => {
                 headers: {
                     'Content-Type': 'application/json',
                     'Accept': 'application/json',
-                    'lk-id': publicId
+                    'lk-id': (typeof window.getLinkedInIdForApi === 'function' ? window.getLinkedInIdForApi() : publicId)
                 },
                 success: function(data) {
                     console.log('✅ jQuery AJAX success:', data);

@@ -62,7 +62,16 @@ $('body').on('click','.openAudienceForm',function(){
     $('#afs-connSecondCheck').prop('checked', true);
     $('#audienceMenu').modal('hide')
     $('#manageAudienceList').modal('hide')
+    
+    // Reset form to clean slate - clear all inputs and messages
     $('#audience-name').val('')
+    $('#afs-liked-postid').val('')
+    $('#afs-commented-postid').val('')
+    $('#afc-error-notice').html('')
+    $('.newAudience-notice').hide()
+    $('#afc-displayNewAudienceStatus').empty()
+    $('.newAudienceAction').attr('disabled', false)
+    
     $('#audienceCreationForm').modal({backdrop:'static', keyboard:false, show:true})
 })
 

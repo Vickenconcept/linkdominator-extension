@@ -20,12 +20,26 @@ const getAutoRespondMessages = () => {
     $.ajax({
         method: 'get',
         beforeSend: function(request) {
-            request.setRequestHeader('lk-id', linkedinId)
+            const currentLinkedInId = (typeof window.getLinkedInIdForApi === 'function' ? window.getLinkedInIdForApi() : (linkedinId || window.linkedinId || $('#me-publicIdentifier').val()));
+            if (!currentLinkedInId) {
+                console.error('❌ LinkedIn ID not available for API call');
+                return;
+            }
+            request.setRequestHeader('lk-id', currentLinkedInId)
         },
         url: `${filterApi}/autoresponses`,
         success: function(res) {
-            autoRespondMessages = res
-            setAutoRespondMessagesList()
+            // Ensure res has the expected structure
+            if (res && typeof res === 'object') {
+                autoRespondMessages = {
+                    normal: res.normal || [],
+                    endorsement: res.endorsement || {},
+                    followup: res.followup || {}
+                };
+                setAutoRespondMessagesList();
+            } else {
+                console.error('❌ Invalid response format from autoresponses API:', res);
+            }
         },
         error: function(err, textStatus) {
             if(err.hasOwnProperty('responseJSON'))
@@ -42,7 +56,12 @@ const storeAutoRespondMessages = () => {
         method: 'post',
         beforeSend: function(request) {
             request.setRequestHeader('Content-Type', 'application/json')
-            request.setRequestHeader('lk-id', linkedinId)
+            const currentLinkedInId = (typeof window.getLinkedInIdForApi === 'function' ? window.getLinkedInIdForApi() : (linkedinId || window.linkedinId || $('#me-publicIdentifier').val()));
+            if (!currentLinkedInId) {
+                console.error('❌ LinkedIn ID not available for API call');
+                return;
+            }
+            request.setRequestHeader('lk-id', currentLinkedInId)
         },
         url: `${filterApi}/autoresponse/store`,
         data: JSON.stringify({
@@ -77,7 +96,12 @@ const showAutoRespondMessages = (id) => {
     $.ajax({
         method: 'get',
         beforeSend: function(request) {
-            request.setRequestHeader('lk-id', linkedinId)
+            const currentLinkedInId = (typeof window.getLinkedInIdForApi === 'function' ? window.getLinkedInIdForApi() : (linkedinId || window.linkedinId || $('#me-publicIdentifier').val()));
+            if (!currentLinkedInId) {
+                console.error('❌ LinkedIn ID not available for API call');
+                return;
+            }
+            request.setRequestHeader('lk-id', currentLinkedInId)
         },
         url: `${filterApi}/autoresponse/show/${id}`,
         success: function(res) {
@@ -98,7 +122,12 @@ const updateAutoRespondMessages = (id) => {
         method: 'put',
         beforeSend: function(request) {
             request.setRequestHeader('Content-Type', 'application/json')
-            request.setRequestHeader('lk-id', linkedinId)
+            const currentLinkedInId = (typeof window.getLinkedInIdForApi === 'function' ? window.getLinkedInIdForApi() : (linkedinId || window.linkedinId || $('#me-publicIdentifier').val()));
+            if (!currentLinkedInId) {
+                console.error('❌ LinkedIn ID not available for API call');
+                return;
+            }
+            request.setRequestHeader('lk-id', currentLinkedInId)
         },
         url: `${filterApi}/autoresponse/update/${id}`,
         data: JSON.stringify({
@@ -133,7 +162,12 @@ const deleteAutoRespondMessages = (id) => {
     $.ajax({
         method: 'delete',
         beforeSend: function(request) {
-            request.setRequestHeader('lk-id', linkedinId)
+            const currentLinkedInId = (typeof window.getLinkedInIdForApi === 'function' ? window.getLinkedInIdForApi() : (linkedinId || window.linkedinId || $('#me-publicIdentifier').val()));
+            if (!currentLinkedInId) {
+                console.error('❌ LinkedIn ID not available for API call');
+                return;
+            }
+            request.setRequestHeader('lk-id', currentLinkedInId)
         },
         url: `${filterApi}/autoresponse/delete/${id}`,
         success: function(res, textStatus, xhr) {

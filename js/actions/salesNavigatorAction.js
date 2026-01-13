@@ -300,7 +300,7 @@ const saveSNLeads = async () => {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'lk-id': linkedinId
+                'lk-id': (typeof window.getLinkedInIdForApi === 'function' ? window.getLinkedInIdForApi() : (linkedinId || window.linkedinId || $('#me-publicIdentifier').val()))
             },
             body: JSON.stringify({
                 leads: leads[i],

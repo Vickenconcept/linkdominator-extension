@@ -40,6 +40,21 @@ var mainMenu = `
     <div class="menu-divider" style="margin-bottom:8px;"></div>
     <a href="${LINKEDIN_URL}/in/me" id="profileSpot" style="padding: 0px 8px 0px 32px;"></a>
     <div class="menu-divider-menu"></div>
+    <!-- Authorization Button - Shows when user is not authorized -->
+    <div id="authorize-button-container" style="display: none; padding: 12px 16px; margin: 8px 16px; background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%); border-radius: 8px; box-shadow: 0 2px 8px rgba(255, 107, 107, 0.3);">
+        <div style="color: white; font-size: 12px; font-weight: 600; margin-bottom: 8px; text-align: center;">
+            <i class="fas fa-exclamation-triangle" style="margin-right: 6px;"></i>
+            Authorization Required
+        </div>
+        <button id="authorize-linkedin-btn" style="width: 100%; padding: 10px; background: white; color: #0077b5; border: none; border-radius: 6px; font-weight: 600; font-size: 13px; cursor: pointer; transition: all 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+            <i class="fas fa-sync-alt" style="margin-right: 6px;"></i>
+            Sync & Authorize
+        </button>
+        <div style="color: white; font-size: 11px; margin-top: 8px; text-align: center; opacity: 0.9;">
+            Click to sync your LinkedIn account with the platform
+        </div>
+    </div>
+    <div class="menu-divider-menu"></div>
     <div id="menus" class="menus">
         <span id="stop-bot">
             <i class="fas fa-toggle-on fa-lg sm-icon"></i>&nbsp;Stop Bot
@@ -132,6 +147,87 @@ var mainMenu = `
 `;
 
 $('body').append(mainMenu)
+
+// Authorization button click handler - triggers auto-sync
+$(document).on('click', '#authorize-linkedin-btn', async function(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    console.log('🔐 Authorization button clicked - triggering auto-sync...');
+    
+    const $btn = $(this);
+    const originalHtml = $btn.html();
+    $btn.html('<i class="fas fa-spinner fa-spin" style="margin-right: 6px;"></i>Syncing...');
+    $btn.prop('disabled', true);
+    
+    // Get current LinkedIn ID
+    const currentLinkedInId = (typeof window.getLinkedInIdForApi === 'function' ? window.getLinkedInIdForApi() : (typeof linkedinId !== 'undefined' ? linkedinId : (window.linkedinId || $('#me-publicIdentifier').val())));
+    
+    if (!currentLinkedInId) {
+        alert('LinkedIn ID not found. Please refresh the page.');
+        $btn.html(originalHtml);
+        $btn.prop('disabled', false);
+        return;
+    }
+    
+    // Try to sync LinkedIn ID
+    if (typeof window.syncLinkedInIdWithBackend === 'function') {
+        const syncSuccess = await window.syncLinkedInIdWithBackend(currentLinkedInId);
+        
+        if (syncSuccess) {
+            // Wait for sync to complete
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            
+            // Re-check authorization
+            try {
+                const filterApi = typeof PLATFORM_URL !== 'undefined' ? `${PLATFORM_URL}/api` : 'https://app.linkdominator.com/api';
+                const retryResponse = await fetch(`${filterApi}/accessCheck`, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'lk-id': currentLinkedInId
+                    }
+                });
+                
+                if (retryResponse.ok) {
+                    const retryData = await retryResponse.json();
+                    if (retryData.status !== 401) {
+                        console.log('✅✅✅ Authorization successful after manual sync!');
+                        // Hide button and enable menus
+                        $('#authorize-button-container').hide();
+                        $('#menus span').css('opacity', '1').css('pointer-events', 'auto');
+                        $('#accessCheck').remove();
+                        
+                        // Reload extension features
+                        if (typeof onMounted === 'function') onMounted();
+                        if (typeof getAutoRespondMessages === 'function') getAutoRespondMessages();
+                        if (typeof getAIContents === 'function') getAIContents();
+                        if (typeof getSNLeadList === 'function') getSNLeadList();
+                        if (typeof getCampaigns === 'function') getCampaigns();
+                        
+                        $btn.html('<i class="fas fa-check" style="margin-right: 6px;"></i>Synced!');
+                        setTimeout(() => {
+                            $('#authorize-button-container').hide();
+                        }, 2000);
+                        return;
+                    }
+                }
+            } catch (error) {
+                console.error('Error re-checking authorization:', error);
+            }
+        }
+        
+        $btn.html('<i class="fas fa-exclamation-triangle" style="margin-right: 6px;"></i>Sync Failed');
+        setTimeout(() => {
+            $btn.html(originalHtml);
+            $btn.prop('disabled', false);
+        }, 3000);
+    } else {
+        alert('Sync function not available. Please refresh the page.');
+        $btn.html(originalHtml);
+        $btn.prop('disabled', false);
+    }
+});
 
 // Function to check campaign status
 const checkCampaignStatus = () => {
@@ -431,8 +527,36 @@ const getAudienceList = async (fieldId) => {
 }
 
 const implementPermission = (actionId) => {
+    // Show/hide authorization button based on access check
+    const accessCheckValue = $('#accessCheck').val();
+    if (accessCheckValue == 401) {
+        // Show authorization button
+        $('#authorize-button-container').show();
+        // Disable menu items
+        $('#menus span').css('opacity', '0.5').css('pointer-events', 'none');
+    } else {
+        // Hide authorization button
+        $('#authorize-button-container').hide();
+        // Enable menu items
+        $('#menus span').css('opacity', '1').css('pointer-events', 'auto');
+    }
+    
     if ($('#accessCheck').val() == 401){
-        $('.modal-body').html('<h5><center><strong> UNAUTHORISED </strong></center></h5>')
-        $(`.${actionId}`).hide()
+        $('.modal-body').html(`
+            <div style="text-align: center; padding: 20px;">
+                <h5><strong>UNAUTHORIZED</strong></h5>
+                <p style="margin: 15px 0; color: #666;">Please connect your LinkedIn account to use this feature.</p>
+                <button id="authorize-from-modal" style="padding: 10px 20px; background: #0077b5; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; margin-top: 10px;">
+                    <i class="fab fa-linkedin" style="margin-right: 6px;"></i>Connect LinkedIn Account
+                </button>
+            </div>
+        `);
+        $(`.${actionId}`).hide();
+        
+        // Add click handler for modal button
+        $(document).off('click', '#authorize-from-modal').on('click', '#authorize-from-modal', function() {
+            const platformUrl = typeof PLATFORM_URL !== 'undefined' ? PLATFORM_URL : 'https://app.linkdominator.com';
+            window.open(`${platformUrl}/social-account`, '_blank');
+        });
     }
 }

@@ -124,6 +124,7 @@ const setAutoRespondMessagesList = () => {
     $('#followup-tbody').empty()
 
     $.each(normal, function(i,item) {
+        const itemAttachment = helper.toJson(item.attachement) || { status: false };
         displayNormal = `
         <tr class="normal-response-${item.id}">
             <td>
@@ -134,9 +135,9 @@ const setAutoRespondMessagesList = () => {
                 data-id="${item.id}">
                 <label for="ar-normal-check-${item.id}" style="margin-bottom: 5rem;"></label>
             </td>
-            <td title="${item.message_keywords}">${helper.truncateString(item.message_keywords, 20)}</td>
-            <td title="${item.message_body}">${helper.truncateString(item.message_body, 20)}</td>
-            <td>${helper.toJson(item.attachement).status}</td>
+            <td title="${item.message_keywords || ''}">${helper.truncateString(item.message_keywords || '', 20)}</td>
+            <td title="${item.message_body || ''}">${helper.truncateString(item.message_body || '', 20)}</td>
+            <td>${itemAttachment.status}</td>
             <td>
                 <i class="far fa-edit cursorr edit-response" 
                 data-id="${item.id}" 
@@ -150,7 +151,8 @@ const setAutoRespondMessagesList = () => {
     })
 
     // Endorsement
-    if(Object.keys(endorsement).length) {
+    if(Object.keys(endorsement).length && endorsement.id) {
+        const endorsementAttachment = helper.toJson(endorsement.attachement) || { status: false };
         displayEndorse = `
         <tr>
             <td>
@@ -161,10 +163,10 @@ const setAutoRespondMessagesList = () => {
                 data-id="${endorsement.id}">
                 <label for="ar-endorsement-check" style="margin-bottom: 5rem;"></label>
             </td>
-            <td title="${endorsement.message_body}">${helper.truncateString(endorsement.message_keywords, 20)}</td>
-            <td>${endorsement.total_endorse_skills}</td>
-            <td title="${endorsement.message_body}">${helper.truncateString(endorsement.message_body, 20)}</td>
-            <td>${helper.toJson(endorsement.attachement).status}</td>
+            <td title="${endorsement.message_body || ''}">${helper.truncateString(endorsement.message_keywords || '', 20)}</td>
+            <td>${endorsement.total_endorse_skills || ''}</td>
+            <td title="${endorsement.message_body || ''}">${helper.truncateString(endorsement.message_body || '', 20)}</td>
+            <td>${endorsementAttachment.status}</td>
             <td>
                 <i class="far fa-edit cursorr edit-response" data-id="${endorsement.id}" data-type="endorsement"></i>
             </td>
@@ -174,7 +176,8 @@ const setAutoRespondMessagesList = () => {
     }
 
     // Followup
-    if(Object.keys(followup).length) {
+    if(Object.keys(followup).length && followup.id) {
+        const followupAttachment = helper.toJson(followup.attachement) || { status: false };
         displayFollowup = `
         <tr>
             <td>
@@ -186,8 +189,8 @@ const setAutoRespondMessagesList = () => {
                 <label for="ar-followup-check" 
                 style="margin-bottom:5rem;color:#0A66C2;"></label>
             </td>
-            <td title="${followup.message_body}">${helper.truncateString(followup.message_body, 65)}</td>
-            <td>${helper.toJson(followup.attachement).status}</td>
+            <td title="${followup.message_body || ''}">${helper.truncateString(followup.message_body || '', 65)}</td>
+            <td>${followupAttachment.status}</td>
             <td>
                 <i class="far fa-edit cursorr edit-response" data-id="${followup.id}" data-type="followup"></i>
             </td>

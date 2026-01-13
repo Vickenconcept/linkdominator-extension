@@ -478,7 +478,12 @@ const mtuGetAudienceData = async (mtuMessage, mtuDelay, audience) => {
             url: `${filterApi}/audience/list?audienceId=${audience}&totalCount=${$('#mtu-totalMessageConnect').val()}`,
             beforeSend: function(request) {
                 if (linkedinId) {
-                    request.setRequestHeader('lk-id', linkedinId);
+                    const currentLinkedInId = (typeof window.getLinkedInIdForApi === 'function' ? window.getLinkedInIdForApi() : (linkedinId || window.linkedinId || $('#me-publicIdentifier').val()));
+                    if (!currentLinkedInId) {
+                        console.error('❌ LinkedIn ID not available for API call');
+                        return;
+                    }
+                    request.setRequestHeader('lk-id', currentLinkedInId);
                 }
             }
         });

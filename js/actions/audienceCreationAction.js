@@ -74,7 +74,10 @@ const handleAudienceCreationError = (error, context) => {
     
     let userMessage = 'An error occurred while creating the audience.';
     
-    if (error.message.includes('timeout') || error.message.includes('AbortError')) {
+    // Check for configuration errors
+    if (error.message && (error.message.includes('phantom ID not configured') || error.message.includes('PhantomBuster configuration missing'))) {
+        userMessage = 'PhantomBuster configuration missing. Please contact support to configure the required phantom IDs.';
+    } else if (error.message && error.message.includes('timeout') || error.message.includes('AbortError')) {
         userMessage = 'Request timed out. LinkedIn may be slow, please try again.';
     } else if (error.message.includes('rate limit') || error.message.includes('429')) {
         userMessage = 'LinkedIn rate limit reached. Please wait a moment and try again.';
@@ -239,6 +242,33 @@ const fsGetConnections = async () => {
             
             console.log(`Fetching connections from position: ${getConnectParams.startPosition}`);
             
+            // Ensure linkedinId is available before making API call
+            // Use the helper function from appConfig.js if available, otherwise use fallback
+            let currentLinkedInId = null;
+            if (typeof getLinkedInIdForApi === 'function') {
+                currentLinkedInId = getLinkedInIdForApi();
+            } else {
+                currentLinkedInId = linkedinId || window.linkedinId || $('#me-publicIdentifier').val();
+            }
+            
+            if (!currentLinkedInId) {
+                console.error('❌ LinkedIn ID not available. Waiting for authentication...');
+                // Try to get from storage or wait a bit
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                if (typeof getLinkedInIdForApi === 'function') {
+                    currentLinkedInId = getLinkedInIdForApi();
+                } else {
+                    currentLinkedInId = linkedinId || window.linkedinId || $('#me-publicIdentifier').val();
+                }
+                
+                if (!currentLinkedInId) {
+                    throw new Error('LinkedIn ID not found. Please refresh the page to re-authenticate. Make sure your LinkedIn account is connected in the dashboard.');
+                }
+            }
+            
+            console.log('🔑 Using LinkedIn ID for API call:', currentLinkedInId);
+            
             let res;
             if (getConnectParams.usePhantomSearch) {
                 console.log('Using PhantomBuster Search Export for audience search', {
@@ -250,7 +280,7 @@ const fsGetConnections = async () => {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'lk-id': linkedinId,
+                        'lk-id': currentLinkedInId,
                         'ngrok-skip-browser-warning': 'true' // Bypass ngrok warning page
                     },
                     body: JSON.stringify({
@@ -271,6 +301,63 @@ const fsGetConnections = async () => {
                     }
                     
                     // Check for specific error types
+                    // Handle 401 Unauthorized - try to auto-sync LinkedIn ID
+                    if (response.status === 401) {
+                        console.log('🔄 401 Unauthorized detected. Attempting to auto-sync LinkedIn ID...');
+                        
+                        // Try to sync LinkedIn ID automatically
+                        if (typeof window.syncLinkedInIdWithBackend === 'function') {
+                            const syncSuccess = await window.syncLinkedInIdWithBackend(currentLinkedInId);
+                            
+                            if (syncSuccess) {
+                                // Wait for sync to complete
+                                await new Promise(resolve => setTimeout(resolve, 1500));
+                                
+                                // Retry the original request
+                                console.log('🔄 Retrying request after sync...');
+                                const retryResponse = await fetch(`${PLATFORM_URL}/api/audience/search-export`, {
+                                    method: 'POST',
+                                    headers: {
+                                        'Content-Type': 'application/json',
+                                        'lk-id': currentLinkedInId,
+                                        'ngrok-skip-browser-warning': 'true'
+                                    },
+                                    body: JSON.stringify({
+                                        search_url: getConnectParams.searchUrl || null,
+                                        keywords: getConnectParams.keywords,
+                                        connection_degrees: getConnectParams.connection_degrees,
+                                        limit: parseInt($('#afs-total').val(), 10) || undefined
+                                    })
+                                });
+                                
+                                if (retryResponse.ok) {
+                                    console.log('✅ Request successful after auto-sync!');
+                                    res = await retryResponse.json();
+                                    // Continue with normal flow
+                                } else {
+                                    // Still failed after sync
+                                    const retryErrorData = await retryResponse.json().catch(() => ({}));
+                                    const error = new Error(retryErrorData.message || 'User not found or unauthorized after sync. Please ensure your LinkedIn account is connected in the dashboard.');
+                                    error.errorCode = 'UNAUTHORIZED';
+                                    error.errorType = 'unauthorized';
+                                    throw error;
+                                }
+                            } else {
+                                // Sync failed
+                                const error = new Error(errorData.message || 'User not found or unauthorized. Auto-sync failed. Please ensure your LinkedIn account is connected in the dashboard.');
+                                error.errorCode = 'UNAUTHORIZED';
+                                error.errorType = 'unauthorized';
+                                throw error;
+                            }
+                        } else {
+                            // Sync function not available
+                            const error = new Error(errorData.message || 'User not found or unauthorized. Please ensure your LinkedIn account is connected in the dashboard.');
+                            error.errorCode = 'UNAUTHORIZED';
+                            error.errorType = 'unauthorized';
+                            throw error;
+                        }
+                    }
+                    
                     if (errorData.error_code === 'LINKEDIN_SESSION_EXPIRED' || errorData.error_type === 'session_expired') {
                         const error = new Error(errorData.message || 'LinkedIn session cookie expired');
                         error.errorCode = 'LINKEDIN_SESSION_EXPIRED';
@@ -536,10 +623,29 @@ const fsGetConnections = async () => {
         } catch (error) {
             console.error('Error in getConnectionsLooper:', error);
             
+            // Check if this is an unauthorized error - user not found or LinkedIn ID mismatch
+            const isUnauthorized = error.errorCode === 'UNAUTHORIZED' || error.errorType === 'unauthorized' ||
+                                   error.message.includes('User not found') || error.message.includes('unauthorized') ||
+                                   error.message.includes('401');
+            
             // Check if this is a network timeout or session expired error - don't retry these
             const isNetworkTimeout = error.errorCode === 'NETWORK_TIMEOUT' || error.errorType === 'network_timeout' || 
                                      error.message.includes('Network timeout') || error.message.includes('NETWORK_TIMEOUT');
             const isSessionExpired = error.errorCode === 'LINKEDIN_SESSION_EXPIRED' || error.errorType === 'session_expired';
+            
+            // Handle unauthorized errors - don't retry, show helpful message
+            if (isUnauthorized) {
+                console.error('❌ Unauthorized: User not found or LinkedIn ID mismatch');
+                console.error('💡 Please ensure your LinkedIn account is connected in the dashboard at:', PLATFORM_URL);
+                $('#afc-displayNewAudienceStatus').html(
+                    `<div class="alert alert-danger">
+                        <strong>Authentication Error:</strong> Your LinkedIn account may not be connected to this platform.<br>
+                        Please go to <a href="${PLATFORM_URL}" target="_blank">${PLATFORM_URL}</a> and connect your LinkedIn account, then refresh this page.
+                    </div>`
+                );
+                window.searchActive = false;
+                return;
+            }
             
             if ((isNetworkTimeout || isSessionExpired) || retryCount >= maxRetries) {
                 // Don't retry for network timeout or session expired errors, or if max retries reached
@@ -585,63 +691,74 @@ $('body').on('click','.nav-link',function(){
         }
     }, 1000)
 })
-$('#afs-liked-none').prop('checked', true)
-if($('#afs-liked-none').prop('checked') == true ){
-    $('.afs-user-like').val('').hide()
-}
-$('#afs-commented-none').prop('checked', true)
-if($('#afs-commented-none').prop('checked') == true ){
-    $('.afs-user-commented').val('').hide()
-}
+// Set Post as default and keep input visible
+$('#afs-liked-post').prop('checked', true)
+$('#afs-liked-postid').show() // Always show the post input field
+
+// Commented out - None option not needed, Post is always visible
+// $('#afs-liked-none').prop('checked', true)
+// if($('#afs-liked-none').prop('checked') == true ){
+//     $('.afs-user-like').val('').hide()
+// }
+// Post is now default and always visible for comments - no need to check for "None"
+// Set Post as checked by default
+$('#afs-commented-post').prop('checked', true);
+$('#afs-commented-postid').show(); // Always visible
 $('.afs-liked-check').change(function(){
-    if($('#afs-liked-none').prop('checked') == true ){
-        $('.afs-user-like').val('').hide()
-    }else if($('#afs-liked-post').prop('checked') == true){
+    // Only handle Post option now (Article/Video commented out)
+    if($('#afs-liked-post').prop('checked') == true){
         $('#afs-liked-postid').val('').show()
-        $('#afs-liked-articleid').val('').hide()
-        $('#afs-liked-videoid').val('').hide()
+        // Commented out - Article and Video inputs
+        // $('#afs-liked-articleid').val('').hide()
+        // $('#afs-liked-videoid').val('').hide()
         $('.afs-commented-check').prop('checked', false)
         $('.afs-user-commented').val('').hide()
-    }else if($('#afs-liked-article').prop('checked') == true){
-        $('#afs-liked-postid').val('').hide()
-        $('#afs-liked-articleid').val('').show()
-        $('#afs-liked-videoid').val('').hide()
-        $('.afs-commented-check').prop('checked', false)
-        $('.afs-user-commented').val('').hide()
-    }else if($('#afs-liked-video').prop('checked') == true){
-        $('#afs-liked-postid').val('').hide()
-        $('#afs-liked-articleid').val('').hide()
-        $('#afs-liked-videoid').val('').show()
-        $('.afs-commented-check').prop('checked', false)
-        $('.afs-user-commented').val('').hide()
-    }else{
-        $('.afs-user-like').val('').hide()
     }
+    // Commented out - Article and Video handling
+    // else if($('#afs-liked-article').prop('checked') == true){
+    //     $('#afs-liked-postid').val('').hide()
+    //     $('#afs-liked-articleid').val('').show()
+    //     $('#afs-liked-videoid').val('').hide()
+    //     $('.afs-commented-check').prop('checked', false)
+    //     $('.afs-user-commented').val('').hide()
+    // }else if($('#afs-liked-video').prop('checked') == true){
+    //     $('#afs-liked-postid').val('').hide()
+    //     $('#afs-liked-articleid').val('').hide()
+    //     $('#afs-liked-videoid').val('').show()
+    //     $('.afs-commented-check').prop('checked', false)
+    //     $('.afs-user-commented').val('').hide()
+    // }else{
+    //     $('.afs-user-like').val('').hide()
+    // }
 })
 $('.afs-commented-check').change(function(){
-    if($('#afs-commented-none').prop('checked') == true){
-        $('.afs-user-commented').val('').hide()
-    }else if($('#afs-commented-post').prop('checked') == true){
+    // Post is the only option now, so just ensure it's visible
+    if($('#afs-commented-post').prop('checked') == true){
         $('#afs-commented-postid').val('').show()
-        $('#afs-commented-articleid').val('').hide()
-        $('#afs-commented-videoid').val('').hide()
+        // Commented out - Article and Video inputs not currently used
+        // $('#afs-commented-articleid').val('').hide()
+        // $('#afs-commented-videoid').val('').hide()
         $('.afs-liked-check').prop('checked', false)
         $('.afs-user-like').val('').hide()
-    }else if($('#afs-commented-article').prop('checked') == true){
-        $('#afs-commented-postid').val('').hide()
-        $('#afs-commented-articleid').val('').show()
-        $('#afs-commented-videoid').val('').hide()
-        $('.afs-liked-check').prop('checked', false)
-        $('.afs-user-like').val('').hide()
-    }else if($('#afs-commented-video').prop('checked') == true){
-        $('#afs-commented-postid').val('').hide()
-        $('#afs-commented-articleid').val('').hide()
-        $('#afs-commented-videoid').val('').show()
-        $('.afs-liked-check').prop('checked', false)
-        $('.afs-user-like').val('').hide()
-    }else{
-        $('.afs-user-commented').val('').hide()
     }
+    // Commented out - None, Article, and Video options not currently used
+    // if($('#afs-commented-none').prop('checked') == true){
+    //     $('.afs-user-commented').val('').hide()
+    // }else if($('#afs-commented-article').prop('checked') == true){
+    //     $('#afs-commented-postid').val('').hide()
+    //     $('#afs-commented-articleid').val('').show()
+    //     $('#afs-commented-videoid').val('').hide()
+    //     $('.afs-liked-check').prop('checked', false)
+    //     $('.afs-user-like').val('').hide()
+    // }else if($('#afs-commented-video').prop('checked') == true){
+    //     $('#afs-commented-postid').val('').hide()
+    //     $('#afs-commented-articleid').val('').hide()
+    //     $('#afs-commented-videoid').val('').show()
+    //     $('.afs-liked-check').prop('checked', false)
+    //     $('.afs-user-like').val('').hide()
+    // }else{
+    //     $('.afs-user-commented').val('').hide()
+    // }
 })
 
 let getConnectParams = {}
@@ -1007,10 +1124,13 @@ $('.newAudienceAction').click(function(){
             var afcArticleIdComment = $('#afs-commented-articleid');
             var afcVideoIdComment = $('#afs-commented-videoid');
             var afcPostIdLiked = $('#afs-liked-postid');
-            var afcArticleIdLiked = $('#afs-liked-articleid');
-            var afcVideoIdLiked = $('#afs-liked-videoid');
+            // Commented out - Article and Video inputs not currently used
+            // var afcArticleIdLiked = $('#afs-liked-articleid');
+            // var afcVideoIdLiked = $('#afs-liked-videoid');
             var afcPostId;
-            var validateFields = [afcPostIdComment,afcArticleIdComment,afcVideoIdComment,afcPostIdLiked,afcArticleIdLiked,afcVideoIdLiked]
+            var validateFields = [afcPostIdComment,afcArticleIdComment,afcVideoIdComment,afcPostIdLiked]
+            // Commented out - Article and Video validation
+            // var validateFields = [afcPostIdComment,afcArticleIdComment,afcVideoIdComment,afcPostIdLiked,afcArticleIdLiked,afcVideoIdLiked]
 
             let countInvalidFields = 0;
             for (let s=0; s<validateFields.length; s++){
@@ -1029,27 +1149,43 @@ $('.newAudienceAction').click(function(){
                 $(this).attr('disabled', true);
 
                 if (afcPostIdLiked.val() != ''){
-                    afcPostId = buildLinkedInPostUrl('activity', afcPostIdLiked.val());
+                    // Handle all URL formats: full URLs, /posts/ URLs, or just IDs
+                    let postIdValue = afcPostIdLiked.val().trim();
+                    afcPostId = normalizeLinkedInPostUrl(postIdValue);
+                    if (!afcPostId) {
+                        $('#afc-displayNewAudienceStatus').html('<span style="color: #dc3545;">Invalid post URL or ID format.</span>');
+                        $('.newAudienceAction').attr('disabled', false);
+                        return;
+                    }
                     afcGetLikedProfiles(afcPostId,afcTotal,afcDelay.val(), afcAudienceName.val(),audienceType);
-                }else if (afcArticleIdLiked.val() != ''){
-                    afcPostId = buildLinkedInPostUrl('article', afcArticleIdLiked.val());
-                    afcGetLikedProfiles(afcPostId,afcTotal,afcDelay.val(),afcAudienceName.val(),audienceType);
-                }else if (afcVideoIdLiked.val() != ''){
-                    afcPostId = buildLinkedInPostUrl('ugcPost', afcVideoIdLiked.val());
-                    afcGetLikedProfiles(afcPostId,afcTotal,afcDelay.val(),afcAudienceName.val(),audienceType);
-                }else if (afcPostIdComment.val() != ''){
-                    afcPostId = 'activity%3A'+afcPostIdComment.val();
-
-                    afcGetCommentProfiles(afcPostId,afcTotal,afcStartP.val(),afcDelay.val(),afcAudienceName.val(),audienceType);
-                }else if (afcArticleIdComment.val() != ''){
-                    afcPostId = 'article%3A'+afcArticleIdComment.val();
-
-                    afcGetCommentProfiles(afcPostId,afcTotal,afcStartP.val(),afcDelay.val(),afcAudienceName.val(),audienceType);
-                }else if (afcVideoIdComment.val() != ''){
-                    afcPostId = 'ugcPost%3A'+afcVideoIdComment.val();
-
-                    afcGetCommentProfiles(afcPostId,afcTotal,afcStartP.val(),afcDelay.val(),afcAudienceName.val(),audienceType);
                 }
+                // Commented out - Article and Video options not currently used
+                // else if (afcArticleIdLiked.val() != ''){
+                //     afcPostId = buildLinkedInPostUrl('article', afcArticleIdLiked.val());
+                //     afcGetLikedProfiles(afcPostId,afcTotal,afcDelay.val(),afcAudienceName.val(),audienceType);
+                // }else if (afcVideoIdLiked.val() != ''){
+                //     afcPostId = buildLinkedInPostUrl('ugcPost', afcVideoIdLiked.val());
+                //     afcGetLikedProfiles(afcPostId,afcTotal,afcDelay.val(),afcAudienceName.val(),audienceType);
+                // }
+                else if (afcPostIdComment.val() != ''){
+                    // Handle all URL formats: full URLs, /posts/ URLs, or just IDs
+                    let commentPostIdValue = afcPostIdComment.val().trim();
+                    let commentPostUrl = normalizeLinkedInPostUrl(commentPostIdValue);
+                    if (!commentPostUrl) {
+                        $('#afc-displayNewAudienceStatus').html('<span style="color: #dc3545;">Invalid post URL or ID format.</span>');
+                        $('.newAudienceAction').attr('disabled', false);
+                        return;
+                    }
+                    afcGetCommentProfiles(commentPostUrl, afcTotal, afcStartP.val(), afcDelay.val(), afcAudienceName.val(), audienceType);
+                }
+                // Commented out - Article and Video comment options not currently used
+                // else if (afcArticleIdComment.val() != ''){
+                //     afcPostId = 'article%3A'+afcArticleIdComment.val();
+                //     afcGetCommentProfiles(afcPostId,afcTotal,afcStartP.val(),afcDelay.val(),afcAudienceName.val(),audienceType);
+                // }else if (afcVideoIdComment.val() != ''){
+                //     afcPostId = 'ugcPost%3A'+afcVideoIdComment.val();
+                //     afcGetCommentProfiles(afcPostId,afcTotal,afcStartP.val(),afcDelay.val(),afcAudienceName.val(),audienceType);
+                // }
             }
         }else if($('#nav-link-fevent').hasClass('active')) {
             if ($('#afs-eventId').val() == ''){
@@ -1672,7 +1808,7 @@ const afcGetLikedProfiles = async (postUrl, afcTotal, afcDelay, afcAudienceName,
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'lk-id': linkedinId,
+                'lk-id': (typeof getLinkedInIdForApi === 'function' ? getLinkedInIdForApi() : (linkedinId || window.linkedinId || $('#me-publicIdentifier').val())),
                 'ngrok-skip-browser-warning': 'true' // Bypass ngrok warning page
             },
             body: JSON.stringify(payload)
@@ -1737,7 +1873,130 @@ const afcGetLikedProfiles = async (postUrl, afcTotal, afcDelay, afcAudienceName,
     }
 }
 
-const afcGetCommentProfiles = (afcPostId,afcTotal,afcStartP,afcDelay,afcAudienceName,audienceType) => {
+const afcGetCommentProfiles = async (postUrl, afcTotal, afcStartP, afcDelay, afcAudienceName, audienceType) => {
+    try {
+        if (!postUrl) {
+            throw new Error('Invalid LinkedIn post URL. Please check the ID and try again.');
+        }
+        $('.newAudience-notice').show();
+        $('#afc-displayNewAudienceStatus').html('Fetching post commenters. This may take a moment...');
+        $('.newAudienceAction').attr('disabled', true);
+
+        const requestedLimit = parseInt($('#afs-total').val()) || afcTotal;
+        const payload = {
+            post_url: postUrl,
+            limit: requestedLimit
+        };
+
+        console.log('Requesting post commenters:', {
+            post_url: postUrl,
+            requested_limit: requestedLimit,
+            payload: payload
+        });
+
+        const response = await fetch(`${PLATFORM_URL}/api/audience/post-comments`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'lk-id': (typeof getLinkedInIdForApi === 'function' ? getLinkedInIdForApi() : (linkedinId || window.linkedinId || $('#me-publicIdentifier').val())),
+                'ngrok-skip-browser-warning': 'true'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        const result = await response.json();
+        
+        // Check for errors in response
+        if (!response.ok) {
+            const errorMessage = result.message || result.error || 'Failed to fetch post commenters';
+            throw new Error(errorMessage);
+        }
+        
+        // Check if status is not 200 (even if response.ok is true)
+        if (result.status && result.status !== 200) {
+            const errorMessage = result.message || 'Failed to fetch post commenters';
+            throw new Error(errorMessage);
+        }
+
+        let profiles = result.data?.profiles || [];
+        console.log('Received post commenters from backend:', {
+            profiles_count: profiles.length,
+            total_from_phantom: result.data?.total_from_phantom,
+            after_limit: result.data?.after_limit,
+            skipped_companies: result.data?.skipped_companies,
+            skipped_no_profile_link: result.data?.skipped_no_profile_link,
+            requested_limit: requestedLimit
+        });
+
+        // Clear any previous error messages
+        $('#afc-error-notice').html('');
+
+        if (!profiles.length) {
+            $('#afc-displayNewAudienceStatus').html('<span style="color: #856404;">No commenters found for this post.</span>');
+            $('.newAudienceAction').attr('disabled', false);
+            return;
+        }
+        
+        // Show success message
+        $('#afc-displayNewAudienceStatus').html(`<span style="color: #28a745;">✓ Found ${profiles.length} commenter(s). Processing...</span>`);
+
+        const profilesBeforeFilter = profiles.length;
+        profiles = filterProfilesByPreferences(profiles);
+        const profilesAfterFilter = profiles.length;
+        
+        if (profilesBeforeFilter > profilesAfterFilter) {
+            console.log(`Filtered ${profilesBeforeFilter} profiles down to ${profilesAfterFilter} based on your preferences (degree, keywords, etc.)`);
+        }
+        
+        if (!profiles.length) {
+            $('#afc-displayNewAudienceStatus').html('No profiles matched your filters.');
+            $('.newAudienceAction').attr('disabled', false);
+            return;
+        }
+
+        // Update status to show we're processing the profiles
+        $('#afc-displayNewAudienceStatus').html(`<span style="color: #28a745;">✓ Found ${profiles.length} commenter(s). Processing profiles...</span>`);
+        
+        const connections = transformProfilesToConnections(profiles, afcAudienceName);
+        
+        if (!connections || connections.length === 0) {
+            $('#afc-displayNewAudienceStatus').html('<span style="color: #856404;">No valid profiles to process after transformation.</span>');
+            $('.newAudienceAction').attr('disabled', false);
+            return;
+        }
+        
+        // Process the connections - use newAudience() like the likes flow, NOT memberBadgesEndpoint()
+        newAudience(
+            connections,
+            afcDelay,
+            afcAudienceName,
+            audienceType,
+            [],
+            [],
+            [],
+            []
+        );
+        
+    } catch (error) {
+        console.error('Error fetching post commenters:', error);
+        
+        // Show user-friendly error message
+        let errorMessage = error.message || 'Failed to fetch commenters';
+        
+        // Provide specific guidance for configuration errors
+        if (errorMessage.includes('phantom ID not configured') || errorMessage.includes('PhantomBuster configuration missing')) {
+            errorMessage = 'PhantomBuster configuration missing. Please contact support to set up the LinkedIn Post Comments phantom ID.';
+        }
+        
+        $('#afc-displayNewAudienceStatus').html(`<span style="color: #dc3545;">Error: ${errorMessage}</span>`);
+        handleAudienceCreationError(error, 'post-comments');
+    } finally {
+        $('.newAudienceAction').attr('disabled', false);
+    }
+}
+
+// Legacy function kept for backward compatibility (commented out - now using PhantomBuster)
+const afcGetCommentProfilesLegacy = (afcPostId,afcTotal,afcStartP,afcDelay,afcAudienceName,audienceType) => {
     var con = [];
     var degree = [];
     var conArr = [];
@@ -2667,6 +2926,56 @@ const getConnectContactInfo = async (connectionId) => {
     })
 }
 
+/**
+ * Normalize LinkedIn post URL to a format PhantomBuster can accept
+ * Handles multiple URL formats:
+ * - https://www.linkedin.com/feed/update/urn:li:activity:7389592155834642434/ (keep as-is)
+ * - https://www.linkedin.com/posts/username_slug-7416785324715962368-XGiQ/ (keep as-is - PhantomBuster accepts this)
+ * - 7389592155834642434 (just the ID - convert to feed format)
+ * - activity:7389592155834642434 (with prefix - convert to feed format)
+ * 
+ * Note: /posts/ URLs are kept as-is because some posts are only accessible via this format
+ * and PhantomBuster accepts this format directly.
+ */
+function normalizeLinkedInPostUrl(input) {
+    if (!input) return null;
+    
+    const trimmed = String(input).trim();
+    
+    // If it's already a feed URL format, return as-is (PhantomBuster accepts this)
+    if (trimmed.includes('/feed/update/urn:li:activity:')) {
+        return trimmed;
+    }
+    
+    // If it's a /posts/ URL, keep it as-is - PhantomBuster accepts this format
+    // and some posts are only accessible via this format
+    if (trimmed.includes('/posts/')) {
+        // Remove query parameters but keep the URL structure
+        const urlWithoutParams = trimmed.split('?')[0];
+        return urlWithoutParams;
+    }
+    
+    // If it's a full URL but not recognized format, try to extract ID
+    if (trimmed.startsWith('http')) {
+        // Try to extract from various URL patterns
+        const activityMatch = trimmed.match(/activity[:\/](\d+)/);
+        if (activityMatch && activityMatch[1]) {
+            return `https://www.linkedin.com/feed/update/urn:li:activity:${activityMatch[1]}/`;
+        }
+        // If we can't parse it but it's a valid URL, return as-is (PhantomBuster might handle it)
+        return trimmed.split('?')[0]; // Remove query params
+    }
+    
+    // If it's just an ID (numeric string), convert to feed format
+    const numericId = trimmed.replace(/^activity:/, '').replace(/[^\d]/g, '');
+    if (numericId && /^\d+$/.test(numericId)) {
+        return `https://www.linkedin.com/feed/update/urn:li:activity:${numericId}/`;
+    }
+    
+    // If we can't parse it, return the original (PhantomBuster might handle it)
+    return trimmed;
+}
+
 function buildLinkedInPostUrl(type, id) {
     if (!id) return null;
     const cleanId = String(id).trim();
@@ -3171,7 +3480,12 @@ const newAudienceList = async (audienceData, con, memberBadgesData, networkInfoD
                         method: 'post',
                         beforeSend: function(request) {
                             request.setRequestHeader('Content-Type', 'application/json')
-                            request.setRequestHeader('lk-id', linkedinId)
+                            const currentLinkedInId = (typeof getLinkedInIdForApi === 'function' ? getLinkedInIdForApi() : (linkedinId || window.linkedinId || $('#me-publicIdentifier').val()));
+                            if (!currentLinkedInId) {
+                                console.error('❌ LinkedIn ID not available for API call');
+                                throw new Error('LinkedIn ID not found. Please refresh the page.');
+                            }
+                            request.setRequestHeader('lk-id', currentLinkedInId)
                             request.setRequestHeader('ngrok-skip-browser-warning', 'true') // Bypass ngrok warning page
                         },
                         url: `${filterApi}/audience/list`,
@@ -3224,10 +3538,28 @@ const newAudienceList = async (audienceData, con, memberBadgesData, networkInfoD
     }
     $('#afc-displayNewAudienceStatus').html(completionMessage)
     
-    // Auto-close form after 3 seconds
+    // Auto-close form and reset after 3 seconds
     setTimeout(function() {
-        $('#audienceCreationForm').modal('hide')
-        $('#audienceMenu').modal({backdrop:'static', keyboard:false, show:true})
+        // Clear all input fields
+        $('#audience-name').val('');
+        $('#afs-liked-postid').val('');
+        $('#afs-commented-postid').val('');
+        
+        // Clear error notice
+        $('#afc-error-notice').html('');
+        
+        // Hide and clear the status message banner
+        $('.newAudience-notice').hide();
+        $('#afc-displayNewAudienceStatus').empty();
+        
+        // Re-enable the action button
+        $('.newAudienceAction').attr('disabled', false);
+        
+        // Close the form
+        $('#audienceCreationForm').modal('hide');
+        
+        // Open the audience menu
+        $('#audienceMenu').modal({backdrop:'static', keyboard:false, show:true});
     }, 3000)
     
     // Refresh the audience table after successful creation
@@ -3252,7 +3584,12 @@ const newAudienceListUpdate = async (connectionId,audienceId,distance,companyUrl
         method: 'put',
         beforeSend: function(request) {
             request.setRequestHeader('Content-Type', 'application/json')
-            request.setRequestHeader('lk-id', linkedinId)
+            const currentLinkedInId = (typeof getLinkedInIdForApi === 'function' ? getLinkedInIdForApi() : (linkedinId || window.linkedinId || $('#me-publicIdentifier').val()));
+            if (!currentLinkedInId) {
+                console.error('❌ LinkedIn ID not available for API call');
+                throw new Error('LinkedIn ID not found. Please refresh the page.');
+            }
+            request.setRequestHeader('lk-id', currentLinkedInId)
             request.setRequestHeader('ngrok-skip-browser-warning', 'true') // Bypass ngrok warning page
         },
         url: `${filterApi}/audience/list`,
