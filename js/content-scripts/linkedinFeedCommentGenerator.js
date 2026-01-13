@@ -34,20 +34,56 @@
         }, 2000);
     }
     
-    // Check if current page is a feed page
+    // Check if current page is a feed page, search results, company, hashtag, or group page
     function isFeedPage() {
         return window.location.href.includes('linkedin.com/feed') || 
                window.location.pathname === '/feed' || 
-               window.location.pathname.startsWith('/feed/');
+               window.location.pathname.startsWith('/feed/') ||
+               window.location.pathname.includes('/search/results/') ||
+               window.location.pathname.includes('/company/') ||
+               window.location.pathname.includes('/groups/');
     }
     
-    // Only run on LinkedIn feed pages
+    // Check if we're on the main feed page (not a single post)
+    function isMainFeedPage() {
+        return window.location.pathname === '/feed' || 
+               (window.location.pathname.startsWith('/feed/') && 
+                !window.location.pathname.includes('/feed/update/') && 
+                !window.location.pathname.includes('/feed/hashtag/'));
+    }
+    
+    // Check if we're on a single post page
+    function isSinglePostPage() {
+        return window.location.pathname.includes('/feed/update/');
+    }
+    
+    // Check if we're on a search results page
+    function isSearchResultsPage() {
+        return window.location.pathname.includes('/search/results/');
+    }
+    
+    // Check if we're on a company page
+    function isCompanyPage() {
+        return window.location.pathname.includes('/company/');
+    }
+    
+    // Check if we're on a hashtag feed page
+    function isHashtagFeedPage() {
+        return window.location.pathname.includes('/feed/hashtag/');
+    }
+    
+    // Check if we're on a group page
+    function isGroupPage() {
+        return window.location.pathname.includes('/groups/');
+    }
+    
+    // Only run on LinkedIn feed pages, search results, company, hashtag, or group pages
     if (!isFeedPage()) {
-        console.log('⏭️ Not a feed page, skipping comment generator');
+        console.log('⏭️ Not a feed, search results, company, hashtag, or group page, skipping comment generator');
         return;
     }
     
-    console.log('🚀 LinkedIn Feed Comment Generator script loaded on feed page');
+    console.log('🚀 LinkedIn Feed Comment Generator script loaded');
 
     // CSS for the comment generator button and modal
     const style = document.createElement('style');
@@ -87,7 +123,11 @@
         .feed-shared-update-v2:hover .ld-comment-gen-btn,
         .occludable-update:hover .ld-comment-gen-btn,
         [data-test-id="main-feed-activity-card"]:hover .ld-comment-gen-btn,
-        .feed-shared-update-v2__update-content-wrapper:hover .ld-comment-gen-btn {
+        .search-results__search-feed-update:hover .ld-comment-gen-btn,
+        [role="listitem"]:hover .ld-comment-gen-btn,
+        [data-testid="main-feed-activity-card"]:hover .ld-comment-gen-btn,
+        .feed-shared-update-v2__update-content-wrapper:hover .ld-comment-gen-btn,
+        .feed-container-theme .feed-shared-update-v2:hover .ld-comment-gen-btn {
             opacity: 1;
         }
         
@@ -397,22 +437,45 @@
      */
     function extractPostContent(postElement) {
         // Try multiple selectors for post content
+        // Works for both main feed (role="listitem") and single post pages
         const selectors = [
             '.feed-shared-update-v2__description',
             '.feed-shared-text',
             '.feed-shared-text__text-view',
+            '.update-components-text',
             '[data-test-id="main-feed-activity-card"] .feed-shared-text',
-            '.feed-shared-update-v2__description-wrapper'
+            '[data-testid="main-feed-activity-card"] .feed-shared-text',
+            '.feed-shared-update-v2__description-wrapper',
+            // For listitem containers, search within them
+            '[role="listitem"] .feed-shared-text',
+            '[role="listitem"] .feed-shared-update-v2__description',
+            '[role="listitem"] .update-components-text',
+            // Generic fallbacks
+            '[class*="feed-shared-text"]',
+            '[class*="update-components-text"]',
+            '[class*="description"]'
         ];
         
+        // If the element itself is a listitem, search within it
+        const searchRoot = postElement.getAttribute('role') === 'listitem' 
+            ? postElement 
+            : postElement;
+        
         for (const selector of selectors) {
-            const contentEl = postElement.querySelector(selector);
+            const contentEl = searchRoot.querySelector(selector);
             if (contentEl) {
                 const text = contentEl.innerText || contentEl.textContent || '';
                 if (text.trim().length > 0) {
                     return text.trim();
                 }
             }
+        }
+        
+        // Fallback: try to get text directly from the post element if it has substantial content
+        const directText = postElement.innerText || postElement.textContent || '';
+        if (directText.trim().length > 50) {
+            // Only use direct text if it's substantial (likely a post)
+            return directText.trim();
         }
         
         return '';
@@ -608,27 +671,113 @@
             return false; // Button already exists
         }
         
-        // Verify this is actually a post element (has some content)
-        const hasContent = postElement.querySelector('.feed-shared-text, .feed-shared-update-v2__description, [data-test-id="main-feed-activity-card"] .feed-shared-text, .update-components-text');
-        if (!hasContent && !postElement.getAttribute('data-urn')) {
-            // Skip if it doesn't look like a real post
-            return false;
+        // Verify this is actually a post element
+        const isListItem = postElement.getAttribute('role') === 'listitem';
+        const isMainFeed = isMainFeedPage(); // Check page type directly
+        const isSearchResults = isSearchResultsPage(); // Check if search results page
+        const isCompany = isCompanyPage(); // Check if company page
+        const isHashtag = isHashtagFeedPage(); // Check if hashtag feed
+        const isGroup = isGroupPage(); // Check if group page
+        const isSearchResultPost = postElement.classList.contains('search-results__search-feed-update');
+        const isCompanyPost = postElement.classList.contains('feed-shared-update-v2') && isCompany;
+        const isGroupPost = postElement.classList.contains('feed-shared-update-v2') && isGroup;
+        
+        // Check for content (used later in logging)
+        let hasContent = null;
+        let hasActivityUrn = null;
+        
+        // For listitem in mainFeed or hashtag feeds, accept them directly if visible
+        if ((isMainFeed || isHashtag) && isListItem) {
+            const rect = postElement.getBoundingClientRect();
+            if (rect.height === 0 || rect.width === 0) {
+                return false; // Not visible
+            }
+            // Continue to add button - don't return early!
+        } 
+        // For search results posts, accept them directly if visible
+        else if (isSearchResults && isSearchResultPost) {
+            const rect = postElement.getBoundingClientRect();
+            if (rect.height === 0 || rect.width === 0) {
+                return false; // Not visible
+            }
+            // Continue to add button - don't return early!
+        }
+        // For company page posts, accept them directly if visible
+        else if (isCompanyPost) {
+            const rect = postElement.getBoundingClientRect();
+            if (rect.height === 0 || rect.width === 0) {
+                return false; // Not visible
+            }
+            // Continue to add button - don't return early!
+        }
+        // For group posts, accept them directly if visible
+        else if (isGroupPost) {
+            const rect = postElement.getBoundingClientRect();
+            if (rect.height === 0 || rect.width === 0) {
+                return false; // Not visible
+            }
+            // Continue to add button - don't return early!
+        } else {
+            // For other containers (single post pages), verify content
+            hasContent = postElement.querySelector('.feed-shared-text, .feed-shared-update-v2__description, [data-test-id="main-feed-activity-card"] .feed-shared-text, [data-testid="main-feed-activity-card"] .feed-shared-text, .update-components-text, [class*="feed-shared-text"], [class*="update-components-text"]');
+            hasActivityUrn = postElement.querySelector('[data-urn*="activity:"]') || postElement.getAttribute('data-urn')?.includes('activity:');
+            
+            if (!hasContent && !hasActivityUrn) {
+                return false;
+            }
         }
         
+        // Continue to create and add the button (don't return early!)
+        
         // Try multiple container selectors to find the right parent
-        let container = postElement.closest('.feed-shared-update-v2');
-        if (!container) {
-            container = postElement.closest('.occludable-update');
-        }
-        if (!container) {
-            container = postElement.closest('[data-test-id="main-feed-activity-card"]');
-        }
-        if (!container) {
-            container = postElement.querySelector('.feed-shared-update-v2__update-content-wrapper');
-        }
-        if (!container) {
-            // If we still don't have a container, use the post element itself
+        // For listitem containers, use them directly or find the post content wrapper within
+        let container = null;
+        
+        // If postElement is a listitem, use it directly as container (for main feed/hashtag)
+        // If postElement is a search result/company/group post, use it directly as container
+        // Use the page type variables already defined above
+        if (isSearchResults && isSearchResultPost) {
+            // For search results posts, use the post element itself as container
             container = postElement;
+        } else if (isCompanyPost || isGroupPost) {
+            // For company or group posts, use the post element itself as container
+            container = postElement;
+        } else if ((isMainFeed || isHashtag) && isListItem) {
+            // For listitem in mainFeed or hashtag feeds, use the listitem itself as container
+            container = postElement;
+        } else if (isListItem) {
+            // For listitem on other pages, try to find the actual post content container within it
+            container = postElement.querySelector('.feed-shared-update-v2, .occludable-update, [data-testid="main-feed-activity-card"], [data-test-id="main-feed-activity-card"], .feed-shared-update-v2__update-content-wrapper');
+            // If no specific container found, use the listitem itself
+            if (!container) {
+                container = postElement;
+            }
+        } else if (isSearchResults) {
+            // For search results, try to find container within the search result post
+            container = postElement.querySelector('.feed-shared-update-v2, .occludable-update, [data-testid="main-feed-activity-card"], [data-test-id="main-feed-activity-card"], .feed-shared-update-v2__update-content-wrapper');
+            // If no specific container found, use the post element itself
+            if (!container) {
+                container = postElement;
+            }
+        } else {
+            // For non-listitem elements, use original logic
+            container = postElement.closest('.feed-shared-update-v2');
+            if (!container) {
+                container = postElement.closest('.occludable-update');
+            }
+            if (!container) {
+                container = postElement.closest('[data-testid="main-feed-activity-card"], [data-test-id="main-feed-activity-card"]');
+            }
+            if (!container) {
+                container = postElement.closest('[role="listitem"]');
+            }
+            if (!container) {
+                container = postElement.querySelector('.feed-shared-update-v2__update-content-wrapper');
+            }
+            if (!container) {
+                // If we still don't have a container, use the post element itself
+                container = postElement;
+            }
         }
         
         // Make container relative if needed
@@ -775,7 +924,16 @@
         container.appendChild(btn);
         console.log('✅ Added draggable comment button to post', {
             container: container.className,
-            hasContent: !!hasContent
+            isMainFeed: isMainFeed,
+            isSearchResults: isSearchResults,
+            isCompany: isCompany,
+            isHashtag: isHashtag,
+            isGroup: isGroup,
+            isListItem: isListItem,
+            isSearchResultPost: isSearchResultPost,
+            isCompanyPost: isCompanyPost,
+            isGroupPost: isGroupPost,
+            hasContent: hasContent !== null ? !!hasContent : (isMainFeed || isSearchResults || isCompany || isHashtag || isGroup ? 'N/A (feed page)' : 'N/A')
         });
         return true; // Successfully added button
     }
@@ -796,13 +954,120 @@
             return;
         }
 
-        // Primary selectors for main feed posts (most common)
-        const primarySelectors = [
-            '.feed-shared-update-v2',
-            '.occludable-update',
+        // Determine search scope based on page type
+        let searchScope = document;
+        const isMainFeed = isMainFeedPage();
+        const isSinglePost = isSinglePostPage();
+        const isSearchResults = isSearchResultsPage();
+        const isCompany = isCompanyPage();
+        const isHashtag = isHashtagFeedPage();
+        const isGroup = isGroupPage();
+        
+        console.log(`🔍 Scanning for posts - Main Feed: ${isMainFeed}, Single Post: ${isSinglePost}, Search Results: ${isSearchResults}, Company: ${isCompany}, Hashtag: ${isHashtag}, Group: ${isGroup}`);
+        
+        // For main feed, search within the mainFeed container
+        if (isMainFeed) {
+            const mainFeedContainer = document.querySelector('[data-testid="mainFeed"]');
+            if (mainFeedContainer) {
+                searchScope = mainFeedContainer;
+                console.log('✅ Found mainFeed container, searching within it');
+            } else {
+                console.log('⚠️ mainFeed container not found, searching entire document');
+            }
+        }
+        
+        // For search results, search within the search-results-container
+        if (isSearchResults) {
+            const searchResultsContainer = document.querySelector('.search-results-container');
+            if (searchResultsContainer) {
+                searchScope = searchResultsContainer;
+                console.log('✅ Found search-results-container, searching within it');
+            } else {
+                console.log('⚠️ search-results-container not found, searching entire document');
+            }
+        }
+        
+        // For company pages, search within the feed-container-theme container
+        if (isCompany) {
+            const companyFeedContainer = document.querySelector('.feed-container-theme');
+            if (companyFeedContainer) {
+                searchScope = companyFeedContainer;
+                console.log('✅ Found feed-container-theme container, searching within it');
+            } else {
+                console.log('⚠️ feed-container-theme container not found, searching entire document');
+            }
+        }
+        
+        // For hashtag feeds, search within the mainFeed container (similar to main feed)
+        if (isHashtag) {
+            const hashtagFeedContainer = document.querySelector('[data-testid="mainFeed"]') || document.querySelector('.feed-container-theme');
+            if (hashtagFeedContainer) {
+                searchScope = hashtagFeedContainer;
+                console.log('✅ Found hashtag feed container, searching within it');
+            } else {
+                console.log('⚠️ hashtag feed container not found, searching entire document');
+            }
+        }
+        
+        // For groups, search within common group feed containers
+        if (isGroup) {
+            const groupFeedContainer = document.querySelector('.feed-container-theme') || document.querySelector('[data-testid="mainFeed"]');
+            if (groupFeedContainer) {
+                searchScope = groupFeedContainer;
+                console.log('✅ Found group feed container, searching within it');
+            } else {
+                console.log('⚠️ group feed container not found, searching entire document');
+            }
+        }
+
+        // Primary selectors for posts (work for all page types)
+        // Prioritize page-specific selectors first
+        const primarySelectors = isSearchResults ? [
+            '.search-results__search-feed-update',  // Search results posts
+            '[data-testid="main-feed-activity-card"]',
             '[data-test-id="main-feed-activity-card"]',
             'div[data-urn*="activity:"]',
             'article[data-urn*="activity:"]',
+            '.feed-shared-update-v2',
+            '.occludable-update',
+        ] : isCompany ? [
+            '.feed-shared-update-v2',  // Company page posts (user specified this class)
+            '[data-testid="main-feed-activity-card"]',
+            '[data-test-id="main-feed-activity-card"]',
+            'div[data-urn*="activity:"]',
+            'article[data-urn*="activity:"]',
+            '.occludable-update',
+        ] : isHashtag ? [
+            '[role="listitem"]',  // Hashtag feeds use similar structure to main feed
+            '.feed-shared-update-v2',
+            '[data-testid="main-feed-activity-card"]',
+            '[data-test-id="main-feed-activity-card"]',
+            'div[data-urn*="activity:"]',
+            'article[data-urn*="activity:"]',
+            '.occludable-update',
+        ] : isGroup ? [
+            '.feed-shared-update-v2',  // Groups use similar structure to company pages
+            '[data-testid="main-feed-activity-card"]',
+            '[data-test-id="main-feed-activity-card"]',
+            'div[data-urn*="activity:"]',
+            'article[data-urn*="activity:"]',
+            '.occludable-update',
+        ] : isMainFeed ? [
+            '[role="listitem"]',  // Main feed posts are in listitem containers
+            '[data-testid="main-feed-activity-card"]',
+            '[data-test-id="main-feed-activity-card"]',
+            'div[data-urn*="activity:"]',
+            'article[data-urn*="activity:"]',
+            '.feed-shared-update-v2',
+            '.occludable-update',
+        ] : [
+            // Single post page selectors (keep existing logic)
+            '[data-testid="main-feed-activity-card"]',
+            '[data-test-id="main-feed-activity-card"]',
+            'div[data-urn*="activity:"]',
+            'article[data-urn*="activity:"]',
+            '.feed-shared-update-v2',
+            '.occludable-update',
         ];
         
         // Secondary selectors (fallback for different layouts)
@@ -820,14 +1085,47 @@
         let foundWithPrimary = false;
         
         for (const selector of primarySelectors) {
-            const found = document.querySelectorAll(selector);
+            const found = searchScope.querySelectorAll(selector);
             if (found.length > 0) {
                 foundWithPrimary = true;
+                console.log(`✅ Found ${found.length} elements with selector: ${selector}`);
                 found.forEach(post => {
-                    // Only add if it's a top-level post container, not nested
-                    const isTopLevel = !post.closest('.feed-shared-update-v2, .occludable-update, [data-test-id="main-feed-activity-card"]') || 
-                                      post.matches('.feed-shared-update-v2, .occludable-update, [data-test-id="main-feed-activity-card"]');
-                    if (isTopLevel) {
+                    // For search results, accept .search-results__search-feed-update directly
+                    if (isSearchResults && post.classList.contains('search-results__search-feed-update')) {
+                        allPosts.add(post);
+                        console.log(`   ✅ Added search result post to allPosts`);
+                    }
+                    // For company pages, accept .feed-shared-update-v2 directly
+                    else if (isCompany && post.classList.contains('feed-shared-update-v2')) {
+                        allPosts.add(post);
+                        console.log(`   ✅ Added company page post to allPosts`);
+                    }
+                    // For hashtag feeds with role="listitem", accept them directly
+                    else if (isHashtag && post.getAttribute('role') === 'listitem') {
+                        allPosts.add(post);
+                        console.log(`   ✅ Added hashtag feed post to allPosts`);
+                    }
+                    // For groups, accept .feed-shared-update-v2 directly
+                    else if (isGroup && post.classList.contains('feed-shared-update-v2')) {
+                        allPosts.add(post);
+                        console.log(`   ✅ Added group post to allPosts`);
+                    }
+                    // For main feed with role="listitem", accept them directly
+                    // They're already in the mainFeed container, so they're posts
+                    else if (isMainFeed && post.getAttribute('role') === 'listitem') {
+                        // Add all listitems - they're posts in mainFeed
+                        allPosts.add(post);
+                        console.log(`   ✅ Added listitem to allPosts`);
+                    } else if (isMainFeed || isHashtag) {
+                        // For other selectors on main feed or hashtag, find parent listitem or use directly
+                        const parentListItem = post.closest('[role="listitem"]');
+                        if (parentListItem) {
+                            allPosts.add(parentListItem);
+                        } else {
+                            allPosts.add(post);
+                        }
+                    } else {
+                        // For single post pages, company pages, groups, add directly
                         allPosts.add(post);
                     }
                 });
@@ -838,15 +1136,15 @@
         if (!foundWithPrimary) {
             console.log('⚠️ No posts found with primary selectors, trying secondary...');
             for (const selector of secondarySelectors) {
-                const found = document.querySelectorAll(selector);
+                const found = searchScope.querySelectorAll(selector);
                 found.forEach(post => {
                     // Find the parent post container
-                    const parentPost = post.closest('.feed-shared-update-v2, .occludable-update, [data-test-id="main-feed-activity-card"], div[data-urn*="activity:"], article[data-urn*="activity:"]');
+                    const parentPost = post.closest('[data-testid="main-feed-activity-card"], [data-test-id="main-feed-activity-card"], .feed-shared-update-v2, .occludable-update, div[data-urn*="activity:"], article[data-urn*="activity:"]');
                     if (parentPost) {
                         allPosts.add(parentPost);
                     } else {
                         // If no parent found, use the element itself if it looks like a post
-                        if (post.querySelector('.feed-shared-text, .feed-shared-update-v2__description, [data-test-id="main-feed-activity-card"]')) {
+                        if (post.querySelector('.feed-shared-text, .feed-shared-update-v2__description, [data-testid="main-feed-activity-card"], [data-test-id="main-feed-activity-card"]')) {
                             allPosts.add(post);
                         }
                     }
@@ -854,24 +1152,216 @@
             }
         }
         
-        const posts = Array.from(allPosts);
+        // Convert Set to Array
+        let posts = Array.from(allPosts);
+        
+        console.log(`📊 Before filtering: ${posts.length} posts in allPosts`);
+        console.log(`📊 allPosts Set size: ${allPosts.size}`);
+        
+        // Filter out duplicates
+        posts = posts.filter((post, index, self) => {
+            return index === self.findIndex(p => p === post);
+        });
+        
+        console.log(`📊 After deduplication: ${posts.length} posts`);
+        
+        // SIMPLE, STABLE filtering - no complex logic
+        const filteredPosts = [];
+        for (const post of posts) {
+            if (!post) {
+                continue;
+            }
+            
+            // Check visibility
+            const rect = post.getBoundingClientRect();
+            const isVisible = rect.height > 0 && rect.width > 0;
+            
+            if (!isVisible) {
+                continue;
+            }
+            
+            // For listitem in mainFeed or hashtag feeds, accept if visible - NO CONTENT CHECK
+            if ((isMainFeed || isHashtag) && post.getAttribute('role') === 'listitem') {
+                filteredPosts.push(post);
+                continue;
+            }
+            
+            // For search results posts, accept if visible - NO CONTENT CHECK
+            if (isSearchResults && post.classList.contains('search-results__search-feed-update')) {
+                filteredPosts.push(post);
+                continue;
+            }
+            
+            // For company page posts, accept if visible - NO CONTENT CHECK
+            if (isCompany && post.classList.contains('feed-shared-update-v2')) {
+                filteredPosts.push(post);
+                continue;
+            }
+            
+            // For group posts, accept if visible - NO CONTENT CHECK
+            if (isGroup && post.classList.contains('feed-shared-update-v2')) {
+                filteredPosts.push(post);
+                continue;
+            }
+            
+            // For other posts (single post pages), check if it has some content
+            const hasContent = post.textContent?.trim().length > 0 || 
+                              post.querySelector('img, video, .feed-shared-text, .update-components-text');
+            
+            if (hasContent) {
+                filteredPosts.push(post);
+            }
+        }
+        
+        posts = filteredPosts;
+        console.log(`📊 After filtering: ${posts.length} posts`);
         
         if (posts.length === 0) {
             console.log('⚠️ No posts found with any selector');
             console.log('🔍 Debug: Current URL:', window.location.href);
             console.log('🔍 Debug: Page ready state:', document.readyState);
-            // Log what selectors are actually on the page
-            const debugSelectors = ['.feed-shared-update-v2', '.occludable-update', '[data-test-id="main-feed-activity-card"]'];
-            debugSelectors.forEach(sel => {
-                const count = document.querySelectorAll(sel).length;
-                if (count > 0) {
-                    console.log(`🔍 Found ${count} elements with selector: ${sel}`);
+            
+            // Comprehensive debugging - check all possible selectors
+            const allDebugSelectors = [
+                '[role="listitem"]',  // Priority for main feed
+                '[data-testid="main-feed-activity-card"]',
+                '[data-test-id="main-feed-activity-card"]',
+                '[data-testid*="activity-card"]',
+                '[data-test-id*="activity-card"]',
+                'div[data-urn*="activity:"]',
+                'article[data-urn*="activity:"]',
+                '.feed-shared-update-v2',
+                '.occludable-update',
+                '[class*="feed-shared"]',
+                '[class*="update-v2"]',
+                '[class*="occludable"]',
+                '[data-testid*="feed"]',
+                '[data-test-id*="feed"]',
+                '[data-testid*="activity"]',
+                '[data-test-id*="activity"]',
+                '[data-testid*="card"]',
+                '[data-test-id*="card"]',
+            ];
+            
+            console.log('🔍 Checking all selectors on page...');
+            console.log(`🔍 Search scope: ${isMainFeed ? 'mainFeed container' : 'entire document'}`);
+            allDebugSelectors.forEach(sel => {
+                const found = searchScope.querySelectorAll(sel);
+                if (found.length > 0) {
+                    console.log(`✅ Found ${found.length} elements with selector: ${sel}`);
+                    // Log first element's classes for debugging
+                    if (found[0]) {
+                        console.log(`   First element classes: ${found[0].className}`);
+                        const dataAttrs = {};
+                        for (let attr of found[0].attributes) {
+                            if (attr.name.startsWith('data-')) {
+                                dataAttrs[attr.name] = attr.value;
+                            }
+                        }
+                        console.log(`   First element data attributes:`, dataAttrs);
+                    }
                 }
             });
-            return;
+            
+            // Try to find posts by structure (elements with activity URNs)
+            const allDivs = searchScope.querySelectorAll('div[data-urn]');
+            const activityDivs = Array.from(allDivs).filter(div => {
+                const urn = div.getAttribute('data-urn') || '';
+                return urn.includes('activity:');
+            });
+            
+            if (activityDivs.length > 0) {
+                console.log(`🔍 Found ${activityDivs.length} divs with activity URNs`);
+                // Try using these as posts
+                activityDivs.forEach(div => {
+                    // Find the parent container that looks like a post
+                    let postContainer = div;
+                    let parent = div.parentElement;
+                    let depth = 0;
+                    while (parent && depth < 5) {
+                        if (parent.classList.contains('feed-shared-update-v2') || 
+                            parent.classList.contains('occludable-update') ||
+                            parent.getAttribute('data-testid')?.includes('activity-card') ||
+                            parent.getAttribute('data-test-id')?.includes('activity-card') ||
+                            parent.querySelector('.feed-shared-text, .update-components-text')) {
+                            postContainer = parent;
+                            break;
+                        }
+                        parent = parent.parentElement;
+                        depth++;
+                    }
+                    allPosts.add(postContainer);
+                });
+            }
+            
+            // If still no posts, try finding by text content structure
+            if (allPosts.size === 0) {
+                console.log('🔍 Trying to find posts by content structure...');
+                const possiblePosts = searchScope.querySelectorAll('div, article');
+                const postsByStructure = Array.from(possiblePosts).filter(el => {
+                    // Look for elements that have:
+                    // 1. Text content
+                    // 2. Some interaction buttons (like, comment, share)
+                    // 3. Are visible
+                    const hasText = el.textContent && el.textContent.trim().length > 50;
+                    const hasInteractions = el.querySelector('button[aria-label*="Like"], button[aria-label*="Comment"], button[aria-label*="Share"], button[aria-label*="like"], button[aria-label*="comment"], button[aria-label*="share"]');
+                    const isVisible = el.offsetHeight > 0 && el.offsetWidth > 0;
+                    const hasAuthor = el.querySelector('img[alt*="profile"], [class*="actor"], [class*="author"], [data-testid*="actor"]');
+                    
+                    return hasText && hasInteractions && isVisible && hasAuthor;
+                });
+                
+                if (postsByStructure.length > 0) {
+                    console.log(`🔍 Found ${postsByStructure.length} potential posts by structure`);
+                    postsByStructure.forEach(post => allPosts.add(post));
+                }
+            }
+            
+            // Re-check posts after fallback attempts
+            posts = Array.from(allPosts).filter((post, index, self) => {
+                return index === self.findIndex(p => p === post);
+            }).filter(post => {
+                if (!post) return false;
+                
+                // Check visibility
+                const rect = post.getBoundingClientRect();
+                const isVisible = rect.height > 0 && rect.width > 0;
+                
+                // For listitem in mainFeed, just check visibility - accept them
+                if (isMainFeed && post.getAttribute('role') === 'listitem') {
+                    return isVisible;
+                }
+                
+                // For others, check content
+                const hasContent = post.textContent?.trim().length > 0 || 
+                                  post.querySelector('img, video, .feed-shared-text, .update-components-text');
+                
+                return isVisible && hasContent;
+            });
+            
+            if (posts.length === 0) {
+                console.log('❌ Still no posts found after all attempts');
+                return;
+            } else {
+                console.log(`✅ Found ${posts.length} posts using alternative methods`);
+            }
         }
         
-        console.log(`✅ Found ${posts.length} unique posts`);
+        console.log(`✅ Found ${posts.length} unique posts after filtering`);
+        
+        if (posts.length === 0 && allPosts.size > 0) {
+            console.log(`⚠️ Warning: ${allPosts.size} posts found but ${posts.length} passed filtering`);
+            console.log('🔍 Debugging filter - checking first post:');
+            const firstPost = Array.from(allPosts)[0];
+            if (firstPost) {
+                const rect = firstPost.getBoundingClientRect();
+                const isListItem = firstPost.getAttribute('role') === 'listitem';
+                console.log('   - Is listitem:', isListItem);
+                console.log('   - Visible:', rect.height > 0 && rect.width > 0);
+                console.log('   - Dimensions:', rect.width, 'x', rect.height);
+                console.log('   - Has text:', (firstPost.textContent?.trim().length || 0) > 0);
+            }
+        }
         
         let buttonsAdded = 0;
         posts.forEach(post => {
@@ -939,8 +1429,41 @@
         scanAndAddButtons();
 
         // Observe for new posts (LinkedIn uses infinite scroll)
-        // Try multiple container selectors
-        const containerSelectors = [
+        // Try multiple container selectors - prioritize page-specific containers
+        const containerSelectors = isSearchResultsPage() ? [
+            '.search-results-container',  // Search results container
+            '.scaffold-finite-scroll__content',
+            'main',
+            '[role="main"]',
+        ] : isCompanyPage() ? [
+            '.feed-container-theme',  // Company page container
+            '.scaffold-finite-scroll__content',
+            'main',
+            '[role="main"]',
+        ] : isHashtagFeedPage() ? [
+            '[data-testid="mainFeed"]',  // Hashtag feeds use similar structure to main feed
+            '.feed-container-theme',
+            '.scaffold-finite-scroll__content',
+            'main',
+            '[role="main"]',
+        ] : isGroupPage() ? [
+            '.feed-container-theme',  // Groups use similar structure to company pages
+            '[data-testid="mainFeed"]',
+            '.scaffold-finite-scroll__content',
+            'main',
+            '[role="main"]',
+        ] : isMainFeedPage() ? [
+            '[data-testid="mainFeed"]',  // Main feed container
+            '.scaffold-finite-scroll__content',
+            'main',
+            '[role="main"]',
+            '.feed-container',
+            '.feed-container__content',
+            '#main-content',
+            '.global-feed',
+            'div[data-view-name="feed-container"]',
+            'div[data-view-name="feed"]'
+        ] : [
             '.scaffold-finite-scroll__content',
             'main',
             '[role="main"]',
