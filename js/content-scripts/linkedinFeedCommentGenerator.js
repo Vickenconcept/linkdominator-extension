@@ -34,12 +34,15 @@
         }, 2000);
     }
     
-    // Only run on LinkedIn feed pages
-    const isFeedPage = window.location.href.includes('linkedin.com/feed') || 
-                       window.location.pathname === '/feed' || 
-                       window.location.pathname.startsWith('/feed/');
+    // Check if current page is a feed page
+    function isFeedPage() {
+        return window.location.href.includes('linkedin.com/feed') || 
+               window.location.pathname === '/feed' || 
+               window.location.pathname.startsWith('/feed/');
+    }
     
-    if (!isFeedPage) {
+    // Only run on LinkedIn feed pages
+    if (!isFeedPage()) {
         console.log('⏭️ Not a feed page, skipping comment generator');
         return;
     }
@@ -602,7 +605,14 @@
     function addCommentButtonToPost(postElement) {
         // Check if button already exists
         if (postElement.querySelector('.ld-comment-gen-btn')) {
-            return;
+            return false; // Button already exists
+        }
+        
+        // Verify this is actually a post element (has some content)
+        const hasContent = postElement.querySelector('.feed-shared-text, .feed-shared-update-v2__description, [data-test-id="main-feed-activity-card"] .feed-shared-text, .update-components-text');
+        if (!hasContent && !postElement.getAttribute('data-urn')) {
+            // Skip if it doesn't look like a real post
+            return false;
         }
         
         // Try multiple container selectors to find the right parent
@@ -763,84 +773,331 @@
         });
         
         container.appendChild(btn);
-        console.log('✅ Added draggable comment button to post');
+        console.log('✅ Added draggable comment button to post', {
+            container: container.className,
+            hasContent: !!hasContent
+        });
+        return true; // Successfully added button
+    }
+
+    // Global observer and initialization state
+    let feedObserver = null;
+    let isInitialized = false;
+    let currentUrl = window.location.href;
+    let periodicCheckInterval = null;
+
+    /**
+     * Scan for posts and add buttons
+     */
+    function scanAndAddButtons() {
+        // Check if still on feed page
+        if (!isFeedPage()) {
+            console.log('⏭️ No longer on feed page, stopping scan');
+            return;
+        }
+
+        // Primary selectors for main feed posts (most common)
+        const primarySelectors = [
+            '.feed-shared-update-v2',
+            '.occludable-update',
+            '[data-test-id="main-feed-activity-card"]',
+            'div[data-urn*="activity:"]',
+            'article[data-urn*="activity:"]',
+        ];
+        
+        // Secondary selectors (fallback for different layouts)
+        const secondarySelectors = [
+            '.feed-shared-update-v2__update-content-wrapper',
+            '.feed-shared-update-v2__description-wrapper',
+            '.update-components-actor',
+            '.feed-shared-update-v2__update-content',
+            '[class*="feed-shared-update"]',
+            '[class*="update-components"]',
+        ];
+        
+        // Collect all unique posts from primary selectors first
+        const allPosts = new Set();
+        let foundWithPrimary = false;
+        
+        for (const selector of primarySelectors) {
+            const found = document.querySelectorAll(selector);
+            if (found.length > 0) {
+                foundWithPrimary = true;
+                found.forEach(post => {
+                    // Only add if it's a top-level post container, not nested
+                    const isTopLevel = !post.closest('.feed-shared-update-v2, .occludable-update, [data-test-id="main-feed-activity-card"]') || 
+                                      post.matches('.feed-shared-update-v2, .occludable-update, [data-test-id="main-feed-activity-card"]');
+                    if (isTopLevel) {
+                        allPosts.add(post);
+                    }
+                });
+            }
+        }
+        
+        // If no posts found with primary selectors, try secondary
+        if (!foundWithPrimary) {
+            console.log('⚠️ No posts found with primary selectors, trying secondary...');
+            for (const selector of secondarySelectors) {
+                const found = document.querySelectorAll(selector);
+                found.forEach(post => {
+                    // Find the parent post container
+                    const parentPost = post.closest('.feed-shared-update-v2, .occludable-update, [data-test-id="main-feed-activity-card"], div[data-urn*="activity:"], article[data-urn*="activity:"]');
+                    if (parentPost) {
+                        allPosts.add(parentPost);
+                    } else {
+                        // If no parent found, use the element itself if it looks like a post
+                        if (post.querySelector('.feed-shared-text, .feed-shared-update-v2__description, [data-test-id="main-feed-activity-card"]')) {
+                            allPosts.add(post);
+                        }
+                    }
+                });
+            }
+        }
+        
+        const posts = Array.from(allPosts);
+        
+        if (posts.length === 0) {
+            console.log('⚠️ No posts found with any selector');
+            console.log('🔍 Debug: Current URL:', window.location.href);
+            console.log('🔍 Debug: Page ready state:', document.readyState);
+            // Log what selectors are actually on the page
+            const debugSelectors = ['.feed-shared-update-v2', '.occludable-update', '[data-test-id="main-feed-activity-card"]'];
+            debugSelectors.forEach(sel => {
+                const count = document.querySelectorAll(sel).length;
+                if (count > 0) {
+                    console.log(`🔍 Found ${count} elements with selector: ${sel}`);
+                }
+            });
+            return;
+        }
+        
+        console.log(`✅ Found ${posts.length} unique posts`);
+        
+        let buttonsAdded = 0;
+        posts.forEach(post => {
+            const added = addCommentButtonToPost(post);
+            if (added) buttonsAdded++;
+        });
+        
+        console.log(`✅ Added ${buttonsAdded} buttons to posts`);
     }
 
     /**
      * Initialize: Find all posts and add buttons
      */
     function initialize() {
+        // Don't re-initialize if already initialized and on same page
+        if (isInitialized && currentUrl === window.location.href) {
+            return;
+        }
+
         console.log('🔍 Initializing LinkedIn Feed Comment Generator...');
+        
+        // Update current URL
+        currentUrl = window.location.href;
         
         // Wait for page to be interactive
         if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', initialize);
+            document.addEventListener('DOMContentLoaded', () => {
+                setTimeout(initialize, 1000);
+            });
             return;
         }
         
-        // Also wait a bit for LinkedIn's React to render
+        // Stop existing observer if any
+        if (feedObserver) {
+            feedObserver.disconnect();
+            feedObserver = null;
+        }
+
+        // Multiple scans to catch posts that load at different times
+        // Initial scan after short delay
         setTimeout(() => {
             scanAndAddButtons();
-        }, 1000);
+        }, 500);
+        
+        // Second scan after longer delay (for slower loading)
+        setTimeout(() => {
+            scanAndAddButtons();
+        }, 2000);
+        
+        // Third scan for very slow loading
+        setTimeout(() => {
+            scanAndAddButtons();
+        }, 4000);
 
-        // Find all feed update cards
-        const observer = new MutationObserver(() => {
+        // Create new observer for feed changes
+        feedObserver = new MutationObserver(() => {
             // Debounce to avoid too many calls
-            clearTimeout(observer.timeout);
-            observer.timeout = setTimeout(() => {
+            clearTimeout(feedObserver.timeout);
+            feedObserver.timeout = setTimeout(() => {
                 scanAndAddButtons();
             }, 500);
         });
-
-        function scanAndAddButtons() {
-            // Try multiple selectors for posts
-            const selectors = [
-                '.feed-shared-update-v2',
-                '.occludable-update',
-                '[data-test-id="main-feed-activity-card"]',
-                '.feed-shared-update-v2__update-content-wrapper',
-                'div[data-urn*="activity:"]'
-            ];
-            
-            let posts = [];
-            for (const selector of selectors) {
-                const found = document.querySelectorAll(selector);
-                if (found.length > 0) {
-                    posts = Array.from(found);
-                    console.log(`✅ Found ${posts.length} posts using selector: ${selector}`);
-                    break;
-                }
-            }
-            
-            if (posts.length === 0) {
-                console.log('⚠️ No posts found with any selector');
-                return;
-            }
-            
-            posts.forEach(post => {
-                addCommentButtonToPost(post);
-            });
-        }
 
         // Initial scan
         scanAndAddButtons();
 
         // Observe for new posts (LinkedIn uses infinite scroll)
-        const feedContainer = document.querySelector('.scaffold-finite-scroll__content') || 
-                             document.querySelector('main') || 
-                             document.querySelector('[role="main"]') ||
-                             document.body;
+        // Try multiple container selectors
+        const containerSelectors = [
+            '.scaffold-finite-scroll__content',
+            'main',
+            '[role="main"]',
+            '.feed-container',
+            '.feed-container__content',
+            '#main-content',
+            '.global-feed',
+            'div[data-view-name="feed-container"]',
+            'div[data-view-name="feed"]'
+        ];
         
-        if (feedContainer) {
-            observer.observe(feedContainer, {
+        let feedContainer = null;
+        for (const selector of containerSelectors) {
+            feedContainer = document.querySelector(selector);
+            if (feedContainer) {
+                console.log(`✅ Found feed container with selector: ${selector}`);
+                break;
+            }
+        }
+        
+        // Fallback to body if no specific container found
+        if (!feedContainer) {
+            feedContainer = document.body;
+            console.log('⚠️ Using document.body as feed container');
+        }
+        
+        if (feedContainer && feedObserver) {
+            feedObserver.observe(feedContainer, {
                 childList: true,
-                subtree: true
+                subtree: true,
+                attributes: false,
+                characterData: false
             });
-            console.log('👀 Observing feed container for new posts');
+            console.log('👀 Observing feed container for new posts', {
+                container: feedContainer.className || feedContainer.tagName,
+                selector: feedContainer.id ? `#${feedContainer.id}` : ''
+            });
         } else {
-            console.log('⚠️ Could not find feed container');
+            console.log('⚠️ Could not set up observer, will retry...');
+            // Retry after a delay
+            setTimeout(() => {
+                let retryContainer = null;
+                for (const selector of containerSelectors) {
+                    retryContainer = document.querySelector(selector);
+                    if (retryContainer) break;
+                }
+                if (!retryContainer) {
+                    retryContainer = document.body;
+                }
+                
+                if (retryContainer && feedObserver) {
+                    feedObserver.observe(retryContainer, {
+                        childList: true,
+                        subtree: true,
+                        attributes: false,
+                        characterData: false
+                    });
+                    console.log('✅ Retry: Now observing feed container');
+                }
+            }, 2000);
+        }
+
+        isInitialized = true;
+
+        // Set up periodic check to catch posts that load slowly
+        if (periodicCheckInterval) {
+            clearInterval(periodicCheckInterval);
+        }
+        
+        periodicCheckInterval = setInterval(() => {
+            if (!isFeedPage()) {
+                clearInterval(periodicCheckInterval);
+                periodicCheckInterval = null;
+                return;
+            }
+            // Always scan periodically to catch posts that load slowly or were missed
+            const existingButtons = document.querySelectorAll('.ld-comment-gen-btn').length;
+            const posts = document.querySelectorAll('.feed-shared-update-v2, .occludable-update, [data-test-id="main-feed-activity-card"], div[data-urn*="activity:"], article[data-urn*="activity:"]');
+            const postsWithoutButtons = Array.from(posts).filter(post => !post.querySelector('.ld-comment-gen-btn'));
+            
+            if (postsWithoutButtons.length > 0) {
+                console.log(`🔄 Periodic check: Found ${postsWithoutButtons.length} posts without buttons, scanning...`);
+                scanAndAddButtons();
+            } else if (posts.length > 0 && existingButtons === 0) {
+                // Posts exist but no buttons - force a scan
+                console.log('🔄 Periodic check: Posts exist but no buttons found, forcing scan...');
+                scanAndAddButtons();
+            }
+        }, 2000); // Check every 2 seconds (more frequent for main feed)
+    }
+
+    /**
+     * Handle SPA navigation
+     */
+    function handleNavigation() {
+        const newUrl = window.location.href;
+        
+        // Check if we're on a feed page
+        if (!isFeedPage()) {
+            // Clean up if we left feed page
+            if (feedObserver) {
+                feedObserver.disconnect();
+                feedObserver = null;
+            }
+            if (periodicCheckInterval) {
+                clearInterval(periodicCheckInterval);
+                periodicCheckInterval = null;
+            }
+            isInitialized = false;
+            return;
+        }
+        
+        // Only reinitialize if URL actually changed and we're still on a feed page
+        if (newUrl !== currentUrl) {
+            console.log('🔄 SPA navigation detected, reinitializing...', {
+                oldUrl: currentUrl,
+                newUrl: newUrl
+            });
+            isInitialized = false;
+            currentUrl = newUrl;
+            
+            // Wait a bit for LinkedIn to render new content
+            setTimeout(() => {
+                initialize();
+            }, 800);
+        } else if (!isInitialized) {
+            // URL didn't change but we're not initialized, initialize now
+            console.log('🔄 Reinitializing (was not initialized)...');
+            setTimeout(() => {
+                initialize();
+            }, 800);
         }
     }
+
+    // Intercept pushState and replaceState for SPA navigation
+    const originalPushState = history.pushState;
+    const originalReplaceState = history.replaceState;
+
+    history.pushState = function(...args) {
+        originalPushState.apply(history, args);
+        setTimeout(handleNavigation, 100);
+    };
+
+    history.replaceState = function(...args) {
+        originalReplaceState.apply(history, args);
+        setTimeout(handleNavigation, 100);
+    };
+
+    // Listen for popstate (back/forward navigation)
+    window.addEventListener('popstate', () => {
+        setTimeout(handleNavigation, 100);
+    });
+
+    // Also listen for hash changes (though LinkedIn doesn't use them much)
+    window.addEventListener('hashchange', () => {
+        setTimeout(handleNavigation, 100);
+    });
 
     // Start initialization after a short delay to ensure page is loaded
     if (document.readyState === 'complete') {
@@ -849,6 +1106,11 @@
         window.addEventListener('load', () => {
             setTimeout(initialize, 1500);
         });
+    }
+
+    // Also initialize immediately if DOM is already ready
+    if (document.readyState === 'interactive' || document.readyState === 'complete') {
+        setTimeout(initialize, 1500);
     }
 })();
 
