@@ -196,7 +196,14 @@ const getConnections = async (searchUrl, keywords, connectionDegrees, totalFollo
             }
         } catch(error) {
             console.error('FLC fetch error', error);
-            $('#displayFollowStatus').html(`Error: ${error.message || 'Something went wrong while trying to get connections!'}`);
+            
+            // Check for session expired error
+            if (window.displaySessionExpiredError && window.displaySessionExpiredError(error, '#displayFollowStatus')) {
+                // Error message already displayed
+            } else {
+                $('#displayFollowStatus').html(`Error: ${error.message || 'Something went wrong while trying to get connections!'}`);
+            }
+            
             $('.followConnect').attr('disabled', false);
         }
     }

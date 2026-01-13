@@ -15,7 +15,11 @@ const getAudience = (audienceId, total, filterApi, callback) => {
         url: `${filterApi}/audience/list?audienceId=${audienceId}&totalCount=${total}`
     });
     
-    fetch(`${filterApi}/audience/list?audienceId=${audienceId}&totalCount=${total}`)
+    fetch(`${filterApi}/audience/list?audienceId=${audienceId}&totalCount=${total}`, {
+        headers: {
+            'ngrok-skip-browser-warning': 'true'
+        }
+    })
         .then(res => {
             console.log('📡 getAudience: API response status:', res.status);
             if (!res.ok) {
@@ -430,6 +434,7 @@ const getAIContents = () => {
         method: 'get',
         beforeSend: function(req) {
             req.setRequestHeader('lk-id', linkedinId);
+            req.setRequestHeader('ngrok-skip-browser-warning', 'true');
         },
         url: url,
         success: function(res) {

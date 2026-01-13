@@ -231,6 +231,18 @@
             border-radius: 4px;
             margin-bottom: 16px;
         }
+        
+        .ld-comment-btn-regenerate {
+            background: #f3f2ef;
+            color: #0077b5;
+            border: 1px solid #0077b5;
+        }
+        
+        .ld-comment-btn-regenerate:hover {
+            background: #e8f4f8;
+            border-color: #005885;
+            color: #005885;
+        }
     `;
     document.head.appendChild(style);
 
@@ -264,6 +276,118 @@
             modal.classList.remove('active');
         }
     });
+
+    // Storage key prefix for localStorage
+    const STORAGE_KEY_PREFIX = 'ld_ai_comment_';
+    const MAX_STORED_COMMENTS = 100; // Limit stored comments to prevent localStorage bloat
+    
+    // Track current post hash and element references for regenerate functionality
+    let currentPostHash = null;
+    let currentPostContent = null;
+    let currentPostElement = null;
+    let currentGenButton = null;
+
+    /**
+     * Generate a simple hash from post content
+     */
+    function hashPostContent(content) {
+        let hash = 0;
+        const str = content.trim().toLowerCase();
+        if (str.length === 0) return hash;
+        for (let i = 0; i < str.length; i++) {
+            const char = str.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash; // Convert to 32-bit integer
+        }
+        return Math.abs(hash).toString(36);
+    }
+
+    /**
+     * Get stored comment for a post
+     */
+    function getStoredComment(postHash) {
+        try {
+            const key = STORAGE_KEY_PREFIX + postHash;
+            const stored = localStorage.getItem(key);
+            if (stored) {
+                return JSON.parse(stored);
+            }
+        } catch (error) {
+            console.error('Error reading stored comment:', error);
+        }
+        return null;
+    }
+
+    /**
+     * Save comment to localStorage
+     */
+    function saveComment(postHash, comment) {
+        try {
+            const key = STORAGE_KEY_PREFIX + postHash;
+            const data = {
+                comment: comment,
+                timestamp: Date.now()
+            };
+            localStorage.setItem(key, JSON.stringify(data));
+            
+            // Cleanup old comments periodically
+            cleanupOldComments();
+        } catch (error) {
+            console.error('Error saving comment:', error);
+            // If quota exceeded, cleanup and try again
+            if (error.name === 'QuotaExceededError') {
+                cleanupOldComments(true);
+                try {
+                    const key = STORAGE_KEY_PREFIX + postHash;
+                    localStorage.setItem(key, JSON.stringify({ comment: comment, timestamp: Date.now() }));
+                } catch (retryError) {
+                    console.error('Error saving comment after cleanup:', retryError);
+                }
+            }
+        }
+    }
+
+    /**
+     * Cleanup old comments to prevent localStorage bloat
+     */
+    function cleanupOldComments(aggressive = false) {
+        try {
+            const keys = Object.keys(localStorage);
+            const commentKeys = keys.filter(key => key.startsWith(STORAGE_KEY_PREFIX));
+            
+            if (commentKeys.length <= MAX_STORED_COMMENTS && !aggressive) {
+                return; // No cleanup needed
+            }
+            
+            // Get all stored comments with timestamps
+            const comments = commentKeys.map(key => {
+                try {
+                    const data = JSON.parse(localStorage.getItem(key));
+                    return {
+                        key: key,
+                        timestamp: data.timestamp || 0
+                    };
+                } catch (e) {
+                    return { key: key, timestamp: 0 };
+                }
+            });
+            
+            // Sort by timestamp (newest first)
+            comments.sort((a, b) => b.timestamp - a.timestamp);
+            
+            // Remove oldest comments, keep only the most recent MAX_STORED_COMMENTS
+            const toRemove = comments.slice(MAX_STORED_COMMENTS);
+            toRemove.forEach(item => {
+                localStorage.removeItem(item.key);
+            });
+            
+            if (toRemove.length > 0) {
+                console.log(`🧹 Cleaned up ${toRemove.length} old comments from localStorage`);
+            }
+        } catch (error) {
+            console.error('Error cleaning up old comments:', error);
+        }
+    }
 
     /**
      * Extract post content from LinkedIn feed post element
@@ -359,7 +483,7 @@
     /**
      * Show modal with generated comment
      */
-    function showCommentModal(comment, error = null) {
+    function showCommentModal(comment, error = null, onRegenerate = null) {
         if (error) {
             modalBody.innerHTML = `
                 <div class="ld-comment-error">${error}</div>
@@ -368,10 +492,15 @@
                 </div>
             `;
         } else {
+            const regenerateBtn = onRegenerate ? `
+                <button class="ld-comment-btn ld-comment-btn-regenerate" id="ldCommentRegenerateBtn">Regenerate</button>
+            ` : '';
+            
             modalBody.innerHTML = `
                 <textarea class="ld-comment-textarea" id="ldCommentText" readonly>${comment}</textarea>
                 <div class="ld-comment-modal-actions">
                     <button class="ld-comment-btn ld-comment-btn-secondary" onclick="document.getElementById('ldCommentModal').classList.remove('active')">Close</button>
+                    ${regenerateBtn}
                     <button class="ld-comment-btn ld-comment-btn-primary" id="ldCommentCopyBtn">Copy Comment</button>
                 </div>
             `;
@@ -390,6 +519,13 @@
                     }, 2000);
                 }
             });
+            
+            // Regenerate button handler
+            if (onRegenerate) {
+                document.getElementById('ldCommentRegenerateBtn').addEventListener('click', () => {
+                    onRegenerate();
+                });
+            }
         }
         
         modal.classList.add('active');
@@ -398,7 +534,11 @@
     /**
      * Handle comment generation button click
      */
-    async function handleCommentGeneration(btn, postElement) {
+    async function handleCommentGeneration(btn, postElement, forceRegenerate = false) {
+        // Store references for regenerate callback
+        currentGenButton = btn;
+        currentPostElement = postElement;
+        
         btn.classList.add('loading');
         btn.innerHTML = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="white" stroke-width="2" fill="none" stroke-dasharray="31.416" stroke-dashoffset="31.416"><animate attributeName="stroke-dasharray" dur="2s" values="0 31.416;15.708 15.708;0 31.416;0 31.416" repeatCount="indefinite"/><animate attributeName="stroke-dashoffset" dur="2s" values="0;-15.708;-31.416;-31.416" repeatCount="indefinite"/></circle></svg>';
         
@@ -409,12 +549,45 @@
                 throw new Error('Could not extract post content. Please try again.');
             }
             
+            // Generate hash for this post
+            const postHash = hashPostContent(postContent);
+            currentPostHash = postHash;
+            currentPostContent = postContent;
+            
+            // Check if comment exists in storage (unless forcing regenerate)
+            if (!forceRegenerate) {
+                const stored = getStoredComment(postHash);
+                if (stored && stored.comment) {
+                    // Show stored comment with regenerate option
+                    const regenerateCallback = () => {
+                        if (currentGenButton && currentPostElement) {
+                            handleCommentGeneration(currentGenButton, currentPostElement, true);
+                        }
+                    };
+                    showCommentModal(stored.comment, null, regenerateCallback);
+                    btn.classList.remove('loading');
+                    btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>';
+                    return;
+                }
+            }
+            
             // Show loading modal
             modalBody.innerHTML = '<div class="ld-comment-loading">Generating comment...</div>';
             modal.classList.add('active');
             
+            // Generate new comment
             const comment = await generateComment(postContent);
-            showCommentModal(comment);
+            
+            // Save to localStorage
+            saveComment(postHash, comment);
+            
+            // Show comment with regenerate option
+            const regenerateCallback = () => {
+                if (currentGenButton && currentPostElement) {
+                    handleCommentGeneration(currentGenButton, currentPostElement, true);
+                }
+            };
+            showCommentModal(comment, null, regenerateCallback);
         } catch (error) {
             showCommentModal('', error.message);
         } finally {

@@ -286,7 +286,14 @@ const mtuGetConnections = async (searchUrl, keywords, connectionDegrees, mtuStar
             }
         } catch(error) {
             console.error('Error fetching connections:', error);
-            $('#displayMessageTargetStatus').html(`Error: ${error.message || 'Something went wrong while trying to get connections!'}`);
+            
+            // Check for session expired error
+            if (window.displaySessionExpiredError && window.displaySessionExpiredError(error, '#displayMessageTargetStatus')) {
+                // Error message already displayed
+            } else {
+                $('#displayMessageTargetStatus').html(`Error: ${error.message || 'Something went wrong while trying to get connections!'}`);
+            }
+            
             $('.messageTargetUserAction').attr('disabled', false);
         }
     }

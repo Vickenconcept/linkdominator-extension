@@ -305,8 +305,36 @@ window.fetchPhantomSearchResults = async (options = {}) => {
     });
     
     if (!response.ok) {
-        const body = await response.text();
-        throw new Error(`Search export failed: ${response.status} ${body}`);
+        let errorData;
+        try {
+            errorData = await response.json();
+        } catch (e) {
+            const body = await response.text();
+            throw new Error(`Search export failed: ${response.status} ${body}`);
+        }
+        
+        // Check for session expired error
+        if (errorData.error_code === 'LINKEDIN_SESSION_EXPIRED' || errorData.error_type === 'session_expired') {
+            const error = new Error(errorData.message || 'LinkedIn session cookie expired');
+            error.errorCode = 'LINKEDIN_SESSION_EXPIRED';
+            error.errorType = 'session_expired';
+            error.crmUrl = errorData.crm_url;
+            error.helpMessage = errorData.help_message;
+            error.instructions = errorData.instructions;
+            throw error;
+        }
+        
+        // Check for network timeout error
+        if (errorData.error_code === 'NETWORK_TIMEOUT' || errorData.error_type === 'network_timeout') {
+            const error = new Error(errorData.message || 'Network timeout');
+            error.errorCode = 'NETWORK_TIMEOUT';
+            error.errorType = 'network_timeout';
+            error.helpMessage = errorData.help_message;
+            error.suggestions = errorData.suggestions;
+            throw error;
+        }
+        
+        throw new Error(errorData.message || `Search export failed: ${response.status}`);
     }
     
     const data = await response.json();
@@ -319,6 +347,87 @@ window.fetchPhantomSearchResults = async (options = {}) => {
     } else {
         return data; // Return as-is
     }
+};
+
+/**
+ * Display user-friendly error message for session expired errors
+ * @param {Error} error - The error object
+ * @param {string} statusElementId - The ID of the element to display the error in
+ */
+window.displaySessionExpiredError = function(error, statusElementId) {
+    if (error.errorCode === 'LINKEDIN_SESSION_EXPIRED' || error.errorType === 'session_expired') {
+        const crmUrl = error.crmUrl || (typeof PLATFORM_URL !== 'undefined' ? PLATFORM_URL.replace('/api', '') + '/social-account' : '');
+        const instructions = error.instructions || [
+            '1. Go to Social Accounts page in your CRM',
+            '2. Find your LinkedIn account',
+            '3. Update the session cookie (li_at) and user agent',
+            '4. Save and try again'
+        ];
+        
+        let errorHtml = `
+            <div style="background: #fff3cd; border: 2px solid #ffc107; border-radius: 8px; padding: 15px; margin: 10px 0;">
+                <h3 style="color: #856404; margin-top: 0; font-size: 16px; font-weight: bold;">
+                    🔐 LinkedIn Session Cookie Expired
+                </h3>
+                <p style="color: #856404; margin: 10px 0;">
+                    ${error.helpMessage || 'Your LinkedIn session cookie has expired or is invalid. Please update it to continue.'}
+                </p>
+                <div style="background: white; padding: 10px; border-radius: 4px; margin: 10px 0;">
+                    <strong style="color: #856404;">Steps to fix:</strong>
+                    <ol style="color: #856404; margin: 5px 0; padding-left: 20px;">
+                        ${instructions.map(step => `<li>${step}</li>`).join('')}
+                    </ol>
+                </div>
+                ${crmUrl ? `
+                    <a href="${crmUrl}" target="_blank" 
+                       style="display: inline-block; background: #0077b5; color: white; padding: 10px 20px; 
+                              text-decoration: none; border-radius: 4px; font-weight: bold; margin-top: 10px;">
+                        🔗 Open Social Accounts Page
+                    </a>
+                ` : ''}
+            </div>
+        `;
+        
+        $(statusElementId).html(errorHtml);
+        return true;
+    }
+    
+    // Handle network timeout errors
+    if (error.errorCode === 'NETWORK_TIMEOUT' || error.errorType === 'network_timeout') {
+        const suggestions = error.suggestions || [
+            '1. Check your internet connection',
+            '2. Verify your server can access external APIs',
+            '3. Check if a firewall is blocking connections',
+            '4. Try again in a few moments'
+        ];
+        
+        let errorHtml = `
+            <div style="background: #f8d7da; border: 2px solid #dc3545; border-radius: 8px; padding: 15px; margin: 10px 0;">
+                <h3 style="color: #721c24; margin-top: 0; font-size: 16px; font-weight: bold;">
+                    🌐 Network Connection Timeout
+                </h3>
+                <p style="color: #721c24; margin: 10px 0;">
+                    ${error.helpMessage || 'Cannot connect to PhantomBuster API. This is usually a network connectivity issue.'}
+                </p>
+                <div style="background: white; padding: 10px; border-radius: 4px; margin: 10px 0;">
+                    <strong style="color: #721c24;">Suggestions:</strong>
+                    <ul style="color: #721c24; margin: 5px 0; padding-left: 20px;">
+                        ${suggestions.map(suggestion => `<li>${suggestion}</li>`).join('')}
+                    </ul>
+                </div>
+                <button onclick="location.reload()" 
+                        style="display: inline-block; background: #dc3545; color: white; padding: 10px 20px; 
+                               border: none; border-radius: 4px; font-weight: bold; margin-top: 10px; cursor: pointer;">
+                    🔄 Retry
+                </button>
+            </div>
+        `;
+        
+        $(statusElementId).html(errorHtml);
+        return true;
+    }
+    
+    return false;
 };
 
 // Unified audience fetching function to avoid duplicates across modules

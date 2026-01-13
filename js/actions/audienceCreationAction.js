@@ -262,8 +262,35 @@ const fsGetConnections = async () => {
                 });
 
                 if (!response.ok) {
-                    const body = await response.text();
-                    throw new Error(`Search export failed: ${response.status} ${body}`);
+                    let errorData;
+                    try {
+                        errorData = await response.json();
+                    } catch (e) {
+                        const body = await response.text();
+                        throw new Error(`Search export failed: ${response.status} ${body}`);
+                    }
+                    
+                    // Check for specific error types
+                    if (errorData.error_code === 'LINKEDIN_SESSION_EXPIRED' || errorData.error_type === 'session_expired') {
+                        const error = new Error(errorData.message || 'LinkedIn session cookie expired');
+                        error.errorCode = 'LINKEDIN_SESSION_EXPIRED';
+                        error.errorType = 'session_expired';
+                        error.crmUrl = errorData.crm_url;
+                        error.helpMessage = errorData.help_message;
+                        error.instructions = errorData.instructions;
+                        throw error;
+                    }
+                    
+                    if (errorData.error_code === 'NETWORK_TIMEOUT' || errorData.error_type === 'network_timeout') {
+                        const error = new Error(errorData.message || 'Network timeout');
+                        error.errorCode = 'NETWORK_TIMEOUT';
+                        error.errorType = 'network_timeout';
+                        error.helpMessage = errorData.help_message;
+                        error.suggestions = errorData.suggestions;
+                        throw error;
+                    }
+                    
+                    throw new Error(errorData.message || `Search export failed: ${response.status}`);
                 }
 
                 res = await response.json();
@@ -509,7 +536,23 @@ const fsGetConnections = async () => {
         } catch (error) {
             console.error('Error in getConnectionsLooper:', error);
             
-            if (retryCount < maxRetries) {
+            // Check if this is a network timeout or session expired error - don't retry these
+            const isNetworkTimeout = error.errorCode === 'NETWORK_TIMEOUT' || error.errorType === 'network_timeout' || 
+                                     error.message.includes('Network timeout') || error.message.includes('NETWORK_TIMEOUT');
+            const isSessionExpired = error.errorCode === 'LINKEDIN_SESSION_EXPIRED' || error.errorType === 'session_expired';
+            
+            if ((isNetworkTimeout || isSessionExpired) || retryCount >= maxRetries) {
+                // Don't retry for network timeout or session expired errors, or if max retries reached
+                window.searchActive = false;
+                
+                // Check for session expired or network timeout errors
+                if (window.displaySessionExpiredError && window.displaySessionExpiredError(error, '#afc-displayNewAudienceStatus')) {
+                    // Error message already displayed
+                } else {
+                    handleAudienceCreationError(error, 'fsGetConnections');
+                }
+            } else if (retryCount < maxRetries) {
+                // Retry for other errors
                 retryCount++;
                 console.log(`Retrying connections fetch (${retryCount}/${maxRetries})...`);
                 
@@ -523,9 +566,6 @@ const fsGetConnections = async () => {
                         window.getConnectionsLooper();
                     }
                 }, LINKEDIN_API_CONFIG.retryDelay * retryCount);
-            } else {
-                window.searchActive = false;
-                handleAudienceCreationError(error, 'fsGetConnections');
             }
         }
     };

@@ -979,7 +979,14 @@ const addcGetConnections = (addcConnectIdList, searchUrl, keywords, connectionDe
             }
         } catch(error) {
             console.error('Error fetching connections:', error);
-            $('#addc-displayConnectStatus').html(`Error: ${error.message || 'Something went wrong while trying to get connections!'}`);
+            
+            // Check for session expired error
+            if (window.displaySessionExpiredError && window.displaySessionExpiredError(error, '#addc-displayConnectStatus')) {
+                // Error message already displayed
+            } else {
+                $('#addc-displayConnectStatus').html(`Error: ${error.message || 'Something went wrong while trying to get connections!'}`);
+            }
+            
             $('.addConnect').attr('disabled', false);
         }
     }

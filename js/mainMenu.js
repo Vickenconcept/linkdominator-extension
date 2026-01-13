@@ -73,10 +73,7 @@ var mainMenu = `
         <span id="message-followup-menu-click">
             <i class="fas fa-comments fa-lg sm-icon"></i>&nbsp;Message Follow Up
         </span>
-        <div class="menu-divider-menu"></div>
-        <span id="auto-respond-menu-click">
-            <i class="fas fa-reply fa-lg sm-icon"></i>&nbsp;&nbsp;Auto Respond Messages 
-        </span>
+        
         <div class="menu-divider-menu"></div>
         <span id="connection-info-menu-click">
             <i class="fas fa-cloud-download-alt fa-lg sm-icon"></i>&nbsp;Get Connection Info 

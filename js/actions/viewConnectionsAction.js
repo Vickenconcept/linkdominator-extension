@@ -268,7 +268,14 @@ const vcpGetConnections = async (searchUrl, keywords, connectionDegrees, vcpStar
             }
         } catch(error) {
             console.error('❌ View Connections: Error fetching connections:', error);
-            $('#displayViewConnectionStatus').html(`Error: ${error.message || 'Something went wrong while trying to get connections!'}`);
+            
+            // Check for session expired error
+            if (window.displaySessionExpiredError && window.displaySessionExpiredError(error, '#displayViewConnectionStatus')) {
+                // Error message already displayed
+            } else {
+                $('#displayViewConnectionStatus').html(`Error: ${error.message || 'Something went wrong while trying to get connections!'}`);
+            }
+            
             $('.viewConnetionsAction').attr('disabled', false);
         }
     }

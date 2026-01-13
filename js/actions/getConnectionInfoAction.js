@@ -250,7 +250,14 @@ const gciGetConnections = async (searchUrl, keywords, connectionDegrees, gciStar
             }
         } catch(error) {
             console.error('❌ Get Connections Info: Error fetching connections:', error);
-            $('#displayGetConnectInfoStatus').html(`Error: ${error.message || 'Error searching LinkedIn. Please try again or check console for details.'}`);
+            
+            // Check for session expired error
+            if (window.displaySessionExpiredError && window.displaySessionExpiredError(error, '#displayGetConnectInfoStatus')) {
+                // Error message already displayed
+            } else {
+                $('#displayGetConnectInfoStatus').html(`Error: ${error.message || 'Error searching LinkedIn. Please try again or check console for details.'}`);
+            }
+            
             $('.connectionInfoAction').attr('disabled', false);
         }
     }
