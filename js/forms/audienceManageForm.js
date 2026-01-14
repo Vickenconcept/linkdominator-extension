@@ -15,7 +15,8 @@ var manageAudienceList = `
                                 <th>Contacts</th>
                                 <th>Add</th>
                                 <th>View</th>
-                                <th>Export</th>
+                                <th>Export CSV</th>
+                                <th id="espExportHeader" style="display: none;">Export to ESP</th>
                                 <th>
                                     <div class="juez-tooltip">
                                         <i class="far fa-plus-square fa-lg cursorr openAudienceForm"></i>
@@ -65,9 +66,85 @@ var manageAudienceList = `
         </div>
     </div>
 </div>
+
+<!-- ESP Selection Modal -->
+<div class="modal fade" id="espSelectionModal" tabindex="-1" role="dialog" aria-labelledby="espSelectionModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered" role="document">
+        <div class="modal-content border-0 shadow-lg">
+            <div class="modal-header" style="background: linear-gradient(135deg, #0077b5 0%, #005885 100%); color: white; border-0">
+                <h5 class="modal-title" id="espSelectionModalLabel">
+                    <i class="fas fa-paper-plane me-2"></i>
+                    Export to Email Service Provider
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-dismiss="modal" aria-label="Close">&times;</button>
+            </div>
+            <div class="modal-body py-4">
+                <p class="text-muted mb-4">Select an email service provider to export your audience:</p>
+                <div id="espOptionsList" class="list-group">
+                    <!-- ESP options will be populated here -->
+                </div>
+                <div id="noEspConfigured" class="alert alert-info mt-3" style="display: none;">
+                    <i class="fas fa-info-circle me-2"></i>
+                    <strong>No ESP configured.</strong> Please configure an email service provider in your <a href="/profile" target="_blank" style="text-decoration: underline;">profile settings</a> first.
+                </div>
+            </div>
+            <div class="modal-footer border-0">
+                <button type="button" class="btn btn-secondary px-4" data-dismiss="modal">
+                    <i class="fas fa-times me-2"></i>Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
 `;
 
 $('body').append(manageAudienceList);
+
+// Global variables to store configured ESPs (accessible across files)
+window.configuredEspList = [];
+window.hasEspConfig = false;
+
+// Function to fetch ESP configuration (globally accessible)
+window.fetchEspConfig = async () => {
+    try {
+        const linkedinId = (typeof window.getLinkedInIdForApi === 'function' 
+            ? window.getLinkedInIdForApi() 
+            : (typeof linkedinId !== 'undefined' ? linkedinId : $('#me-publicIdentifier').val()));
+        
+        console.log('📡 [EXTENSION] Fetching ESP configuration...');
+        
+        const response = await $.ajax({
+            method: 'GET',
+            url: `${filterApi}/esp/config`,
+            headers: {
+                'ngrok-skip-browser-warning': 'true',
+                'lk-id': linkedinId || ''
+            }
+        });
+        
+        if (response && response.status === 200 && response.data) {
+            window.configuredEspList = response.data.esps || [];
+            window.hasEspConfig = response.data.has_config || false;
+            
+            console.log('✅ [EXTENSION] ESP configuration loaded', {
+                configured_count: window.configuredEspList.length,
+                esps: window.configuredEspList.map(e => e.name)
+            });
+            
+            return { success: true, esps: window.configuredEspList, hasConfig: window.hasEspConfig };
+        } else {
+            console.warn('⚠️ [EXTENSION] Invalid ESP config response', response);
+            window.configuredEspList = [];
+            window.hasEspConfig = false;
+            return { success: false, esps: [], hasConfig: false };
+        }
+    } catch (error) {
+        console.error('❌ [EXTENSION] Failed to fetch ESP config', error);
+        window.configuredEspList = [];
+        window.hasEspConfig = false;
+        return { success: false, esps: [], hasConfig: false };
+    }
+};
 
 // Add custom styles for the delete confirmation modal
 const customStyles = `
@@ -178,20 +255,16 @@ const getAudienceNameList = async () => {
         // Handle the response structure consistently
         if (response && response.success && response.data && response.data.audience) {
             audienceInfo = response.data.audience;
-            console.log('📊 Found audiences in response.data.audience:', audienceInfo.length);
         }
         // Handle enhanced apiRequest response format  
         else if (response && response.data && response.data.audience) {
             audienceInfo = response.data.audience;
-            console.log('📊 Found audiences in response.data.audience (enhanced):', audienceInfo.length);
         }
         // Fallback for old format
         else if (Array.isArray(response.audience)) {
             audienceInfo = response.audience;
-            console.log('📊 Found audiences in response.audience:', audienceInfo.length);
         }
         
-        console.log('📋 Final audience data:', audienceInfo);
 
         if (audienceInfo && audienceInfo.length > 0) {
                         $('#pager-audience-list').pagination({
@@ -202,6 +275,17 @@ const getAudienceNameList = async () => {
                                 $('#audience-name-list').empty()
 
                                 $.each(audienceInfo, function(i,item){
+                                    // Conditionally show ESP export column
+                                    const espExportColumn = window.hasEspConfig ? `
+                                            <td>
+                                                <div class="juez-tooltip">
+                                        <i class="fas fa-paper-plane export-esp cursorr" 
+                                            data-audid="${item.audience_id}" 
+                                            data-name="${item.audience_name}"></i>
+                                        <span class="juez-tooltiptext">Export to ESP</span>
+                                                </div>
+                                            </td>` : '';
+                                    
                                     displayList = `
                                         <tr class="audience-list${item.id}">
                                             <td>${item.audience_name}</td>
@@ -227,9 +311,10 @@ const getAudienceNameList = async () => {
                                         <i class="fas fa-download export-audience cursorr" 
                                             data-audid="${item.audience_id}" 
                                             data-name="${item.audience_name}"></i>
-                                        <span class="juez-tooltiptext">Export audience</span>
+                                        <span class="juez-tooltiptext">Export CSV</span>
                                                 </div>
                                             </td>
+                                            ${espExportColumn}
                                             <td>
                                                 <div class="juez-tooltip">
                                         <i class="fas fa-trash cursorr delete-audience" 
@@ -247,7 +332,8 @@ const getAudienceNameList = async () => {
             });
             console.log(`🎉 Successfully loaded ${audienceInfo.length} audiences`);
         } else {
-            $('#audience-name-list').html('<tr><td colspan="6" class="text-center">No audiences found. Create your first audience!</td></tr>');
+            const colspan = window.hasEspConfig ? 7 : 6;
+            $('#audience-name-list').html(`<tr><td colspan="${colspan}" class="text-center">No audiences found. Create your first audience!</td></tr>`);
             console.log('ℹ️ No audiences found for this user');
                 }
         
@@ -524,7 +610,8 @@ $('body').on('click','.delete-audience',function(){
                             
                             // Check if no more rows exist
                             if ($('#audience-name-list tr').length === 0) {
-                                $('#audience-name-list').html('<tr><td colspan="6" class="text-center">No audiences found. Create your first audience!</td></tr>');
+                                const colspan = window.hasEspConfig ? 7 : 6;
+            $('#audience-name-list').html(`<tr><td colspan="${colspan}" class="text-center">No audiences found. Create your first audience!</td></tr>`);
                             }
                         }); 
                     } else {
@@ -550,18 +637,49 @@ $('body').on('click','.delete-audience',function(){
 
 $('body').on('click','.export-audience',function(){
     var audienceId = $(this).data('audid');
+    const audienceName = $(this).data('name') || 'Unknown';
+    
+    console.log('📤 [EXTENSION] Export button clicked', {
+        audienceId: audienceId,
+        audienceName: audienceName,
+        timestamp: new Date().toISOString()
+    });
+    
     const date = new Date();
     const d = date.getDate();
     const m = date.getMonth();
     const y = date.getFullYear();
     const mtn = date.getMinutes();
     const fileName =  `contact_data_${d}${m}${y}${mtn}.csv`;
+    
+    const exportUrl = `${filterApi}/audience/list/export?audienceId=${audienceId}`;
+    console.log('📡 [EXTENSION] Making export request', {
+        url: exportUrl,
+        method: 'GET',
+        audienceId: audienceId
+    });
 
     $.ajax({
         method: 'get',
-        url: `${filterApi}/audience/list/export?audienceId=${audienceId}`,
+        url: exportUrl,
+        headers: {
+            'ngrok-skip-browser-warning': 'true' // Bypass ngrok warning page
+        },
         success: function(data){
+            console.log('✅ [EXTENSION] Export response received', {
+                hasData: !!data,
+                hasAudience: !!(data && data.audience),
+                audienceLength: data && data.audience ? data.audience.length : 0,
+                audienceId: audienceId
+            });
+            
             if(data && data.audience && data.audience.length > 0){
+                console.log('📊 [EXTENSION] Processing CSV export', {
+                    recordCount: data.audience.length,
+                    fileName: fileName,
+                    headers: Object.keys(data.audience[0])
+                });
+                
                 const csvRows = [];
                 const headers = Object.keys(data.audience[0]);
                 csvRows.push(headers.join(','));
@@ -582,10 +700,181 @@ $('body').on('click','.export-audience',function(){
                 link.href = window.URL.createObjectURL(blob);
                 link.download = fileName;
                 link.click();
+                
+                console.log('💾 [EXTENSION] CSV file download initiated', {
+                    fileName: fileName,
+                    blobSize: blob.size,
+                    recordCount: data.audience.length
+                });
+            } else {
+                console.warn('⚠️ [EXTENSION] Export response has no data', {
+                    data: data,
+                    audienceId: audienceId
+                });
+                alert('No data available to export for this audience.');
             }
         },
-        error: function(error){
-            console.log(error)
+        error: function(xhr, status, error){
+            console.error('❌ [EXTENSION] Export request failed', {
+                status: status,
+                error: error,
+                statusCode: xhr.status,
+                responseText: xhr.responseText,
+                audienceId: audienceId,
+                url: exportUrl
+            });
+            alert('Failed to export audience data. Please check the console for details.');
+        }
+    })
+})
+
+// ESP Export handler
+$('body').on('click','.export-esp',async function(){
+    var audienceId = $(this).data('audid');
+    const audienceName = $(this).data('name') || 'Unknown';
+    
+    console.log('📤 [EXTENSION] ESP Export button clicked', {
+        audienceId: audienceId,
+        audienceName: audienceName,
+        timestamp: new Date().toISOString()
+    });
+    
+    // Refresh ESP config before showing modal
+    const espConfig = await window.fetchEspConfig();
+    
+    if (!espConfig.hasConfig || window.configuredEspList.length === 0) {
+        alert('No email service providers configured. Please configure an ESP in your profile settings first.');
+        return;
+    }
+    
+    // Store current audience ID for the modal
+    $('#espSelectionModal').data('audience-id', audienceId);
+    $('#espSelectionModal').data('audience-name', audienceName);
+    
+    // Populate ESP options in modal
+    const espOptionsList = $('#espOptionsList');
+    espOptionsList.empty();
+    
+    configuredEspList.forEach((esp) => {
+        const espOption = $(`
+            <a href="#" class="list-group-item list-group-item-action esp-option" data-esp-type="${esp.type}">
+                <div class="d-flex w-100 justify-content-between align-items-center">
+                    <h6 class="mb-1">
+                        <i class="fas fa-paper-plane me-2" style="color: #0077b5;"></i>
+                        ${esp.name}
+                    </h6>
+                </div>
+            </a>
+        `);
+        espOptionsList.append(espOption);
+    });
+    
+    // Show modal
+    $('#espSelectionModal').modal({backdrop: 'static', keyboard: false, show: true});
+})
+
+// Handle ESP selection from modal
+$('body').on('click', '.esp-option', function(e) {
+    e.preventDefault();
+    const selectedEspType = $(this).data('esp-type');
+    const audienceId = $('#espSelectionModal').data('audience-id');
+    const audienceName = $('#espSelectionModal').data('audience-name');
+    const selectedEspName = window.configuredEspList.find(e => e.type === selectedEspType)?.name || selectedEspType;
+    
+    console.log('📡 [EXTENSION] ESP selected for export', {
+        espType: selectedEspType,
+        espName: selectedEspName,
+        audienceId: audienceId
+    });
+    
+    // Close modal
+    $('#espSelectionModal').modal('hide');
+    
+    // Show loading indicator
+    const loadingMsg = $(`
+        <div style="position: fixed; top: 20px; right: 20px; z-index: 99999; min-width: 300px; background: white; border-left: 4px solid #0077b5; padding: 15px 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); border-radius: 4px;">
+            <i class="fas fa-spinner fa-spin me-2" style="color: #0077b5;"></i>
+            <span style="color: #333; font-weight: 500;">Exporting to ${selectedEspName}...</span>
+        </div>
+    `);
+    $('body').append(loadingMsg);
+    
+    // Get LinkedIn ID for authorization
+    const linkedinId = (typeof window.getLinkedInIdForApi === 'function' 
+        ? window.getLinkedInIdForApi() 
+        : (typeof linkedinId !== 'undefined' ? linkedinId : $('#me-publicIdentifier').val()));
+    
+    $.ajax({
+        method: 'POST',
+        url: `${filterApi}/audiences/export/${audienceId}`,
+        headers: {
+            'ngrok-skip-browser-warning': 'true',
+            'lk-id': linkedinId || ''
+        },
+        data: {
+            type: 'esp',
+            espType: selectedEspType
+        },
+        success: function(response){
+            loadingMsg.remove();
+            
+            console.log('✅ [EXTENSION] ESP Export response received', {
+                response: response,
+                audienceId: audienceId,
+                espType: selectedEspType
+            });
+            
+            if (response && response.status === 200) {
+                const message = response.message || `Successfully exported to ${selectedEspName}`;
+                const sharedCount = response.data && response.data.shared_count ? response.data.shared_count : 'N/A';
+                const skippedCount = response.data && response.data.skipped_count ? response.data.skipped_count : 'N/A';
+                
+                const successMsg = $(`
+                    <div style="position: fixed; top: 20px; right: 20px; z-index: 99999; min-width: 300px; background: white; border-left: 4px solid #28a745; padding: 15px 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); border-radius: 4px;">
+                        <i class="fas fa-check-circle me-2" style="color: #28a745;"></i>
+                        <strong style="color: #333;">Success!</strong><br>
+                        <span style="color: #333;">${message}</span><br>
+                        <small style="color: #666;">Shared: ${sharedCount} leads | Skipped: ${skippedCount} leads</small>
+                    </div>
+                `);
+                $('body').append(successMsg);
+                setTimeout(() => successMsg.fadeOut(500, () => successMsg.remove()), 5000);
+            } else {
+                alert('Export completed. Check console for details.');
+            }
+        },
+        error: function(xhr, status, error){
+            loadingMsg.remove();
+            
+            console.error('❌ [EXTENSION] ESP Export request failed', {
+                status: status,
+                error: error,
+                statusCode: xhr.status,
+                responseText: xhr.responseText,
+                audienceId: audienceId,
+                espType: selectedEspType
+            });
+            
+            let errorMessage = 'Failed to export to ESP. ';
+            if (xhr.responseJSON && xhr.responseJSON.message) {
+                errorMessage = xhr.responseJSON.message;
+            } else if (xhr.status === 400) {
+                errorMessage = 'Please configure this ESP in your profile settings first.';
+            } else if (xhr.status === 401) {
+                errorMessage = 'Authentication failed. Please refresh the page.';
+            } else {
+                errorMessage = 'An error occurred. Please check the console for details.';
+            }
+            
+            const errorMsg = $(`
+                <div style="position: fixed; top: 20px; right: 20px; z-index: 99999; min-width: 300px; background: white; border-left: 4px solid #dc3545; padding: 15px 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); border-radius: 4px;">
+                    <i class="fas fa-exclamation-circle me-2" style="color: #dc3545;"></i>
+                    <strong style="color: #333;">Error:</strong><br>
+                    <span style="color: #333;">${errorMessage}</span>
+                </div>
+            `);
+            $('body').append(errorMsg);
+            setTimeout(() => errorMsg.fadeOut(500, () => errorMsg.remove()), 7000);
         }
     })
 })
@@ -600,12 +889,12 @@ $('body').on('click','.retry-audience-list',function(){
 const showErrorAlert = (message) => {
     // Create error alert HTML
     const errorAlert = `
-        <div class="alert alert-danger alert-dismissible fade show position-fixed" 
-             style="top: 20px; right: 20px; z-index: 9999; min-width: 300px;" 
+        <div class="alert-dismissible fade show position-fixed" 
+             style="top: 20px; right: 20px; z-index: 99999; min-width: 300px; background: white; border-left: 4px solid #dc3545; padding: 15px 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); border-radius: 4px;" 
              role="alert">
-            <i class="fas fa-exclamation-circle me-2"></i>
-            <strong>Error:</strong> ${message}
-            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            <i class="fas fa-exclamation-circle me-2" style="color: #dc3545;"></i>
+            <strong style="color: #333;">Error:</strong> <span style="color: #333;">${message}</span>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close" style="opacity: 0.5;"></button>
         </div>
     `;
     

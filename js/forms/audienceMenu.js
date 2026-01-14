@@ -75,8 +75,18 @@ $('body').on('click','.openAudienceForm',function(){
     $('#audienceCreationForm').modal({backdrop:'static', keyboard:false, show:true})
 })
 
-$('body').on('click','#manageAudienceForm',function(){
+$('body').on('click','#manageAudienceForm',async function(){
     $('#audienceMenu').modal('hide');
+    // Fetch ESP config when opening manage form (if function exists)
+    if (typeof window.fetchEspConfig === 'function') {
+        await window.fetchEspConfig();
+        // Show/hide ESP export header based on configuration
+        if (typeof window.hasEspConfig !== 'undefined' && window.hasEspConfig) {
+            $('#espExportHeader').show();
+        } else {
+            $('#espExportHeader').hide();
+        }
+    }
     // Always refresh the audience list when opening manage form
     getAudienceNameList();
     $('#manageAudienceList').modal({backdrop:'static', keyboard:false, show:true});

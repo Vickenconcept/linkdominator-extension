@@ -34,14 +34,15 @@
         }, 2000);
     }
     
-    // Check if current page is a feed page, search results, company, hashtag, or group page
+    // Check if current page is a feed page, search results, company, hashtag, group, or posts page
     function isFeedPage() {
         return window.location.href.includes('linkedin.com/feed') || 
                window.location.pathname === '/feed' || 
                window.location.pathname.startsWith('/feed/') ||
                window.location.pathname.includes('/search/results/') ||
                window.location.pathname.includes('/company/') ||
-               window.location.pathname.includes('/groups/');
+               window.location.pathname.includes('/groups/') ||
+               window.location.pathname.includes('/posts/');
     }
     
     // Check if we're on the main feed page (not a single post)
@@ -54,7 +55,13 @@
     
     // Check if we're on a single post page
     function isSinglePostPage() {
-        return window.location.pathname.includes('/feed/update/');
+        return window.location.pathname.includes('/feed/update/') || 
+               window.location.pathname.includes('/posts/');
+    }
+    
+    // Check if we're on a /posts/ page (individual post page)
+    function isPostsPage() {
+        return window.location.pathname.includes('/posts/');
     }
     
     // Check if we're on a search results page
@@ -77,13 +84,10 @@
         return window.location.pathname.includes('/groups/');
     }
     
-    // Only run on LinkedIn feed pages, search results, company, hashtag, or group pages
+    // Only run on LinkedIn feed pages, search results, company, hashtag, group, or posts pages
     if (!isFeedPage()) {
-        console.log('⏭️ Not a feed, search results, company, hashtag, or group page, skipping comment generator');
         return;
     }
-    
-    console.log('🚀 LinkedIn Feed Comment Generator script loaded');
 
     // CSS for the comment generator button and modal
     const style = document.createElement('style');
@@ -424,9 +428,7 @@
                 localStorage.removeItem(item.key);
             });
             
-            if (toRemove.length > 0) {
-                console.log(`🧹 Cleaned up ${toRemove.length} old comments from localStorage`);
-            }
+            // Cleaned up old comments from localStorage
         } catch (error) {
             console.error('Error cleaning up old comments:', error);
         }
@@ -666,11 +668,6 @@
      * Add comment generation button to post
      */
     function addCommentButtonToPost(postElement) {
-        // Check if button already exists
-        if (postElement.querySelector('.ld-comment-gen-btn')) {
-            return false; // Button already exists
-        }
-        
         // Verify this is actually a post element
         const isListItem = postElement.getAttribute('role') === 'listitem';
         const isMainFeed = isMainFeedPage(); // Check page type directly
@@ -678,9 +675,14 @@
         const isCompany = isCompanyPage(); // Check if company page
         const isHashtag = isHashtagFeedPage(); // Check if hashtag feed
         const isGroup = isGroupPage(); // Check if group page
+        const isPosts = isPostsPage(); // Check if /posts/ page
         const isSearchResultPost = postElement.classList.contains('search-results__search-feed-update');
         const isCompanyPost = postElement.classList.contains('feed-shared-update-v2') && isCompany;
         const isGroupPost = postElement.classList.contains('feed-shared-update-v2') && isGroup;
+        const isPostsPagePost = isPosts && (postElement.classList.contains('feed-shared-update-v2') || 
+            postElement.getAttribute('data-testid')?.includes('activity-card') ||
+            postElement.getAttribute('data-test-id')?.includes('activity-card') ||
+            postElement.querySelector('[data-urn*="activity:"]'));
         
         // Check for content (used later in logging)
         let hasContent = null;
@@ -712,6 +714,14 @@
         }
         // For group posts, accept them directly if visible
         else if (isGroupPost) {
+            const rect = postElement.getBoundingClientRect();
+            if (rect.height === 0 || rect.width === 0) {
+                return false; // Not visible
+            }
+            // Continue to add button - don't return early!
+        }
+        // For /posts/ page posts, accept them directly if visible
+        else if (isPostsPagePost) {
             const rect = postElement.getBoundingClientRect();
             if (rect.height === 0 || rect.width === 0) {
                 return false; // Not visible
@@ -759,6 +769,17 @@
             if (!container) {
                 container = postElement;
             }
+        } else if (isPosts) {
+            // For /posts/ pages, find the post container
+            container = postElement.querySelector('.feed-shared-update-v2, .occludable-update, [data-testid="main-feed-activity-card"], [data-test-id="main-feed-activity-card"], .feed-shared-update-v2__update-content-wrapper');
+            if (!container) {
+                // Try to find parent container
+                container = postElement.closest('.feed-shared-update-v2, .occludable-update, [data-testid="main-feed-activity-card"], [data-test-id="main-feed-activity-card"]');
+            }
+            if (!container) {
+                // If no container found, use the post element itself
+                container = postElement;
+            }
         } else {
             // For non-listitem elements, use original logic
             container = postElement.closest('.feed-shared-update-v2');
@@ -778,6 +799,25 @@
                 // If we still don't have a container, use the post element itself
                 container = postElement;
             }
+        }
+        
+        // Check if button already exists in container (where we'll add it)
+        // This prevents duplicate buttons when multiple elements match the same post
+        if (container.querySelector('.ld-comment-gen-btn')) {
+            return false; // Button already exists in container
+        }
+        // Also check if container itself is a button (shouldn't happen, but be safe)
+        if (container.classList && container.classList.contains('ld-comment-gen-btn')) {
+            return false;
+        }
+        // Check if any ancestor of the container has a button
+        // This catches cases where a parent element was used as container for another postElement
+        let checkElement = container.parentElement;
+        while (checkElement && checkElement !== document.body) {
+            if (checkElement.querySelector && checkElement.querySelector('.ld-comment-gen-btn')) {
+                return false; // Button exists in an ancestor of container
+            }
+            checkElement = checkElement.parentElement;
         }
         
         // Make container relative if needed
@@ -922,19 +962,6 @@
         });
         
         container.appendChild(btn);
-        console.log('✅ Added draggable comment button to post', {
-            container: container.className,
-            isMainFeed: isMainFeed,
-            isSearchResults: isSearchResults,
-            isCompany: isCompany,
-            isHashtag: isHashtag,
-            isGroup: isGroup,
-            isListItem: isListItem,
-            isSearchResultPost: isSearchResultPost,
-            isCompanyPost: isCompanyPost,
-            isGroupPost: isGroupPost,
-            hasContent: hasContent !== null ? !!hasContent : (isMainFeed || isSearchResults || isCompany || isHashtag || isGroup ? 'N/A (feed page)' : 'N/A')
-        });
         return true; // Successfully added button
     }
 
@@ -950,7 +977,6 @@
     function scanAndAddButtons() {
         // Check if still on feed page
         if (!isFeedPage()) {
-            console.log('⏭️ No longer on feed page, stopping scan');
             return;
         }
 
@@ -962,17 +988,13 @@
         const isCompany = isCompanyPage();
         const isHashtag = isHashtagFeedPage();
         const isGroup = isGroupPage();
-        
-        console.log(`🔍 Scanning for posts - Main Feed: ${isMainFeed}, Single Post: ${isSinglePost}, Search Results: ${isSearchResults}, Company: ${isCompany}, Hashtag: ${isHashtag}, Group: ${isGroup}`);
+        const isPosts = isPostsPage();
         
         // For main feed, search within the mainFeed container
         if (isMainFeed) {
             const mainFeedContainer = document.querySelector('[data-testid="mainFeed"]');
             if (mainFeedContainer) {
                 searchScope = mainFeedContainer;
-                console.log('✅ Found mainFeed container, searching within it');
-            } else {
-                console.log('⚠️ mainFeed container not found, searching entire document');
             }
         }
         
@@ -981,9 +1003,6 @@
             const searchResultsContainer = document.querySelector('.search-results-container');
             if (searchResultsContainer) {
                 searchScope = searchResultsContainer;
-                console.log('✅ Found search-results-container, searching within it');
-            } else {
-                console.log('⚠️ search-results-container not found, searching entire document');
             }
         }
         
@@ -992,9 +1011,6 @@
             const companyFeedContainer = document.querySelector('.feed-container-theme');
             if (companyFeedContainer) {
                 searchScope = companyFeedContainer;
-                console.log('✅ Found feed-container-theme container, searching within it');
-            } else {
-                console.log('⚠️ feed-container-theme container not found, searching entire document');
             }
         }
         
@@ -1003,9 +1019,6 @@
             const hashtagFeedContainer = document.querySelector('[data-testid="mainFeed"]') || document.querySelector('.feed-container-theme');
             if (hashtagFeedContainer) {
                 searchScope = hashtagFeedContainer;
-                console.log('✅ Found hashtag feed container, searching within it');
-            } else {
-                console.log('⚠️ hashtag feed container not found, searching entire document');
             }
         }
         
@@ -1014,9 +1027,14 @@
             const groupFeedContainer = document.querySelector('.feed-container-theme') || document.querySelector('[data-testid="mainFeed"]');
             if (groupFeedContainer) {
                 searchScope = groupFeedContainer;
-                console.log('✅ Found group feed container, searching within it');
-            } else {
-                console.log('⚠️ group feed container not found, searching entire document');
+            }
+        }
+        
+        // For /posts/ pages, search within main container
+        if (isPosts) {
+            const postsContainer = document.querySelector('main') || document.querySelector('[role="main"]') || document.querySelector('.scaffold-finite-scroll__content');
+            if (postsContainer) {
+                searchScope = postsContainer;
             }
         }
 
@@ -1052,6 +1070,16 @@
             'div[data-urn*="activity:"]',
             'article[data-urn*="activity:"]',
             '.occludable-update',
+        ] : isPosts ? [
+            // /posts/ page selectors - individual post pages
+            '[data-testid="main-feed-activity-card"]',
+            '[data-test-id="main-feed-activity-card"]',
+            '.feed-shared-update-v2',
+            '.occludable-update',
+            'article[data-urn*="activity:"]',
+            'div[data-urn*="activity:"]',
+            '.update-components-actor',
+            '[class*="feed-shared-update"]',
         ] : isMainFeed ? [
             '[role="listitem"]',  // Main feed posts are in listitem containers
             '[data-testid="main-feed-activity-card"]',
@@ -1088,34 +1116,35 @@
             const found = searchScope.querySelectorAll(selector);
             if (found.length > 0) {
                 foundWithPrimary = true;
-                console.log(`✅ Found ${found.length} elements with selector: ${selector}`);
                 found.forEach(post => {
                     // For search results, accept .search-results__search-feed-update directly
                     if (isSearchResults && post.classList.contains('search-results__search-feed-update')) {
                         allPosts.add(post);
-                        console.log(`   ✅ Added search result post to allPosts`);
                     }
                     // For company pages, accept .feed-shared-update-v2 directly
                     else if (isCompany && post.classList.contains('feed-shared-update-v2')) {
                         allPosts.add(post);
-                        console.log(`   ✅ Added company page post to allPosts`);
                     }
                     // For hashtag feeds with role="listitem", accept them directly
                     else if (isHashtag && post.getAttribute('role') === 'listitem') {
                         allPosts.add(post);
-                        console.log(`   ✅ Added hashtag feed post to allPosts`);
                     }
                     // For groups, accept .feed-shared-update-v2 directly
                     else if (isGroup && post.classList.contains('feed-shared-update-v2')) {
                         allPosts.add(post);
-                        console.log(`   ✅ Added group post to allPosts`);
+                    }
+                    // For /posts/ pages, accept posts with activity card or feed-shared-update-v2
+                    else if (isPosts && (post.classList.contains('feed-shared-update-v2') || 
+                        post.getAttribute('data-testid')?.includes('activity-card') ||
+                        post.getAttribute('data-test-id')?.includes('activity-card') ||
+                        post.querySelector('[data-urn*="activity:"]'))) {
+                        allPosts.add(post);
                     }
                     // For main feed with role="listitem", accept them directly
                     // They're already in the mainFeed container, so they're posts
                     else if (isMainFeed && post.getAttribute('role') === 'listitem') {
                         // Add all listitems - they're posts in mainFeed
                         allPosts.add(post);
-                        console.log(`   ✅ Added listitem to allPosts`);
                     } else if (isMainFeed || isHashtag) {
                         // For other selectors on main feed or hashtag, find parent listitem or use directly
                         const parentListItem = post.closest('[role="listitem"]');
@@ -1134,7 +1163,6 @@
         
         // If no posts found with primary selectors, try secondary
         if (!foundWithPrimary) {
-            console.log('⚠️ No posts found with primary selectors, trying secondary...');
             for (const selector of secondarySelectors) {
                 const found = searchScope.querySelectorAll(selector);
                 found.forEach(post => {
@@ -1155,15 +1183,34 @@
         // Convert Set to Array
         let posts = Array.from(allPosts);
         
-        console.log(`📊 Before filtering: ${posts.length} posts in allPosts`);
-        console.log(`📊 allPosts Set size: ${allPosts.size}`);
-        
-        // Filter out duplicates
+        // Filter out duplicates - improved logic for /posts/ pages
+        // Check if elements are the same object OR if one contains the other (same post)
         posts = posts.filter((post, index, self) => {
-            return index === self.findIndex(p => p === post);
+            // First check: exact same element
+            const exactMatch = self.findIndex(p => p === post);
+            if (exactMatch === index) {
+                return true; // Keep first occurrence
+            }
+            // Second check: if this post contains or is contained by another post, it's a duplicate
+            const isDuplicate = self.some((p, otherIndex) => {
+                if (otherIndex >= index) return false; // Only check earlier elements
+                // Check if one contains the other
+                if (post.contains && post.contains(p)) {
+                    return true; // This post contains an earlier one, so this is a duplicate
+                }
+                if (p.contains && p.contains(post)) {
+                    return true; // An earlier post contains this one, so this is a duplicate
+                }
+                // Check if they share the same activity URN (same post)
+                const postUrn = post.getAttribute('data-urn') || post.querySelector('[data-urn*="activity:"]')?.getAttribute('data-urn');
+                const pUrn = p.getAttribute('data-urn') || p.querySelector('[data-urn*="activity:"]')?.getAttribute('data-urn');
+                if (postUrn && pUrn && postUrn === pUrn) {
+                    return true; // Same activity URN, so same post
+                }
+                return false;
+            });
+            return !isDuplicate; // Keep if not a duplicate
         });
-        
-        console.log(`📊 After deduplication: ${posts.length} posts`);
         
         // SIMPLE, STABLE filtering - no complex logic
         const filteredPosts = [];
@@ -1204,6 +1251,15 @@
                 continue;
             }
             
+            // For /posts/ page posts, accept if visible - NO CONTENT CHECK
+            if (isPosts && (post.classList.contains('feed-shared-update-v2') || 
+                post.getAttribute('data-testid')?.includes('activity-card') ||
+                post.getAttribute('data-test-id')?.includes('activity-card') ||
+                post.querySelector('[data-urn*="activity:"]'))) {
+                filteredPosts.push(post);
+                continue;
+            }
+            
             // For other posts (single post pages), check if it has some content
             const hasContent = post.textContent?.trim().length > 0 || 
                               post.querySelector('img, video, .feed-shared-text, .update-components-text');
@@ -1214,13 +1270,8 @@
         }
         
         posts = filteredPosts;
-        console.log(`📊 After filtering: ${posts.length} posts`);
         
         if (posts.length === 0) {
-            console.log('⚠️ No posts found with any selector');
-            console.log('🔍 Debug: Current URL:', window.location.href);
-            console.log('🔍 Debug: Page ready state:', document.readyState);
-            
             // Comprehensive debugging - check all possible selectors
             const allDebugSelectors = [
                 '[role="listitem"]',  // Priority for main feed
@@ -1243,24 +1294,9 @@
                 '[data-test-id*="card"]',
             ];
             
-            console.log('🔍 Checking all selectors on page...');
-            console.log(`🔍 Search scope: ${isMainFeed ? 'mainFeed container' : 'entire document'}`);
             allDebugSelectors.forEach(sel => {
                 const found = searchScope.querySelectorAll(sel);
-                if (found.length > 0) {
-                    console.log(`✅ Found ${found.length} elements with selector: ${sel}`);
-                    // Log first element's classes for debugging
-                    if (found[0]) {
-                        console.log(`   First element classes: ${found[0].className}`);
-                        const dataAttrs = {};
-                        for (let attr of found[0].attributes) {
-                            if (attr.name.startsWith('data-')) {
-                                dataAttrs[attr.name] = attr.value;
-                            }
-                        }
-                        console.log(`   First element data attributes:`, dataAttrs);
-                    }
-                }
+                // Check selectors silently
             });
             
             // Try to find posts by structure (elements with activity URNs)
@@ -1271,7 +1307,6 @@
             });
             
             if (activityDivs.length > 0) {
-                console.log(`🔍 Found ${activityDivs.length} divs with activity URNs`);
                 // Try using these as posts
                 activityDivs.forEach(div => {
                     // Find the parent container that looks like a post
@@ -1296,7 +1331,6 @@
             
             // If still no posts, try finding by text content structure
             if (allPosts.size === 0) {
-                console.log('🔍 Trying to find posts by content structure...');
                 const possiblePosts = searchScope.querySelectorAll('div, article');
                 const postsByStructure = Array.from(possiblePosts).filter(el => {
                     // Look for elements that have:
@@ -1312,7 +1346,6 @@
                 });
                 
                 if (postsByStructure.length > 0) {
-                    console.log(`🔍 Found ${postsByStructure.length} potential posts by structure`);
                     postsByStructure.forEach(post => allPosts.add(post));
                 }
             }
@@ -1340,26 +1373,7 @@
             });
             
             if (posts.length === 0) {
-                console.log('❌ Still no posts found after all attempts');
                 return;
-            } else {
-                console.log(`✅ Found ${posts.length} posts using alternative methods`);
-            }
-        }
-        
-        console.log(`✅ Found ${posts.length} unique posts after filtering`);
-        
-        if (posts.length === 0 && allPosts.size > 0) {
-            console.log(`⚠️ Warning: ${allPosts.size} posts found but ${posts.length} passed filtering`);
-            console.log('🔍 Debugging filter - checking first post:');
-            const firstPost = Array.from(allPosts)[0];
-            if (firstPost) {
-                const rect = firstPost.getBoundingClientRect();
-                const isListItem = firstPost.getAttribute('role') === 'listitem';
-                console.log('   - Is listitem:', isListItem);
-                console.log('   - Visible:', rect.height > 0 && rect.width > 0);
-                console.log('   - Dimensions:', rect.width, 'x', rect.height);
-                console.log('   - Has text:', (firstPost.textContent?.trim().length || 0) > 0);
             }
         }
         
@@ -1368,8 +1382,6 @@
             const added = addCommentButtonToPost(post);
             if (added) buttonsAdded++;
         });
-        
-        console.log(`✅ Added ${buttonsAdded} buttons to posts`);
     }
 
     /**
@@ -1380,8 +1392,6 @@
         if (isInitialized && currentUrl === window.location.href) {
             return;
         }
-
-        console.log('🔍 Initializing LinkedIn Feed Comment Generator...');
         
         // Update current URL
         currentUrl = window.location.href;
@@ -1452,6 +1462,13 @@
             '.scaffold-finite-scroll__content',
             'main',
             '[role="main"]',
+        ] : isPostsPage() ? [
+            // /posts/ pages - individual post pages
+            'main',
+            '[role="main"]',
+            '.scaffold-finite-scroll__content',
+            '[data-testid="mainFeed"]',
+            '.feed-container',
         ] : isMainFeedPage() ? [
             '[data-testid="mainFeed"]',  // Main feed container
             '.scaffold-finite-scroll__content',
@@ -1479,7 +1496,6 @@
         for (const selector of containerSelectors) {
             feedContainer = document.querySelector(selector);
             if (feedContainer) {
-                console.log(`✅ Found feed container with selector: ${selector}`);
                 break;
             }
         }
@@ -1487,7 +1503,6 @@
         // Fallback to body if no specific container found
         if (!feedContainer) {
             feedContainer = document.body;
-            console.log('⚠️ Using document.body as feed container');
         }
         
         if (feedContainer && feedObserver) {
@@ -1497,12 +1512,7 @@
                 attributes: false,
                 characterData: false
             });
-            console.log('👀 Observing feed container for new posts', {
-                container: feedContainer.className || feedContainer.tagName,
-                selector: feedContainer.id ? `#${feedContainer.id}` : ''
-            });
         } else {
-            console.log('⚠️ Could not set up observer, will retry...');
             // Retry after a delay
             setTimeout(() => {
                 let retryContainer = null;
@@ -1521,7 +1531,6 @@
                         attributes: false,
                         characterData: false
                     });
-                    console.log('✅ Retry: Now observing feed container');
                 }
             }, 2000);
         }
@@ -1545,11 +1554,9 @@
             const postsWithoutButtons = Array.from(posts).filter(post => !post.querySelector('.ld-comment-gen-btn'));
             
             if (postsWithoutButtons.length > 0) {
-                console.log(`🔄 Periodic check: Found ${postsWithoutButtons.length} posts without buttons, scanning...`);
                 scanAndAddButtons();
             } else if (posts.length > 0 && existingButtons === 0) {
                 // Posts exist but no buttons - force a scan
-                console.log('🔄 Periodic check: Posts exist but no buttons found, forcing scan...');
                 scanAndAddButtons();
             }
         }, 2000); // Check every 2 seconds (more frequent for main feed)
@@ -1578,10 +1585,6 @@
         
         // Only reinitialize if URL actually changed and we're still on a feed page
         if (newUrl !== currentUrl) {
-            console.log('🔄 SPA navigation detected, reinitializing...', {
-                oldUrl: currentUrl,
-                newUrl: newUrl
-            });
             isInitialized = false;
             currentUrl = newUrl;
             
@@ -1591,7 +1594,6 @@
             }, 800);
         } else if (!isInitialized) {
             // URL didn't change but we're not initialized, initialize now
-            console.log('🔄 Reinitializing (was not initialized)...');
             setTimeout(() => {
                 initialize();
             }, 800);

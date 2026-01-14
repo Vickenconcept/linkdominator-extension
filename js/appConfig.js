@@ -335,11 +335,33 @@ const remainedTime = (delayTime, totalConnect) => {
 
 // based on module action
 const sendStats = async (totalFollow, module) => {
+  const profileId = $('#me-publicIdentifier').val();
+  const url = `${filterApi}/activites?module=${module}&stat=${totalFollow}&identifier=${profileId}`;
+  
+  console.log('📊 [User Activity] Sending stats to backend:', {
+    module: module,
+    stat: totalFollow,
+    profileId: profileId,
+    url: url
+  });
+  
   await ajaxPromise({
       method: 'post',
-      url: `${filterApi}/activites?module=${module}&stat=${totalFollow}&identifier=${$('#me-publicIdentifier').val()}`,
-      success: function(data){},
+      url: url,
+      success: function(data){
+        console.log('✅ [User Activity] Stats saved successfully:', {
+          module: module,
+          stat: totalFollow,
+          response: data
+        });
+      },
       error: function(err, textStatus){
+        console.error('❌ [User Activity] Failed to save stats:', {
+          module: module,
+          stat: totalFollow,
+          error: err,
+          textStatus: textStatus
+        });
         if(err.hasOwnProperty('responseJSON') && err.responseJSON && err.responseJSON.data && err.responseJSON.data.message)
           console.log(err.responseJSON.data.message);
         else console.log(textStatus);
@@ -361,15 +383,14 @@ const connectionStat = async () => {
     url: `${voyagerApi}/relationships/connectionsSummary`,
     success: function(data){
       let totalConnection = data.numConnections
+      
       if(data.entityUrn.includes('urn:li:fs_relConnectionsSummary:')){}
         let publicId = data.entityUrn.replace('urn:li:fs_relConnectionsSummary:','')
 
       pendingInviteStat(totalConnection, publicId)
     },
     error: function(err, textStatus){
-      if(err.hasOwnProperty('responseJSON') && err.responseJSON && err.responseJSON.data && err.responseJSON.data.message)
-        console.log(err.responseJSON.data.message);
-      else console.log(textStatus);
+      // Silent error handling
     }
   })
 }
@@ -392,9 +413,7 @@ const pendingInviteStat = async (totalConnection, publicId) => {
       profileViewStat(totalConnection, numTotalSentInvitations, publicId)
     },
     error: function(err, textStatus){
-      if(err.hasOwnProperty('responseJSON') && err.responseJSON && err.responseJSON.data && err.responseJSON.data.message)
-        console.log(err.responseJSON.data.message);
-      else console.log(textStatus);
+      // Silent error handling
     }
   })
 }
@@ -424,51 +443,27 @@ const profileViewStat = async (totalConnection, numTotalSentInvitations, publicI
           profileView = changePercentage
         else
           profileView = '+'+ changePercentage
-        // searchAppearanceStat(totalConnection, numTotalSentInvitations, profileView, publicId)
       }
-      searchAppearanceStat(totalConnection, numTotalSentInvitations, profileView, publicId)
+      sendMiniStats(totalConnection, numTotalSentInvitations, profileView)
     },
     error: function(err, textStatus){
-      if(err.hasOwnProperty('responseJSON') && err.responseJSON && err.responseJSON.data && err.responseJSON.data.message)
-        console.log(err.responseJSON.data.message);
-      else console.log(textStatus);
+      // Silent error handling
     }
   })
 }
 
-const searchAppearanceStat = async (totalConnection, numTotalSentInvitations, profileView, publicId) => {
-  await ajaxPromise({
-    method: 'get',
-    beforeSend: function(request) {
-      request.setRequestHeader('csrf-token', jsession);
-      request.setRequestHeader('content-type', contentType);
-      request.setRequestHeader('x-li-lang', xLiLang);
-      request.setRequestHeader('x-li-page-instance', 'urn:li:page:d_flagship3_feed;mzVS2p1xTZCOWo+RnDKNag==');
-      request.setRequestHeader('x-li-track', JSON.stringify({"clientVersion":"1.10.2031.2","osName":"web","timezoneOffset":1,"deviceFormFactor":"DESKTOP","mpName":"voyager-web"}));
-      request.setRequestHeader('x-restli-protocol-version', xRestliProtocolVersion);
-    },
-    url: `${voyagerApi}/identity/profiles/${publicId}/dashboard`,
-    success: function(data){
-      let searchAppearance = data.numSearchAppearances
-      sendMiniStats(totalConnection, numTotalSentInvitations, profileView, searchAppearance)
-    },
-    error: function(err, textStatus){
-      if(err.hasOwnProperty('responseJSON') && err.responseJSON && err.responseJSON.data && err.responseJSON.data.message)
-        console.log(err.responseJSON.data.message);
-      else console.log(textStatus);
-    }
-  })
-}
-
-const sendMiniStats = async (totalConnection, numTotalSentInvitations, profileView, searchAppearance) => {
+const sendMiniStats = async (totalConnection, numTotalSentInvitations, profileView) => {
+  const profileId = $('#me-publicIdentifier').val();
+  const url = `${filterApi}/conf?connection=${totalConnection}&sentInvite=${numTotalSentInvitations}&profileView=${profileView}&profileId=${profileId}`;
+  
   await ajaxPromise({
     method: 'post',
-    url: `${filterApi}/conf?connection=${totalConnection}&sentInvite=${numTotalSentInvitations}&profileView=${profileView}&searchAppear=${searchAppearance}&profileId=${$('#me-publicIdentifier').val()}`,
-    success: function(data){},
+    url: url,
+    success: function(data){
+      // Silent success
+    },
     error: function(err, textStatus){
-      if(err.hasOwnProperty('responseJSON') && err.responseJSON && err.responseJSON.data && err.responseJSON.data.message)
-        console.log(err.responseJSON.data.message);
-      else console.log(textStatus);
+      // Silent error handling
     }
   })
 }

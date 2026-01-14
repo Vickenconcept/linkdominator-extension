@@ -446,25 +446,20 @@ const getAudienceList = async (fieldId) => {
         // Handle the response structure from successResponse method
         if (response && response.success && response.data && response.data.audience) {
             audienceArr = response.data.audience;
-            console.log('📊 Found audiences in response.data.audience:', audienceArr.length);
         }
         // Handle enhanced apiRequest response format
         else if (response && response.data && response.data.audience) {
             audienceArr = response.data.audience;
-            console.log('📊 Found audiences in response.data.audience (enhanced):', audienceArr.length);
         }
         // Fallback: check for direct audience array (old format)
         else if (Array.isArray(response)) {
             if (response.length > 0 && Array.isArray(response[0].audience)) {
                 audienceArr = response[0].audience;
-                console.log('📊 Found audiences in response[0].audience:', audienceArr.length);
             }
         } else if (Array.isArray(response.audience)) {
             audienceArr = response.audience;
-            console.log('📊 Found audiences in response.audience:', audienceArr.length);
         }
         
-        console.log('📋 Final audience array:', audienceArr);
         
         // Clear loading and populate dropdown
         $(`#${fieldId}`).empty();
@@ -482,15 +477,12 @@ const getAudienceList = async (fieldId) => {
                     value: audienceArr[i].audience_id,
                     html: `${audienceArr[i].audience_name} (${audienceArr[i].total || 0} leads)`
                 }).appendTo(`#${fieldId}`);
-                console.log(`✅ Added audience: ${audienceArr[i].audience_name} (ID: ${audienceArr[i].audience_id})`);
             }
-            console.log(`🎉 Successfully populated ${audienceArr.length} audiences in dropdown`);
         } else {
             $('<option/>', {
                 value: '',
                 html: 'No audiences found - create one first'
             }).appendTo(`#${fieldId}`);
-            console.log('ℹ️ No audiences found for this user');
         }
         
         return audienceArr;
@@ -516,12 +508,6 @@ const getAudienceList = async (fieldId) => {
         }
         
         // Provide helpful troubleshooting info
-        console.log('🔧 Troubleshooting:');
-        console.log('   1. Check if backend server is running');
-        console.log('   2. Verify API endpoint works in browser');
-        console.log('   3. Check browser network tab for detailed error');
-        console.log('   4. Try refreshing the page');
-        
         throw error;
     }
 }
