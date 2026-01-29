@@ -126,6 +126,8 @@ var messageAllConnectForm = `
                     </div>
                 </div>
 
+                <!-- Attachment functionality disabled - Browser automation does not support attachments -->
+                <!--
                 <div class="row">
                     <div class="col-md-4">
                         <div class="form-group">
@@ -156,6 +158,7 @@ var messageAllConnectForm = `
                     </div>
                 </div>
                 <ul class="list-group" id="lkm-mac-file-uploads"></ul>
+                -->
 
             </div>
             <div class="modal-footer">
@@ -217,12 +220,14 @@ $('body').on('click','#message-connect-menu-click',function(){
     
     helper.setAIContentToDropdown('mac-aicontent');
 
-    // Mount file list if exists
+    // Mount file list if exists - DISABLED: Browser automation does not support attachments
+    /*
     try {
         setFilesUploadedToList('lkm-mac');
     } catch (error) {
         console.error('❌ Error loading uploaded files:', error);
     }
+    */
 
     // Set form fields from storage
     try {
@@ -262,7 +267,8 @@ $('#mac-aicontent').change(function(){
     } 
 })
 
-// Handle image uploads
+// Handle image uploads - DISABLED: Browser automation does not support attachments
+/*
 $('body').on('change', '#mac-image', async function(ev) {
     console.log('🖼️ Processing image upload...');
     
@@ -321,7 +327,7 @@ $('body').on('change', '#mac-image', async function(ev) {
     }
 });
 
-// Handle file uploads
+// Handle file uploads - DISABLED: Browser automation does not support attachments
 $('body').on('change', '#mac-file', async function(ev) {
     console.log('📄 Processing file upload...');
     
@@ -380,7 +386,7 @@ $('body').on('change', '#mac-file', async function(ev) {
     }
 });
 
-// Handle file removal
+// Handle file removal - DISABLED: Browser automation does not support attachments
 $('body').on('click', '.lkm-mac-remove-upload', function() {
     const index = $(this).data('index');
     const lkmModule = $(this).data('module');
@@ -415,3 +421,4 @@ $('body').on('click', '.lkm-mac-remove-upload', function() {
         `);
     }
 });
+*/

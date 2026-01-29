@@ -97,6 +97,8 @@ var newJobCongratsForm = `
                     </div>
                 </div>
 
+                <!-- Attachment functionality disabled - Browser automation does not support attachments -->
+                <!--
                 <div class="row">
                     <div class="col-md-4">
                         <div class="form-group">
@@ -127,6 +129,7 @@ var newJobCongratsForm = `
                     </div>
                 </div>
                 <ul class="list-group" id="lkm-njc-file-uploads"></ul>
+                -->
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-primary btn-lg shadow-none newJobCongratsAction">Send</button>
@@ -145,8 +148,8 @@ $('body').on('click','#new-job-menu-click',function(){
     }
     implementPermission('newJobCongratsAction')
 
-    // Mount file list if exists
-    setFilesUploadedToList('lkm-njc')
+    // Mount file list if exists - DISABLED: Browser automation does not support attachments
+    // setFilesUploadedToList('lkm-njc')
 
     // setParamsToFormFields
     setParamsToFormFields('lkm-njc', {
@@ -164,8 +167,9 @@ $('body').on('click','.njc-pm-btn',function(){
 })
 
 /**
- * Handle file uploads
+ * Handle file uploads - DISABLED: Browser automation does not support attachments
  */
+/*
 let njcNoticeClass = '.newJobGreetings-notice',
     njcNoticeStatus = '#displayNewJobGreetingsStatus'
 
@@ -216,3 +220,4 @@ $('body').on('click','.lkm-njc-remove-upload',function() {
     removeFile(lkmModule, index)
     setFilesUploadedToList('lkm-njc')
 })
+*/

@@ -469,7 +469,7 @@ const sendNewJobGreetings = (recipientInfo, njcMessage, njcDelay) => {
                             trackingId: recipientInfo[i].trackingId,
                             value: {
                                 'com.linkedin.voyager.messaging.create.MessageCreate' : {
-                                    attachments: getNjcStore.uploads.length ? getNjcStore.uploads : [],
+                                    // attachments: getNjcStore.uploads.length ? getNjcStore.uploads : [], // DISABLED: Browser automation does not support attachments
                                     attributedBody: {
                                         attributes: [],
                                         text: newMessage

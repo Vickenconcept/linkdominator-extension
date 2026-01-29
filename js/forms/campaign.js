@@ -17,7 +17,7 @@ var campaignList = `
                 <div class="row"> 
                     <div class="col-12">
                         <div class="table-responsive tbl-fixed">
-                            <table class="table campaign-table">
+                            <table class="table table-hover campaign-table">
                                 <thead>
                                     <tr>
                                         <th scope="col" class="th-fixed">Name</th>
@@ -64,12 +64,23 @@ function loadCampaigns() {
 
 $('body').on('click', '#campaign-menu-click', function(){
     console.log('🔍 Campaign menu clicked');
+    
+    // Check auth first - show authorization card if not authenticated
+    if (typeof window.checkAuthAndShowCard === 'function') {
+        window.checkAuthAndShowCard();
+    }
+    
+    if ($('#accessCheck').val() == 401) {
+        // Show authorization card in sidebar
+        if (typeof window.checkAuthAndShowCard === 'function') {
+            window.checkAuthAndShowCard();
+        }
+        $('.modal-body').html('<h5><center><strong> UNAUTHORISED </strong></center></h5>')
+        return; // Don't open modal if not authenticated
+    }
+    
     if (typeof window.closeAllModals === 'function') {
         window.closeAllModals();
-    }
-    if ($('#accessCheck').val() == 401) {
-        $('.modal-body').html('<h5><center><strong> UNAUTHORISED </strong></center></h5>')
-        return;
     }
     
     // Small delay to ensure previous modal closes before opening new one

@@ -321,7 +321,7 @@ const bdwSendBirthdayMessage = async (recipientInfo, bdwMessage, bdwDelay) => {
                         eventCreate: {
                             value: {
                                 'com.linkedin.voyager.messaging.create.MessageCreate' : {
-                                    attachments: getBdwStore.uploads.length ? getBdwStore.uploads : [],
+                                    // attachments: getBdwStore.uploads.length ? getBdwStore.uploads : [], // DISABLED: Browser automation does not support attachments
                                     body: newMessage // message
                                 }
                             }

@@ -198,10 +198,3 @@ window.LinkDominatorDebug = {
         };
     }
 };
-
-// Auto-run basic checks when loaded
-console.log('🐛 LinkDominator Debug utilities loaded!');
-console.log('💡 Use LinkDominatorDebug.runAllTests() to test everything');
-console.log('💡 Use LinkDominatorDebug.checkConfig() to check configuration');
-console.log('💡 Use LinkDominatorDebug.testBackendHealth() to test backend');
-console.log('💡 Use LinkDominatorDebug.testApiConnection() to test API'); 

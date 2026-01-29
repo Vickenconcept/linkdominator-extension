@@ -458,7 +458,7 @@ var audienceCreationForm = `
                                 </div>
                             </label>
                             <textarea class="form-control shadow-none text-area-size" rows="3" id="afs-positiveKeywords" 
-                                placeholder="Ex: Ecommerce, Shopify, Affiliate Marketing"></textarea>
+                                data-name="Positive keyword" placeholder="Ex: Ecommerce, Shopify, Affiliate Marketing"></textarea>
                         </div>
                     </div>
                 </div>

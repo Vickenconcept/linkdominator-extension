@@ -45,11 +45,22 @@ if (typeof window.closeAllModals === 'undefined') {
 }
 
 $('body').on('click', '#audience-creation-menu-click', function(){
+    // Check auth first - show authorization card if not authenticated
+    if (typeof window.checkAuthAndShowCard === 'function') {
+        window.checkAuthAndShowCard();
+    }
+    
+    if ($('#accessCheck').val() == 401){
+        // Show authorization card in sidebar
+        if (typeof window.checkAuthAndShowCard === 'function') {
+            window.checkAuthAndShowCard();
+        }
+        $('.modal-body').html('<h5><center><strong> UNAUTHORISED </strong></center></h5>')
+        return; // Don't open modal if not authenticated
+    }
+    
     if (typeof window.closeAllModals === 'function') {
         window.closeAllModals();
-    }
-    if ($('#accessCheck').val() == 401){
-        $('.modal-body').html('<h5><center><strong> UNAUTHORISED </strong></center></h5>')
     }
     $('.newAudience-notice').hide()
     $('#displayNewAudienceStatus').empty()

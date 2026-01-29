@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Popup Test - Rounded Corners</title>
+    <style>
+        /* CRITICAL: Reset everything */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        html {
+            width: 400px;
+            height: 600px;
+            margin: 0 !important;
+            padding: 0 !important;
+            overflow: hidden !important;
+            background: transparent !important;
+        }
+        
+        body {
+            width: 100%;
+            height: 100%;
+            margin: 0 !important;
+            padding: 8px !important; /* ⚠️ CRITICAL: This creates space for rounded corners */
+            overflow: hidden !important;
+            background: transparent !important;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        
+        #app {
+            width: 100%;
+            height: 100%;
+            border-radius: 12px !important;
+            overflow: hidden !important;
+            background: #ffffff !important;
+            box-shadow: 0 4px 16px rgba(0, 119, 181, 0.15) !important;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #0077b5 0%, #005885 100%);
+            color: white;
+            padding: 20px;
+            border-top-left-radius: 12px;
+            border-top-right-radius: 12px;
+        }
+        
+        .content {
+            padding: 20px;
+            flex: 1;
+            overflow-y: auto;
+        }
+        
+        .footer {
+            background: #f8f9fa;
+            padding: 15px 20px;
+            border-bottom-left-radius: 12px;
+            border-bottom-right-radius: 12px;
+            border-top: 1px solid #e9ecef;
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <div class="header">
+            <h2 style="margin: 0; font-size: 18px;">✅ Rounded Corners Working!</h2>
+        </div>
+        <div class="content">
+            <p>If you can see rounded corners on this popup, the solution is working!</p>
+            <p><strong>Key points:</strong></p>
+            <ul style="margin-top: 10px; padding-left: 20px;">
+                <li>Body has <code>padding: 8px</code> to create space</li>
+                <li>Container has <code>border-radius: 12px</code></li>
+                <li>Container has <code>overflow: hidden</code></li>
+                <li>All styles use <code>!important</code> to override defaults</li>
+            </ul>
+        </div>
+        <div class="footer">
+            <small style="color: #6c757d;">Test popup with rounded corners</small>
+        </div>
+    </div>
+    
+    <script>
+        // Force apply styles as backup (in case CSS doesn't load)
+        (function() {
+            const app = document.getElementById('app');
+            const body = document.body;
+            const html = document.documentElement;
+            
+            // Force critical styles
+            if (app) {
+                app.style.borderRadius = '12px';
+                app.style.overflow = 'hidden';
+            }
+            body.style.padding = '8px';
+            html.style.overflow = 'hidden';
+            
+            console.log('✅ Styles applied:', {
+                bodyPadding: window.getComputedStyle(body).padding,
+                borderRadius: window.getComputedStyle(app).borderRadius,
+                overflow: window.getComputedStyle(app).overflow
+            });
+        })();
+    </script>
+</body>
+</html>

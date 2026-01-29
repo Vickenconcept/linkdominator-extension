@@ -111,8 +111,6 @@ window.fetchEspConfig = async () => {
             ? window.getLinkedInIdForApi() 
             : (typeof linkedinId !== 'undefined' ? linkedinId : $('#me-publicIdentifier').val()));
         
-        console.log('📡 [EXTENSION] Fetching ESP configuration...');
-        
         const response = await $.ajax({
             method: 'GET',
             url: `${filterApi}/esp/config`,
@@ -125,11 +123,6 @@ window.fetchEspConfig = async () => {
         if (response && response.status === 200 && response.data) {
             window.configuredEspList = response.data.esps || [];
             window.hasEspConfig = response.data.has_config || false;
-            
-            console.log('✅ [EXTENSION] ESP configuration loaded', {
-                configured_count: window.configuredEspList.length,
-                esps: window.configuredEspList.map(e => e.name)
-            });
             
             return { success: true, esps: window.configuredEspList, hasConfig: window.hasEspConfig };
         } else {
@@ -248,7 +241,6 @@ const getAudienceNameList = async () => {
     try {
         // Use the unified audience fetching function
         const response = await fetchAudiencesFromAPI();
-            console.log('✅ API Response:', response);
             
         let audienceInfo = [];
         
@@ -330,7 +322,6 @@ const getAudienceNameList = async () => {
                     });
                             }
             });
-            console.log(`🎉 Successfully loaded ${audienceInfo.length} audiences`);
         } else {
             const colspan = window.hasEspConfig ? 7 : 6;
             $('#audience-name-list').html(`<tr><td colspan="${colspan}" class="text-center">No audiences found. Create your first audience!</td></tr>`);
@@ -733,12 +724,6 @@ $('body').on('click','.export-esp',async function(){
     var audienceId = $(this).data('audid');
     const audienceName = $(this).data('name') || 'Unknown';
     
-    console.log('📤 [EXTENSION] ESP Export button clicked', {
-        audienceId: audienceId,
-        audienceName: audienceName,
-        timestamp: new Date().toISOString()
-    });
-    
     // Refresh ESP config before showing modal
     const espConfig = await window.fetchEspConfig();
     
@@ -781,12 +766,6 @@ $('body').on('click', '.esp-option', function(e) {
     const audienceName = $('#espSelectionModal').data('audience-name');
     const selectedEspName = window.configuredEspList.find(e => e.type === selectedEspType)?.name || selectedEspType;
     
-    console.log('📡 [EXTENSION] ESP selected for export', {
-        espType: selectedEspType,
-        espName: selectedEspName,
-        audienceId: audienceId
-    });
-    
     // Close modal
     $('#espSelectionModal').modal('hide');
     
@@ -817,12 +796,6 @@ $('body').on('click', '.esp-option', function(e) {
         },
         success: function(response){
             loadingMsg.remove();
-            
-            console.log('✅ [EXTENSION] ESP Export response received', {
-                response: response,
-                audienceId: audienceId,
-                espType: selectedEspType
-            });
             
             if (response && response.status === 200) {
                 const message = response.message || `Successfully exported to ${selectedEspName}`;

@@ -27,18 +27,26 @@ window.addEventListener('error', function(event) {
 
 var mainMenu = `
 <div id="mySidepanel" class="sidepanel" style="width:285px;display:none; z-index: 100000;">
-    <div class="inline-block">
-        <!--h5 class="nav-header"><b>LinkoMatic</b></h5-->
-        <a href="https://app.linkdominator.com" target="_blank">
-            <img src="https://app.linkdominator.com/images/linkdominator-brand.png" 
-            height="30" 
-            style="margin-left:35px;width:16rem;"
-            onerror="this.src='/images/linkdominator-brand.png'">
-        </a>
-        <span class="closebtn" id="close-nav"><i class="fas fa-minus closer"></i></span>
+    <div class="sidebar-header-dashboard">
+        <div class="dashboard-content">
+            <a href="https://app.linkdominator.com" target="_blank" class="brand-link">
+                <img src="https://app.linkdominator.com/images/linkdominator-brand.png" 
+                height="30" 
+                class="brand-logo"
+                onerror="this.src='/images/linkdominator-brand.png'">
+            </a>
+            <span class="closebtn" id="close-nav"><i class="fas fa-times closer"></i></span>
+        </div>
+        <div class="dashboard-stats">
+            <div class="stat-item">
+                <i class="fas fa-rocket"></i>
+                <span class="stat-label">Power Mode</span>
+            </div>
+        </div>
     </div>
-    <div class="menu-divider" style="margin-bottom:8px;"></div>
-    <a href="${LINKEDIN_URL}/in/me" id="profileSpot" style="padding: 0px 8px 0px 32px;"></a>
+    <div class="profile-section">
+        <a href="${LINKEDIN_URL}/in/me" id="profileSpot" class="profile-link"></a>
+    </div>
     <div class="menu-divider-menu"></div>
     <!-- Authorization Button - Shows when user is not authorized -->
     <div id="authorize-button-container" style="display: none; padding: 12px 16px; margin: 8px 16px; background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%); border-radius: 8px; box-shadow: 0 2px 8px rgba(255, 107, 107, 0.3);">
@@ -56,85 +64,65 @@ var mainMenu = `
     </div>
     <div class="menu-divider-menu"></div>
     <div id="menus" class="menus">
-        <span id="stop-bot">
+        <span id="stop-bot" class="menu-item menu-item-red">
             <i class="fas fa-toggle-on fa-lg sm-icon"></i>&nbsp;Stop Bot
         </span>
         <div class="menu-divider-menu"></div>
-        <span id="audience-creation-menu-click">
+        <span id="audience-creation-menu-click" class="menu-item menu-item-purple">
             <i class="fas fa-bullhorn fa-lg sm-icon"></i>&nbsp;&nbsp;Audience Creation
         </span>
         <div class="menu-divider-menu"></div>
-        <span id="sales-navigator-menu-click">
-            <i class="fas fa-compass fa-lg sm-icon"></i>&nbsp;&nbsp;Sales Navigator
-        </span>
-        <div class="menu-divider-menu"></div>
-        <span id="campaign-menu-click">
+        <span id="campaign-menu-click" class="menu-item menu-item-orange">
             <i class="fas fa-flag fa-lg sm-icon"></i>&nbsp;&nbsp;Campaign
             <i class="fas fa-circle fa-sm" id="status-indicator" style="color: #ccc; margin-left: 8px; font-size: 8px; vertical-align: middle;" title="Campaign Status: Inactive"></i>
         </span>
+        
         <div class="menu-divider-menu"></div>
-        <span id="add-connect-menu-click">
-            <i class="fas fa-user-plus fa-lg sm-icon"></i>&nbsp;Add Connections
-        </span>
-        <div class="menu-divider-menu"></div>
-        <span id="message-connect-menu-click">
+        <span id="message-connect-menu-click" class="menu-item menu-item-teal">
             <i class="fas fa-paper-plane fa-lg sm-icon"></i>&nbsp;&nbsp;Message All Connections 
         </span>
         <div class="menu-divider-menu"></div>
-        <span id="message-target-menu-click">
+        <span id="message-target-menu-click" class="menu-item menu-item-green">
             <i class="fas fa-bullseye fa-lg sm-icon"></i>&nbsp;&nbsp;Message Targeted Users 
         </span>
         <div class="menu-divider-menu"></div>
-        <span id="message-followup-menu-click">
-            <i class="fas fa-comments fa-lg sm-icon"></i>&nbsp;Message Follow Up
-        </span>
-        
-        <div class="menu-divider-menu"></div>
-        <span id="connection-info-menu-click">
-            <i class="fas fa-cloud-download-alt fa-lg sm-icon"></i>&nbsp;Get Connection Info 
-        </span>
-        <div class="menu-divider-menu"></div>
-        <span id="view-connection-menu-click">
+        <span id="view-connection-menu-click" class="menu-item menu-item-indigo">
             <i class="fas fa-eye fa-lg sm-icon"></i>&nbsp;&nbsp;View Connections 
         </span>
         <div class="menu-divider-menu"></div>
-        <span id="endorse-connection-menu-click">
+        <span id="endorse-connection-menu-click" class="menu-item menu-item-pink">
             <i class="fas fa-handshake fa-lg sm-icon"></i>&nbsp;Endorse Connections 
         </span>
         <div class="menu-divider-menu"></div>
-        <span id="like-connect-menu-click">
-            <i class="fas fa-thumbs-up fa-lg sm-icon"></i>&nbsp;&nbsp;Like Or Connect 
-        </span>
-        <div class="menu-divider-menu"></div>
-        <span id="follow-connect-menu-click">
+        <span id="follow-connect-menu-click" class="menu-item menu-item-yellow">
             <i class="fas fa-user-circle fa-lg sm-icon"></i>&nbsp;&nbsp;Follow Connections 
         </span>
         <div class="menu-divider-menu"></div>
-        <span id="birthday-wish-menu-click">
+        <span id="birthday-wish-menu-click" class="menu-item menu-item-rose">
             <i class="fas fa-gifts fa-lg sm-icon"></i>&nbsp;Wish Happy Birthday 
         </span>
         <div class="menu-divider-menu"></div>
-        <span id="anniversary-menu-click">
+        <span id="anniversary-menu-click" class="menu-item menu-item-violet">
             <i class="fas fa-gift fa-lg sm-icon"></i>&nbsp;&nbsp;Congrats On Anniversary
         </span>
         <div class="menu-divider-menu"></div>
-        <span id="new-job-menu-click">
+        <span id="new-job-menu-click" class="menu-item menu-item-amber">
             <i class="fas fa-suitcase fa-lg sm-icon"></i>&nbsp;&nbsp;Congrats On New Job
         </span>
         <div class="menu-divider-menu"></div>
-        <!--span id="remove-connect-menu-click">
+        <!--span id="remove-connect-menu-click" class="menu-item menu-item-red">
             <i class="fas fa-trash fa-lg sm-icon"></i>&nbsp;&nbsp;&nbsp;Remove Connections 
         </span-->
         <div class="menu-divider-menu"></div>
-        <span id="withdraw-invite-menu-click">
+        <span id="withdraw-invite-menu-click" class="menu-item menu-item-gray">
             <i class="fas fa-ban fa-lg sm-icon"></i>&nbsp;&nbsp;Withdraw Sent Invites 
         </span>
         <div class="menu-divider-menu"></div>
-        <span id="accept-invite-menu-click">
+        <span id="accept-invite-menu-click" class="menu-item menu-item-emerald">
             <i class="fas fa-check-double fa-lg sm-icon"></i>&nbsp;&nbsp;&nbsp;Accept Received Invites 
         </span>
         <div class="menu-divider" style="margin-top: 20px"></div>
-        <span>
+        <span class="footer-text">
             &copy; LinkDominator 
         </span>
     </div>
@@ -194,7 +182,8 @@ $(document).on('click', '#authorize-linkedin-btn', async function(e) {
                     if (retryData.status !== 401) {
                         console.log('✅✅✅ Authorization successful after manual sync!');
                         // Hide button and enable menus
-                        $('#authorize-button-container').hide();
+                        const $authCard = $('#authorize-button-container');
+                        $authCard.hide().removeClass('pulse-attention');
                         $('#menus span').css('opacity', '1').css('pointer-events', 'auto');
                         $('#accessCheck').remove();
                         
@@ -417,11 +406,67 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 });
 getUserProfile();
 
+// Centralized function to check authentication and show/hide authorization card
+const checkAuthAndShowCard = () => {
+    const accessCheckValue = $('#accessCheck').val();
+    if (accessCheckValue == 401) {
+        // Show authorization button prominently with animation
+        const $authCard = $('#authorize-button-container');
+        $authCard.show();
+        
+        // Add a pulse animation class to draw attention
+        $authCard.addClass('pulse-attention');
+        
+        // Disable menu items
+        $('#menus span').css('opacity', '0.5').css('pointer-events', 'none');
+        
+        // Ensure sidebar is visible and scroll to show authorization card
+        const $sidePanel = $('#mySidepanel');
+        if ($sidePanel.is(':hidden')) {
+            $sidePanel.show();
+        }
+        
+        // Scroll sidebar content to top to show authorization card
+        setTimeout(() => {
+            const sidePanelElement = $sidePanel[0];
+            if (sidePanelElement) {
+                sidePanelElement.scrollTop = 0;
+            }
+            // Also try scrolling the authorization card into view
+            const authCardElement = $authCard[0];
+            if (authCardElement) {
+                authCardElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        }, 100);
+    } else {
+        // Hide authorization button and remove animation
+        const $authCard = $('#authorize-button-container');
+        $authCard.hide().removeClass('pulse-attention');
+        // Enable menu items
+        $('#menus span').css('opacity', '1').css('pointer-events', 'auto');
+    }
+};
+
+// Make function globally available
+window.checkAuthAndShowCard = checkAuthAndShowCard;
+
+// Add global click handler for all menu items to check auth
+$(document).on('click', '#menus .menu-item', function() {
+    // Check auth when any menu item is clicked
+    if (typeof window.checkAuthAndShowCard === 'function') {
+        window.checkAuthAndShowCard();
+    }
+});
+
 $('#open-nav').click(function(){
     let sidePanel = $('#mySidepanel')
 
     if(sidePanel.is(':hidden')) {
         sidePanel.show().fadeIn('slow')
+        // Check auth status when sidebar opens and show authorization card if needed
+        setTimeout(() => {
+            checkAuthAndShowCard();
+        }, 100);
     }else {
         sidePanel.hide().fadeOut('slow')
     }
@@ -513,20 +558,10 @@ const getAudienceList = async (fieldId) => {
 }
 
 const implementPermission = (actionId) => {
-    // Show/hide authorization button based on access check
-    const accessCheckValue = $('#accessCheck').val();
-    if (accessCheckValue == 401) {
-        // Show authorization button
-        $('#authorize-button-container').show();
-        // Disable menu items
-        $('#menus span').css('opacity', '0.5').css('pointer-events', 'none');
-    } else {
-        // Hide authorization button
-        $('#authorize-button-container').hide();
-        // Enable menu items
-        $('#menus span').css('opacity', '1').css('pointer-events', 'auto');
-    }
+    // Use centralized auth check function
+    checkAuthAndShowCard();
     
+    // Also handle modal content if unauthorized
     if ($('#accessCheck').val() == 401){
         $('.modal-body').html(`
             <div style="text-align: center; padding: 20px;">

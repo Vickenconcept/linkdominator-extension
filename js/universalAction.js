@@ -192,178 +192,72 @@ const sendMessage = async (voyagerApi=null) => {
 const sendMessageToConnection = async (params) => {
     try {
         console.log('🔍 Preparing message for:', params.name);
+        console.log('📤 Using browser automation instead of deprecated API endpoint');
         
         // Replace variables in message
         let message = changeMessageVariableNames(params.message, params);
         
-        // Determine URL and conversation object based on whether we have an existing conversation
-        let url = '';
-        let conversationObj = {};
-        
-        // Prepare message event
-        const messageEvent = {
-            value: {
-                'com.linkedin.voyager.messaging.create.MessageCreate': {
-                    attachments: params.attachement || [],
-                    body: message,
-                    attributedBody: { "text": message, "attributes": [] },
-                    mediaAttachments: [],
-                }
-            }
+        // Prepare lead object for background script
+        const lead = {
+            name: params.name || `${params.firstName || ''} ${params.lastName || ''}`.trim(),
+            firstName: params.firstName || '',
+            lastName: params.lastName || '',
+            connectionId: params.connectionId,
+            conId: params.connectionId,
+            profileId: params.connectionId,
+            publicIdentifier: params.connectionId,
+            netDistance: params.distance || 2
         };
-
-        // Set URL and conversation object based on whether we have an existing conversation
-        if (params.conversationUrnId) {
-            console.log('📧 Using existing conversation:', params.conversationUrnId);
-            url = `${voyagerApi}/messaging/conversations/${params.conversationUrnId}/events?action=create`;
-            conversationObj = {
-                eventCreate: messageEvent
-            };
-        } else {
-            console.log('📧 Creating new conversation');
-            url = `${voyagerApi}/messaging/conversations?action=create`;
-            conversationObj = {
-                conversationCreate: {
-                    eventCreate: messageEvent,
-                    recipients: [params.connectionId],
-                    subtype: params.distance === 1 ? "MEMBER_TO_MEMBER" : "INMAIL"
-                }
-            };
-        }
-
-        console.log('📤 Sending message to LinkedIn API...', {
-            url,
-            message: message.substring(0, 50) + '...',
-            recipient: params.name
+        
+        console.log('📤 Sending message via browser automation...', {
+            recipient: lead.name,
+            connectionId: lead.connectionId,
+            message: message.substring(0, 50) + '...'
         });
         
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: {
-                'csrf-token': jsession,
-                'accept': 'application/vnd.linkedin.normalized+json+2.1',
-                'content-type': 'application/json; charset=UTF-8',
-                'x-li-lang': 'en_US',
-                'x-li-page-instance': 'urn:li:page:d_flagship3_messaging_conversation_detail;' + Math.random().toString(36).substring(2, 15),
-                'x-li-track': JSON.stringify({
-                    "clientVersion": "1.11.5612",
-                    "mpVersion": "2.0",
-                    "osName": "web",
-                    "timezoneOffset": new Date().getTimezoneOffset(),
-                    "deviceFormFactor": "DESKTOP",
-                    "mpName": "voyager-web"
-                }),
-                'x-restli-protocol-version': '2.0.0'
-            },
-            body: JSON.stringify(conversationObj),
-            credentials: 'include'
-        });
-
-        if (!response.ok) {
-            const responseData = await response.json().catch(() => ({}));
-            console.error('❌ LinkedIn API Error:', {
-                status: response.status,
-                statusText: response.statusText,
-                responseData
+        // Use browser automation via background script
+        try {
+            const result = await chrome.runtime.sendMessage({
+                action: 'sendMessageBrowser',
+                data: {
+                    lead: lead,
+                    message: message
+                }
             });
-
-            // Extract error data from the nested structure
-            const errorData = responseData.data || responseData;
             
-            // Use LinkedIn's own error message if available, otherwise provide a simple fallback
-            let errorMessage = '';
+            console.log('📊 Browser automation result:', result);
             
-            if (errorData.message) {
-                errorMessage = errorData.message;
-            } else if (errorData.code === 'NOT_ENOUGH_CREDIT') {
-                errorMessage = 'Insufficient InMail credits';
-            } else if (errorData.code === 'UNRESPONDED_INMAIL_EXISTS') {
-                errorMessage = 'Previous InMail pending response';
-            } else if (errorData.code === 'INVALID_RECIPIENT') {
-                errorMessage = 'Invalid recipient';
-            } else if (errorData.code === 'MESSAGE_QUOTA_EXCEEDED') {
-                errorMessage = 'Message limit reached';
-            } else if (response.status === 403) {
-                // Check for specific 403 error messages
-                if (errorData.message && errorData.message.includes("can't be accessed")) {
-                    errorMessage = 'Profile is private or blocked';
-                } else if (errorData.message && errorData.message.includes("not a 1st degree")) {
-                    errorMessage = 'Access denied - not a 1st degree connection';
-                } else {
-                    errorMessage = 'Access denied - profile may be private or blocked';
-                }
-            } else if (response.status === 429) {
-                errorMessage = 'Rate limit exceeded';
-            } else if (response.status === 401) {
-                errorMessage = 'Session expired';
-            } else {
-                errorMessage = 'Failed to send message';
-            }
-
-            return {
-                status: 'info',
-                message: errorMessage,
-                errorCode: errorData.code || response.status
-            };
-        }
-
-        const data = await response.json();
-        console.log('📋 LinkedIn API response data:', data);
-        console.log('🔍 Response structure check:', {
-            hasValue: !!data.value,
-            hasCreatedAt: !!(data.value?.createdAt),
-            dataKeys: Object.keys(data),
-            valueKeys: data.value ? Object.keys(data.value) : 'no value property'
-        });
-        
-        if (!data.value?.createdAt) {
-            console.error('❌ Message not created - missing createdAt:', data);
-            
-            // Check if message was actually sent despite missing createdAt
-            if (data.value && (data.value.backendEventUrn || data.value.conversationId)) {
-                console.log('✅ Message may have been sent despite missing createdAt, proceeding...');
-            } else {
+            if (result && result.success) {
                 return {
-                    status: 'failed',
-                    message: 'Message not sent - no creation timestamp or conversation ID'
+                    status: 'successful',
+                    message: 'Message sent successfully via browser automation',
+                    conversationId: result.conversationUrnId || null
+                };
+            } else {
+                // Handle different error scenarios
+                let errorMessage = result?.error || 'Failed to send message via browser automation';
+                
+                // Map common errors to user-friendly messages
+                if (errorMessage.includes('not accessible') || errorMessage.includes('profile')) {
+                    errorMessage = 'Profile is private or not accessible';
+                } else if (errorMessage.includes('not a 1st degree')) {
+                    errorMessage = 'Access denied - not a 1st degree connection';
+                } else if (errorMessage.includes('timeout')) {
+                    errorMessage = 'Message send timed out - please try again';
+                }
+                
+                return {
+                    status: 'info',
+                    message: errorMessage
                 };
             }
+        } catch (messageError) {
+            console.error('❌ Error communicating with background script:', messageError);
+            return {
+                status: 'failed',
+                message: 'Failed to communicate with background automation. Please refresh the extension.'
+            };
         }
-
-        // Extract conversation ID and send delivery acknowledgement
-        let conversationUrnId = null;
-        
-        if (data.value?.backendEventUrn) {
-            conversationUrnId = data.value.backendEventUrn.replace('urn:li:messagingMessage:', '');
-            console.log('✅ Message sent successfully, conversation ID from backendEventUrn:', conversationUrnId);
-        } else if (data.value?.conversationId) {
-            conversationUrnId = data.value.conversationId;
-            console.log('✅ Message sent successfully, conversation ID from conversationId:', conversationUrnId);
-        } else if (data.conversationId) {
-            conversationUrnId = data.conversationId;
-            console.log('✅ Message sent successfully, conversation ID from root:', conversationUrnId);
-        } else {
-            console.warn('⚠️ Message sent but no conversation ID found in response');
-            // Still consider it successful if we got this far
-        }
-        
-        try {
-            if (conversationUrnId) {
-                await sendDeliveryAcknowledgement(conversationUrnId);
-                console.log('✅ Delivery acknowledgement sent');
-            } else {
-                console.log('⏩ Skipping delivery acknowledgement - no conversation ID');
-            }
-        } catch (ackError) {
-            console.warn('⚠️ Failed to send delivery acknowledgement:', ackError);
-            // Don't fail the whole operation if this fails
-        }
-
-        return {
-            status: 'successful',
-            message: 'Message sent successfully',
-            conversationId: conversationUrnId
-        };
 
     } catch (error) {
         console.error('❌ Error in sendMessageToConnection:', error);
@@ -426,7 +320,6 @@ const sendDeliveryAcknowledgement = async (conversationUrnId) => {
  * @returns {Promise} Resolves when AI contents are loaded
  */
 const getAIContents = () => {
-    console.log('🔍 Loading AI content templates...');
     const url = `${filterApi}/aicontents`;
 
     return new Promise((resolve, reject) => {
@@ -444,7 +337,6 @@ const getAIContents = () => {
         url: url,
         success: function(res) {
                 if (res.data && Array.isArray(res.data)) {
-                    console.log(`✅ Loaded ${res.data.length} message templates`);
                     aicontents = res.data;
                     resolve(res.data);
                 } else {

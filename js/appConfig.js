@@ -549,20 +549,30 @@ const userPermissions = async () => {
       console.error('❌ Still unauthorized after sync attempt. User may need to connect account in dashboard.');
       $('body').append(`<input type="hidden" id="accessCheck" value="${data.status}">`);
       
-      // Show authorization button in sidebar
+      // Show authorization button in sidebar using centralized function
       setTimeout(() => {
-        if ($('#authorize-button-container').length) {
-          $('#authorize-button-container').show();
-          // Disable menu items
-          $('#menus span').css('opacity', '0.5').css('pointer-events', 'none');
+        if (typeof window.checkAuthAndShowCard === 'function') {
+          window.checkAuthAndShowCard();
+        } else {
+          // Fallback if function not available yet
+          if ($('#authorize-button-container').length) {
+            $('#authorize-button-container').show();
+            // Disable menu items
+            $('#menus span').css('opacity', '0.5').css('pointer-events', 'none');
+          }
         }
       }, 500);
     } else {
-      // Hide authorization button if authorized
-      if ($('#authorize-button-container').length) {
-        $('#authorize-button-container').hide();
-        // Enable menu items
-        $('#menus span').css('opacity', '1').css('pointer-events', 'auto');
+      // Hide authorization button if authorized using centralized function
+      if (typeof window.checkAuthAndShowCard === 'function') {
+        window.checkAuthAndShowCard();
+      } else {
+        // Fallback if function not available yet
+        if ($('#authorize-button-container').length) {
+          $('#authorize-button-container').hide();
+          // Enable menu items
+          $('#menus span').css('opacity', '1').css('pointer-events', 'auto');
+        }
       }
       onMounted();
       getAutoRespondMessages();
@@ -856,7 +866,7 @@ window.addEventListener('unhandledrejection', function(event) {
         } else if (event.reason.status >= 500) {
             errorMessage = 'Server error - Please try again later.';
         } else if (event.reason.status === 401) {
-            errorMessage = 'Authentication required - Please refresh the page.';
+            errorMessage = 'Authentication required - Please Connect your LinkedIn Account ';
         } else if (event.reason.status === 403) {
             errorMessage = 'Access denied - You may not have permission.';
         } else if (event.reason.status === 404) {

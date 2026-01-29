@@ -351,7 +351,7 @@ const sendAnniversaryMessage = async (recipientInfo, angMessage, angDelay) => {
                         eventCreate: {
                             value: {
                                 'com.linkedin.voyager.messaging.create.MessageCreate' : {
-                                    attachments: getAngStore.uploads.length ? getAngStore.uploads : [],
+                                    // attachments: getAngStore.uploads.length ? getAngStore.uploads : [], // DISABLED: Browser automation does not support attachments
                                     body: newMessage // message
                                 }
                             }

@@ -90,6 +90,8 @@ var anniversaryForm = `
                     </div>
                 </div>
 
+                <!-- Attachment functionality disabled - Browser automation does not support attachments -->
+                <!--
                 <div class="row">
                     <div class="col-md-4">
                         <div class="form-group">
@@ -120,6 +122,7 @@ var anniversaryForm = `
                     </div>
                 </div>
                 <ul class="list-group" id="lkm-ang-file-uploads"></ul>
+                -->
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-primary btn-lg shadow-none anniversaryGreetingAction">Send</button>
@@ -138,8 +141,8 @@ $('body').on('click', '#anniversary-menu-click', function(){
     }
     implementPermission('anniversaryGreetingAction')
 
-    // Mount file list if exists
-    setFilesUploadedToList('lkm-ang')
+    // Mount file list if exists - DISABLED: Browser automation does not support attachments
+    // setFilesUploadedToList('lkm-ang')
 
     // setParamsToFormFields
     setParamsToFormFields('lkm-ang', {
@@ -158,8 +161,9 @@ $('body').on('click','.ang-pm-btn',function(){
 })
 
 /**
- * Handle file uploads
+ * Handle file uploads - DISABLED: Browser automation does not support attachments
  */
+/*
 $('body').on('change','#ang-image', async function(ev) {
     let fileData = $("#ang-image")[0].files[0];
     try {
@@ -207,3 +211,4 @@ $('body').on('click','.lkm-ang-remove-upload',function() {
     removeFile(lkmModule, index)
     setFilesUploadedToList('lkm-ang')
 })
+*/

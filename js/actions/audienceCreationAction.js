@@ -776,15 +776,23 @@ $('.newAudienceAction').click(function(){
     var afcStartP = $('#afs-startPosition'),
         afcTotal = $('#afs-total'),
         afcDelay = $('#afs-delayTime'),
-        afcAudienceName = $('#audience-name');
-    var afcFieldList = [afcDelay,afcTotal,afcAudienceName];
+        afcAudienceName = $('#audience-name'),
+        afcPositiveKeywords = $('#afs-positiveKeywords');
+    var afcFieldList = [afcDelay,afcTotal,afcAudienceName,afcPositiveKeywords];
     var audienceType = '';
 
     // field validation
-    if(afcTotal.val()=='' || afcDelay.val()=='' || afcAudienceName.val()==''){
+    var isTotalEmpty = afcTotal.val()=='' || afcTotal.val().trim()=='';
+    var isDelayEmpty = afcDelay.val()=='' || afcDelay.val().trim()=='';
+    var isAudienceNameEmpty = afcAudienceName.val()=='' || afcAudienceName.val().trim()=='';
+    var isPositiveKeywordsEmpty = afcPositiveKeywords.val()=='' || afcPositiveKeywords.val().trim()=='';
+    
+    if(isTotalEmpty || isDelayEmpty || isAudienceNameEmpty || isPositiveKeywordsEmpty){
         for(let i=0; i<afcFieldList.length; i++){
-            if(afcFieldList[i].val() == ''){
+            var fieldValue = afcFieldList[i].val();
+            if(fieldValue == '' || (typeof fieldValue === 'string' && fieldValue.trim() == '')){
                 $('#afc-error-notice').html(`${afcFieldList[i].data('name')} field cannot be empty`)
+                return; // Stop processing if validation fails
             }
         }
     }else if(afcDelay.val() < 30){

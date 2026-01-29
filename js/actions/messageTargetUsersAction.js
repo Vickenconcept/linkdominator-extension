@@ -735,9 +735,10 @@ const mtuSendMessageToConnection = async (mtuMessage, mtuDelay, totalMessage) =>
         let x = 0;
         
         // Initialize storage if not exists
+        // Note: uploads removed - browser automation does not support attachments
         let getMtuStore = localStorage.getItem('lkm-mtu');
         if (!getMtuStore) {
-            getMtuStore = { uploads: [] };
+            getMtuStore = { uploads: [] }; // Keep for backward compatibility but not used
         } else {
             getMtuStore = JSON.parse(getMtuStore);
         }
@@ -763,24 +764,27 @@ const mtuSendMessageToConnection = async (mtuMessage, mtuDelay, totalMessage) =>
         for (const [i, item] of totalMessage.entries()) {
             try {
                 // Prepare message parameters with fallbacks
+                // Note: Attachments removed - browser automation does not support attachments
                 const params = {
                     message: mtuMessage || '',
                     name: item.name || `${item.firstName || ''} ${item.lastName || ''}`.trim(),
                     firstName: item.firstName || '',
                     lastName: item.lastName || '',
                     distance: item.netDistance || 2,
-                    connectionId: item.conId,
-                    attachement: getMtuStore?.uploads?.length ? getMtuStore.uploads : []
+                    connectionId: item.conId
+                    // attachement: getMtuStore?.uploads?.length ? getMtuStore.uploads : [] // DISABLED: Browser automation does not support attachments
                 };
 
                 console.log(`📧 Sending message to: ${params.name} (${i + 1}/${totalMessage.length})`);
+                console.log('📤 Using browser automation (background tab) instead of deprecated API');
 
                 // Check if sendMessageToConnection function exists
                 if (typeof sendMessageToConnection !== 'function') {
                     throw new Error('sendMessageToConnection function is not available. Make sure universalAction.js is loaded.');
                 }
 
-                // Send message using async/await
+                // Send message using browser automation via background script
+                // This opens LinkedIn profile tabs in the background and automates message sending
                 const result = await sendMessageToConnection(params);
                 
                 if (result.status === 'successful') {

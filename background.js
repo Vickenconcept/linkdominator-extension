@@ -419,6 +419,35 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         });
         return true;
     }
+    
+    if (request.action === 'sendMessageBrowser') {
+        console.log('📤 Message send request received via browser automation');
+        const { lead, message } = request.data || {};
+        
+        if (!lead || !message) {
+            sendResponse({
+                success: false,
+                error: 'Missing lead or message data'
+            });
+            return true;
+        }
+        
+        // Use the browser automation function
+        _sendMessageBrowser(lead, message)
+            .then(result => {
+                console.log('✅ Browser automation result:', result);
+                sendResponse(result);
+            })
+            .catch(error => {
+                console.error('❌ Browser automation error:', error);
+                sendResponse({
+                    success: false,
+                    error: error.message || 'Failed to send message via browser automation'
+                });
+            });
+        
+        return true; // Keep message channel open for async response
+    }
 });
 
 // Removed automatic periodic alarm to prevent CSRF errors

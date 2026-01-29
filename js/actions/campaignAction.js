@@ -30,7 +30,6 @@ const apiRequest = async (url, options = {}) => {
     }
 
     // Remove CSRF token logic since we're disabling CSRF validation
-    console.log('🌐 Making API request to:', url, 'with options:', defaultOptions);
 
     try {
         const controller = new AbortController();
@@ -58,16 +57,12 @@ const apiRequest = async (url, options = {}) => {
         const contentType = response.headers.get('content-type');
         if (contentType && contentType.includes('application/json')) {
             const data = await response.json();
-            
-            // Check for success status in JSON body (if present) OR HTTP status code 200-299
-            // Some endpoints return {audience: [...]} without a status field, which is fine
+           
             if (response.status >= 200 && response.status < 300) {
-                // If status field exists, check it; otherwise HTTP status is sufficient
                 if (data.status !== undefined && data.status !== 200 && data.status !== 201) {
                     console.error('❌ API request failed (status in body):', data);
                     throw new Error(data.message || 'API request failed');
                 } else {
-                    console.log('✅ API request successful:', data);
                     return data;
                 }
             } else {
@@ -113,17 +108,8 @@ const apiRequest = async (url, options = {}) => {
  */
 const getCampaigns = async () => {
     try {
-        console.log('Fetching campaigns...');
         const response = await apiRequest(`${PLATFORM_URL}/api/campaigns`, {
             method: 'GET'
-        });
-        
-        console.log('📊 Campaigns API response:', {
-            full_response: response,
-            has_data: !!response.data,
-            data_type: typeof response.data,
-            is_array: Array.isArray(response.data),
-            data_length: Array.isArray(response.data) ? response.data.length : 'not an array'
         });
         
         // Handle different response formats
@@ -133,16 +119,9 @@ const getCampaigns = async () => {
             campaignData = response;
         } else {
             campaignData = [];
-            console.warn('⚠️ Unexpected response format:', response);
         }
         
-        console.log('📋 Campaign data to display:', {
-            count: campaignData.length,
-            campaigns: campaignData
-        });
-        
         setCampaigns();
-        console.log('Campaigns loaded successfully:', campaignData.length);
         
     } catch (error) {
         console.error('Error fetching campaigns:', error);
@@ -155,29 +134,18 @@ const getCampaigns = async () => {
  */
 const setCampaigns = () => {
     let tbody = document.getElementById('campaign-tbody');
-    
-    console.log('🎨 setCampaigns called', {
-        tbody_exists: !!tbody,
-        campaignData_length: campaignData ? campaignData.length : 'campaignData is null/undefined',
-        campaignData_type: typeof campaignData,
-        is_array: Array.isArray(campaignData),
-        campaignData: campaignData
-    });
 
     if (!campaignData) {
-        console.warn('⚠️ campaignData is null or undefined');
         return;
     }
 
     if (!Array.isArray(campaignData)) {
-        console.warn('⚠️ campaignData is not an array:', typeof campaignData, campaignData);
         return;
     }
 
     if(campaignData.length > 0){
         $('#campaign-tbody').empty();
         $.each(campaignData, function(i,item) {
-            console.log('📝 Adding campaign row:', item);
             $('#campaign-tbody').append(`
                 <tr class="campaign-${item.id}">
                     <td title="${item.name}">${item.name}</td>
@@ -192,9 +160,7 @@ const setCampaigns = () => {
                 </tr>
             `);
         });
-        console.log('✅ Campaigns displayed successfully');
     } else {
-        console.warn('⚠️ No campaigns to display');
         $('#campaign-tbody').html('<tr><td colspan="4" class="text-center">No campaigns found</td></tr>');
     }
 }

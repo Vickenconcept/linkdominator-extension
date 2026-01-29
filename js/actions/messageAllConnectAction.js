@@ -657,7 +657,8 @@ const macSendMessageToConnection = async (macMessage, macDelay, dataArr) => {
     try {
         console.log('🔍 Starting Message All Connections for', dataArr.length, 'connections');
         var displayLi = '', x = 0;
-    let getMacStore = JSON.parse(localStorage.getItem('lkm-mac'));
+    // Note: uploads removed from storage - browser automation does not support attachments
+    let getMacStore = JSON.parse(localStorage.getItem('lkm-mac')) || { uploads: [] };
 
         $('.message-connects-notice').show();
 
@@ -680,14 +681,15 @@ const macSendMessageToConnection = async (macMessage, macDelay, dataArr) => {
         for (const [i, item] of dataArr.entries()) {
             try {
                 // Prepare message parameters with fallbacks
+                // Note: Attachments removed - browser automation does not support attachments
                 const params = {
                     message: macMessage || '',
                     name: item.name || `${item.firstName || ''} ${item.lastName || ''}`.trim(),
                     firstName: item.firstName || '',
                     lastName: item.lastName || '',
                     distance: item.netDistance || 2,
-                    connectionId: item.conId,
-                    attachement: getMacStore?.uploads?.length ? getMacStore.uploads : []
+                    connectionId: item.conId
+                    // attachement: getMacStore?.uploads?.length ? getMacStore.uploads : [] // DISABLED: Browser automation does not support attachments
                 };
 
                 console.log(`📧 Sending message to: ${params.name} (${i + 1}/${dataArr.length})`);

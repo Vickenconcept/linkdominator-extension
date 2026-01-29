@@ -359,6 +359,8 @@ var messageTargetUserForm = `
                         </div>
                     </label>
                 </div>
+                <!-- Attachment functionality disabled - Browser automation does not support attachments -->
+                <!--
                 <div class="row">
                     <div class="col-md-4">
                         <div class="form-group">
@@ -389,6 +391,7 @@ var messageTargetUserForm = `
                     </div>
                 </div>
                 <ul class="list-group" id="lkm-mtu-file-uploads"></ul>
+                -->
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-primary btn-lg shadow-none messageTargetUserAction">Send</button>
@@ -450,12 +453,14 @@ $('body').on('click', '#message-target-menu-click', function(){
     
     helper.setAIContentToDropdown('mtu-aicontent');
 
-    // Mount file list if exists
+    // Mount file list if exists - DISABLED: Browser automation does not support attachments
+    /*
     try {
         setFilesUploadedToList('lkm-mtu');
     } catch (error) {
         console.error('❌ Error loading uploaded files:', error);
     }
+    */
 
     // Set form fields from storage
     try {
@@ -495,8 +500,9 @@ $('#mtu-aicontent').change(function(){
 })
 
 /**
- * Handle file uploads
+ * Handle file uploads - DISABLED: Browser automation does not support attachments
  */
+/*
 $('body').on('change','#mtu-image', async function(ev) {
     let fileData = $("#mtu-image")[0].files[0];
 
@@ -546,3 +552,4 @@ $('body').on('click','.lkm-mtu-remove-upload',function() {
     removeFile(lkmModule, index)
     setFilesUploadedToList('lkm-mtu')
 })
+*/

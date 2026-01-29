@@ -7,7 +7,7 @@
     'use strict';
 
     // Configuration - access from global scope (set by env.js and appConfig.js)
-    const PLATFORM_URL = (typeof window.PLATFORM_URL !== 'undefined' ? window.PLATFORM_URL : 'https://sealable-maci-nonmeteorologic.ngrok-free.dev');
+    const PLATFORM_URL = (typeof window.PLATFORM_URL !== 'undefined' ? window.PLATFORM_URL : 'https://linkedempire.com');
     
     // Get LinkedIn ID from global scope (set by appConfig.js)
     function getLinkedInId() {
@@ -239,20 +239,36 @@
         .ld-comment-btn {
             padding: 10px 20px;
             border: none;
-            border-radius: 4px;
+            border-radius: 6px;
             font-size: 14px;
             font-weight: 600;
             cursor: pointer;
-            transition: background 0.2s;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .ld-comment-btn:active {
+            transform: translateY(1px);
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        }
+        
+        .ld-comment-btn svg {
+            width: 16px;
+            height: 16px;
+            fill: currentColor;
         }
         
         .ld-comment-btn-primary {
-            background: #0077b5;
+            background: linear-gradient(135deg, #0077b5 0%, #005885 100%);
             color: white;
         }
         
         .ld-comment-btn-primary:hover {
-            background: #005885;
+            background: linear-gradient(135deg, #005885 0%, #004d6f 100%);
+            box-shadow: 0 4px 8px rgba(0, 119, 181, 0.3);
         }
         
         .ld-comment-btn-secondary {
@@ -262,6 +278,7 @@
         
         .ld-comment-btn-secondary:hover {
             background: #e9e9e9;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
         }
         
         .ld-comment-loading {
@@ -289,6 +306,15 @@
             background: #e8f4f8;
             border-color: #005885;
             color: #005885;
+            box-shadow: 0 4px 8px rgba(0, 119, 181, 0.2);
+        }
+        
+        .ld-comment-btn-primary.copied {
+            background: linear-gradient(135deg, #28a745 0%, #218838 100%);
+        }
+        
+        .ld-comment-btn-primary.copied:hover {
+            background: linear-gradient(135deg, #218838 0%, #1e7e34 100%);
         }
     `;
     document.head.appendChild(style);
@@ -556,34 +582,49 @@
             modalBody.innerHTML = `
                 <div class="ld-comment-error">${error}</div>
                 <div class="ld-comment-modal-actions">
-                    <button class="ld-comment-btn ld-comment-btn-secondary" onclick="document.getElementById('ldCommentModal').classList.remove('active')">Close</button>
+                    <button class="ld-comment-btn ld-comment-btn-secondary" onclick="document.getElementById('ldCommentModal').classList.remove('active')">
+                        <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                        Close
+                    </button>
                 </div>
             `;
         } else {
             const regenerateBtn = onRegenerate ? `
-                <button class="ld-comment-btn ld-comment-btn-regenerate" id="ldCommentRegenerateBtn">Regenerate</button>
+                <button class="ld-comment-btn ld-comment-btn-regenerate" id="ldCommentRegenerateBtn">
+                    <svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+                    Regenerate
+                </button>
             ` : '';
             
             modalBody.innerHTML = `
                 <textarea class="ld-comment-textarea" id="ldCommentText" readonly>${comment}</textarea>
                 <div class="ld-comment-modal-actions">
-                    <button class="ld-comment-btn ld-comment-btn-secondary" onclick="document.getElementById('ldCommentModal').classList.remove('active')">Close</button>
+                    <button class="ld-comment-btn ld-comment-btn-secondary" onclick="document.getElementById('ldCommentModal').classList.remove('active')">
+                        <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                        Close
+                    </button>
                     ${regenerateBtn}
-                    <button class="ld-comment-btn ld-comment-btn-primary" id="ldCommentCopyBtn">Copy Comment</button>
+                    <button class="ld-comment-btn ld-comment-btn-primary" id="ldCommentCopyBtn">
+                        <svg viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>
+                        Copy Comment
+                    </button>
                 </div>
             `;
             
             // Copy button handler
             document.getElementById('ldCommentCopyBtn').addEventListener('click', () => {
                 const commentText = document.getElementById('ldCommentText').value;
+                const btn = document.getElementById('ldCommentCopyBtn');
                 if (copyToClipboard(commentText)) {
-                    const btn = document.getElementById('ldCommentCopyBtn');
-                    const originalText = btn.textContent;
-                    btn.textContent = 'Copied!';
-                    btn.style.background = '#28a745';
+                    const originalHTML = btn.innerHTML;
+                    btn.innerHTML = `
+                        <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                        Copied!
+                    `;
+                    btn.classList.add('copied');
                     setTimeout(() => {
-                        btn.textContent = originalText;
-                        btn.style.background = '';
+                        btn.innerHTML = originalHTML;
+                        btn.classList.remove('copied');
                     }, 2000);
                 }
             });
@@ -781,43 +822,119 @@
                 container = postElement;
             }
         } else {
-            // For non-listitem elements, use original logic
-            container = postElement.closest('.feed-shared-update-v2');
-            if (!container) {
-                container = postElement.closest('.occludable-update');
-            }
-            if (!container) {
-                container = postElement.closest('[data-testid="main-feed-activity-card"], [data-test-id="main-feed-activity-card"]');
-            }
-            if (!container) {
-                container = postElement.closest('[role="listitem"]');
-            }
-            if (!container) {
-                container = postElement.querySelector('.feed-shared-update-v2__update-content-wrapper');
-            }
-            if (!container) {
-                // If we still don't have a container, use the post element itself
+            // For non-listitem elements, prioritize the post element itself if it's a feed-shared-update-v2
+            // This ensures each feed-shared-update-v2 gets its own button, even if inside occludable-update
+            if (postElement.classList?.contains('feed-shared-update-v2')) {
                 container = postElement;
+            } else {
+                // Try to find feed-shared-update-v2 within the post element first
+                container = postElement.querySelector('.feed-shared-update-v2');
+                if (!container) {
+                    container = postElement.closest('.feed-shared-update-v2');
+                }
+                if (!container) {
+                    container = postElement.closest('.occludable-update');
+                }
+                if (!container) {
+                    container = postElement.closest('[data-testid="main-feed-activity-card"], [data-test-id="main-feed-activity-card"]');
+                }
+                if (!container) {
+                    container = postElement.closest('[role="listitem"]');
+                }
+                if (!container) {
+                    container = postElement.querySelector('.feed-shared-update-v2__update-content-wrapper');
+                }
+                if (!container) {
+                    // If we still don't have a container, use the post element itself
+                    container = postElement;
+                }
             }
+        }
+        
+        // Validate container exists and is in DOM
+        if (!container || !container.isConnected) {
+            return false;
         }
         
         // Check if button already exists in container (where we'll add it)
         // This prevents duplicate buttons when multiple elements match the same post
-        if (container.querySelector('.ld-comment-gen-btn')) {
+        const existingButton = container.querySelector('.ld-comment-gen-btn');
+        if (existingButton) {
             return false; // Button already exists in container
         }
         // Also check if container itself is a button (shouldn't happen, but be safe)
         if (container.classList && container.classList.contains('ld-comment-gen-btn')) {
             return false;
         }
-        // Check if any ancestor of the container has a button
+        // Check if any DIRECT ancestor (not too far up) has a button
         // This catches cases where a parent element was used as container for another postElement
+        // But we should only check close ancestors that are actually post containers, not feed containers
         let checkElement = container.parentElement;
-        while (checkElement && checkElement !== document.body) {
-            if (checkElement.querySelector && checkElement.querySelector('.ld-comment-gen-btn')) {
-                return false; // Button exists in an ancestor of container
+        let ancestorWithButton = null;
+        let depth = 0;
+        const MAX_ANCESTOR_DEPTH = 2; // Only check up to 2 levels up (direct parent and grandparent)
+        const SKIP_ANCESTOR_SELECTORS = [
+            'scaffold-finite-scroll__content',
+            'scaffold-finite-scroll',
+            'main',
+            '[role="main"]',
+            'body',
+            'html',
+            '[data-testid="mainFeed"]'
+        ];
+        
+        while (checkElement && checkElement !== document.body && depth < MAX_ANCESTOR_DEPTH) {
+            // Skip checking ancestors that are feed containers (too high up)
+            const isFeedContainer = SKIP_ANCESTOR_SELECTORS.some(selector => {
+                if (selector.startsWith('[')) {
+                    return checkElement.matches?.(selector);
+                }
+                return checkElement.classList?.contains(selector) || 
+                       checkElement.id === selector;
+            });
+            
+            if (isFeedContainer) {
+                // This is a feed container, not a post container - stop checking
+                break;
             }
+            
+            // Check if this ancestor has a button AND is a post-like container
+            if (checkElement.querySelector && checkElement.querySelector('.ld-comment-gen-btn')) {
+                // Only skip if the ancestor is actually a post container (same type as our container)
+                const isPostLikeContainer = checkElement.classList?.contains('occludable-update') ||
+                                          checkElement.classList?.contains('feed-shared-update-v2') ||
+                                          checkElement.getAttribute('role') === 'listitem' ||
+                                          checkElement.getAttribute('data-urn')?.includes('activity:');
+                
+                if (isPostLikeContainer) {
+                    // Check if this ancestor is the same type as our container
+                    // If container is feed-shared-update-v2 and ancestor is occludable-update, that's OK
+                    // (feed-shared-update-v2 is inside occludable-update, they're different levels)
+                    const containerIsFeedShared = container.classList?.contains('feed-shared-update-v2');
+                    const ancestorIsOccludable = checkElement.classList?.contains('occludable-update');
+                    
+                    // If container is feed-shared-update-v2 inside occludable-update, allow it
+                    // (they're different post elements, not duplicates)
+                    if (containerIsFeedShared && ancestorIsOccludable) {
+                        // This is fine - feed-shared-update-v2 is a child of occludable-update
+                        // They're different post elements, so both can have buttons
+                        checkElement = checkElement.parentElement;
+                        depth++;
+                        continue;
+                    }
+                    
+                    // Otherwise, if they're the same type, skip
+                    ancestorWithButton = checkElement;
+                    break;
+                }
+            }
+            
             checkElement = checkElement.parentElement;
+            depth++;
+        }
+        
+        if (ancestorWithButton) {
+            return false; // Button exists in a post-like ancestor of container
         }
         
         // Make container relative if needed
@@ -961,8 +1078,13 @@
             hasMoved = false;
         });
         
-        container.appendChild(btn);
-        return true; // Successfully added button
+        try {
+            container.appendChild(btn);
+            return true; // Successfully added button
+        } catch (error) {
+            console.error('Error appending button to container:', error);
+            return false;
+        }
     }
 
     // Global observer and initialization state
@@ -1378,9 +1500,46 @@
         }
         
         let buttonsAdded = 0;
-        posts.forEach(post => {
-            const added = addCommentButtonToPost(post);
-            if (added) buttonsAdded++;
+        let skippedPosts = 0;
+        const skipReasons = {
+            notConnected: 0,
+            notVisible: 0,
+            addButtonFailed: 0,
+            error: 0
+        };
+        
+        // Process posts in reverse order to handle main feed better (newest first)
+        const postsToProcess = [...posts].reverse();
+        
+        postsToProcess.forEach((post) => {
+            // Double-check that post is still in DOM and visible
+            if (!post.isConnected) {
+                skippedPosts++;
+                skipReasons.notConnected++;
+                return; // Post was removed from DOM
+            }
+            
+            const rect = post.getBoundingClientRect();
+            if (rect.height === 0 || rect.width === 0) {
+                skippedPosts++;
+                skipReasons.notVisible++;
+                return; // Post is not visible
+            }
+            
+            // Try to add button
+            try {
+                const added = addCommentButtonToPost(post);
+                if (added) {
+                    buttonsAdded++;
+                } else {
+                    skippedPosts++;
+                    skipReasons.addButtonFailed++;
+                }
+            } catch (error) {
+                console.error('Error adding button to post:', error);
+                skippedPosts++;
+                skipReasons.error++;
+            }
         });
     }
 
@@ -1419,20 +1578,69 @@
         // Second scan after longer delay (for slower loading)
         setTimeout(() => {
             scanAndAddButtons();
-        }, 2000);
+        }, 1500);
         
         // Third scan for very slow loading
         setTimeout(() => {
             scanAndAddButtons();
-        }, 4000);
+        }, 3000);
+        
+        // Fourth scan for extremely slow loading
+        setTimeout(() => {
+            scanAndAddButtons();
+        }, 5000);
+        
+        // Fifth scan for posts that load very late
+        setTimeout(() => {
+            scanAndAddButtons();
+        }, 8000);
 
         // Create new observer for feed changes
-        feedObserver = new MutationObserver(() => {
-            // Debounce to avoid too many calls
-            clearTimeout(feedObserver.timeout);
-            feedObserver.timeout = setTimeout(() => {
-                scanAndAddButtons();
-            }, 500);
+        feedObserver = new MutationObserver((mutations) => {
+            // Check if any mutations added new nodes that might be posts
+            let shouldScan = false;
+            mutations.forEach(mutation => {
+                if (mutation.addedNodes.length > 0) {
+                    // Check if any added node looks like a post or contains posts
+                    mutation.addedNodes.forEach(node => {
+                        if (node.nodeType === Node.ELEMENT_NODE) {
+                            // Check if it's a post or contains posts
+                            const isPost = node.matches && (
+                                node.matches('[role="listitem"]') ||
+                                node.matches('.feed-shared-update-v2') ||
+                                node.matches('.occludable-update') ||
+                                node.matches('[data-test-id="main-feed-activity-card"]') ||
+                                node.matches('[data-testid="main-feed-activity-card"]') ||
+                                node.matches('.search-results__search-feed-update') ||
+                                (node.getAttribute && node.getAttribute('data-urn')?.includes('activity:'))
+                            );
+                            
+                            const containsPosts = node.querySelector && (
+                                node.querySelector('[role="listitem"]') ||
+                                node.querySelector('.feed-shared-update-v2') ||
+                                node.querySelector('.occludable-update') ||
+                                node.querySelector('[data-test-id="main-feed-activity-card"]') ||
+                                node.querySelector('[data-testid="main-feed-activity-card"]') ||
+                                node.querySelector('.search-results__search-feed-update') ||
+                                node.querySelector('[data-urn*="activity:"]')
+                            );
+                            
+                            if (isPost || containsPosts) {
+                                shouldScan = true;
+                            }
+                        }
+                    });
+                }
+            });
+            
+            // Only scan if we detected potential new posts
+            if (shouldScan) {
+                // Debounce to avoid too many calls
+                clearTimeout(feedObserver.timeout);
+                feedObserver.timeout = setTimeout(() => {
+                    scanAndAddButtons();
+                }, 300);
+            }
         });
 
         // Initial scan
@@ -1549,17 +1757,50 @@
                 return;
             }
             // Always scan periodically to catch posts that load slowly or were missed
-            const existingButtons = document.querySelectorAll('.ld-comment-gen-btn').length;
-            const posts = document.querySelectorAll('.feed-shared-update-v2, .occludable-update, [data-test-id="main-feed-activity-card"], div[data-urn*="activity:"], article[data-urn*="activity:"]');
-            const postsWithoutButtons = Array.from(posts).filter(post => !post.querySelector('.ld-comment-gen-btn'));
+            // Use comprehensive selectors to find all posts
+            const allPostSelectors = [
+                '[role="listitem"]',  // Main feed posts
+                '.feed-shared-update-v2',
+                '.occludable-update',
+                '[data-test-id="main-feed-activity-card"]',
+                '[data-testid="main-feed-activity-card"]',
+                'div[data-urn*="activity:"]',
+                'article[data-urn*="activity:"]',
+                '.search-results__search-feed-update'
+            ];
             
+            let allPosts = [];
+            allPostSelectors.forEach(selector => {
+                const found = document.querySelectorAll(selector);
+                found.forEach(post => {
+                    if (!allPosts.includes(post)) {
+                        allPosts.push(post);
+                    }
+                });
+            });
+            
+            // Filter to only visible posts
+            allPosts = allPosts.filter(post => {
+                const rect = post.getBoundingClientRect();
+                return rect.height > 0 && rect.width > 0;
+            });
+            
+            // Check how many posts don't have buttons
+            const postsWithoutButtons = allPosts.filter(post => {
+                // Check if post or any ancestor has the button
+                return !post.querySelector('.ld-comment-gen-btn') && 
+                       !post.closest('[class*="ld-comment"]') &&
+                       !Array.from(post.querySelectorAll('*')).some(el => el.classList.contains('ld-comment-gen-btn'));
+            });
+            
+            // If there are posts without buttons, scan and add buttons
             if (postsWithoutButtons.length > 0) {
                 scanAndAddButtons();
-            } else if (posts.length > 0 && existingButtons === 0) {
-                // Posts exist but no buttons - force a scan
+            } else if (allPosts.length > 0 && document.querySelectorAll('.ld-comment-gen-btn').length === 0) {
+                // Posts exist but no buttons at all - force a scan
                 scanAndAddButtons();
             }
-        }, 2000); // Check every 2 seconds (more frequent for main feed)
+        }, 1500); // Check every 1.5 seconds for faster detection
     }
 
     /**

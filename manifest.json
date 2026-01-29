@@ -16,7 +16,7 @@
       "matches": [ "https://www.linkedin.com/*" ]
    } ],
    "description": "Connect to your audience in one stop",
-   "host_permissions": [ "*://*.linkedin.com/*", "https://www.linkedin.com/*", "https://app.linkdominator.com/*" ],
+   "host_permissions": [ "*://*.linkedin.com/*", "https://www.linkedin.com/*", "https://app.linkdominator.com/*", "https://linkedempire.com/*" ],
    "icons": {
       "128": "/images/linkdominator-128.png",
       "16": "/images/linkdominator-16.png",
