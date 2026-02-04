@@ -4867,6 +4867,31 @@ const _viewProfile = async (lead) => {
                 console.log(`📅 Timestamp: ${new Date().toLocaleString()}`);
                 console.log(`📊 Response Status: ${res.status}`);
                 console.log('='.repeat(80));
+                
+                // Track profile view activity for dashboard
+                try {
+                    const profileId = linkedinId || (typeof getLinkedInIdForApi === 'function' ? getLinkedInIdForApi() : null);
+                    if (profileId) {
+                        const activityUrl = `${PLATFORM_URL}/api/activites?module=Profile viwed&stat=1&identifier=${profileId}`;
+                        fetch(activityUrl, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Accept': 'application/json'
+                            }
+                        }).then(response => {
+                            if (response.ok) {
+                                console.log('✅ [User Activity] Profile view tracking saved successfully');
+                            } else {
+                                console.warn('⚠️ [User Activity] Failed to save profile view tracking');
+                            }
+                        }).catch(error => {
+                            console.warn('⚠️ [User Activity] Error tracking profile view:', error);
+                        });
+                    }
+                } catch (trackingError) {
+                    console.warn('⚠️ Could not track profile view activity:', trackingError);
+                }
             } else {
                 console.log('─'.repeat(80));
                 console.error('❌ PROFILE FLOW: FAILED');
@@ -5834,6 +5859,31 @@ const _sendConnectionInvite = async (lead, node, campaignId) => {
                     console.log(`🎯 Browser automation - Invitation sent successfully`);
                     console.log(`📝 Message: ${newMessage || 'Default connection message'}`);
                     console.log(`💡 Verify in LinkedIn: My Network → Manage my network → Sent invitations`);
+                    
+                    // Track invitation activity for dashboard
+                    try {
+                        const profileId = linkedinId || (typeof getLinkedInIdForApi === 'function' ? getLinkedInIdForApi() : null);
+                        if (profileId) {
+                            const activityUrl = `${PLATFORM_URL}/api/activites?module=Invitation sent&stat=1&identifier=${profileId}`;
+                            fetch(activityUrl, {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'Accept': 'application/json'
+                                }
+                            }).then(response => {
+                                if (response.ok) {
+                                    console.log('✅ [User Activity] Invitation tracking saved successfully');
+                                } else {
+                                    console.warn('⚠️ [User Activity] Failed to save invitation tracking');
+                                }
+                            }).catch(error => {
+                                console.warn('⚠️ [User Activity] Error tracking invitation:', error);
+                            });
+                        }
+                    } catch (trackingError) {
+                        console.warn('⚠️ Could not track invitation activity:', trackingError);
+                    }
                 }
             } else {
                 console.log(`❌ INVITATION FAILED for ${lead.name} (${lead.connectionId})`);

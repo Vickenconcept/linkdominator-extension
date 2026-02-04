@@ -54,7 +54,7 @@ var viewConnectionsForm = `
                         <input type="text" class="form-control shadow-none" id="vcp-search-term" placeholder="Enter your search term">
                     </div>
                 <div class="row">
-                    <div class="col-md-12">
+                    <div class="col-md-6" style="margin-bottom: 12px;">
                         <div id="vcp-accordion">
                             <div class="card">
                                 <a class="card-link card-header c-header" data-toggle="collapse" href="#vcp-collapseConnectionStage"
@@ -80,9 +80,7 @@ var viewConnectionsForm = `
                             </div>
                         </div>
                     </div>
-                </div>
-                <div class="row">
-                    <div class="col-md-12">
+                    <div class="col-md-6" style="margin-bottom: 12px;">
                         <div id="vcp-accordionKeywords">
                             <div class="card">
                                 <a class="card-link card-header c-header" data-toggle="collapse" href="#vcp-collapseKeywords"
@@ -113,7 +111,7 @@ var viewConnectionsForm = `
                     </div>
                 </div>
                 <div class="row">
-                    <div class="col-md-12">
+                    <div class="col-md-6" style="margin-bottom: 12px;">
                         <div id="vcp-accordion1">
                             <div class="card">
                                 <a class="card-link card-header c-header" data-toggle="collapse" href="#vcp-collapseConnectionOf"
@@ -140,9 +138,7 @@ var viewConnectionsForm = `
                             </div>
                         </div>
                     </div>
-                </div>
-                <div class="row">
-                    <div class="col-md-12">
+                    <div class="col-md-6" style="margin-bottom: 12px;">
                         <div id="vcp-accordion2">
                             <div class="card">
                                 <a class="card-link card-header c-header" data-toggle="collapse" href="#vcp-collapseLocation" style="color:black">
@@ -170,7 +166,7 @@ var viewConnectionsForm = `
                     </div>
                 </div>
                 <div class="row">
-                    <div class="col-md-12">
+                    <div class="col-md-6" style="margin-bottom: 12px;">
                         <div id="vcp-accordion3">
                             <div class="card">
                                 <a class="card-link card-header c-header" data-toggle="collapse" href="#vcp-collapseCurrComp" style="color:black">
@@ -196,9 +192,7 @@ var viewConnectionsForm = `
                             </div>
                         </div>
                     </div>
-                </div>
-                <div class="row">
-                    <div class="col-md-12">
+                    <div class="col-md-6" style="margin-bottom: 12px;">
                         <div id="vcp-accordion4">
                             <div class="card">
                                 <a class="card-link card-header c-header" data-toggle="collapse" href="#vcp-collapsePastComp" style="color:black">
@@ -226,7 +220,7 @@ var viewConnectionsForm = `
                     </div>
                 </div>
                 <div class="row">
-                    <div class="col-md-12">
+                    <div class="col-md-6" style="margin-bottom: 12px;">
                         <div id="vcp-accordion5">
                             <div class="card">
                                 <a class="card-link card-header c-header" data-toggle="collapse" href="#vcp-collapseIndustry" style="color:black">
@@ -252,9 +246,7 @@ var viewConnectionsForm = `
                             </div>
                         </div>
                     </div>
-                </div>
-                <div class="row">
-                    <div class="col-md-12">
+                    <div class="col-md-6" style="margin-bottom: 12px;">
                         <div id="vcp-accordion6">
                             <div class="card">
                                 <a class="card-link card-header c-header" data-toggle="collapse" href="#vcp-collapseSchool" style="color:black">
@@ -282,7 +274,7 @@ var viewConnectionsForm = `
                     </div>
                 </div>
                 <div class="row">
-                    <div class="col-md-12">
+                    <div class="col-md-6" style="margin-bottom: 12px;">
                         <div id="vcp-accordion7">
                             <div class="card">
                                 <a class="card-link card-header c-header" data-toggle="collapse" href="#vcp-collapseLanguage" style="color:black">

@@ -6,28 +6,35 @@ var manageAudienceList = `
                 <h5 class="modal-title">Manage Audience</h5>
                 <button type="button" class="close close-manage-aud" >&times;</button>
             </div>
-            <div class="modal-body">
-                <div class="table-responsive">
-                    <table class="table table-hover">
-                        <thead>
+            <div class="modal-body" style="padding: 20px;">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h6 class="mb-0" style="color: #333; font-weight: 600;">
+                        <i class="fas fa-users me-2" style="color: #a855f7;"></i>
+                        Your Audiences
+                    </h6>
+                    <button class="btn btn-sm btn-primary openAudienceForm" style="background: linear-gradient(135deg, #a855f7 0%, #9333ea 100%); border: none; border-radius: 8px; padding: 8px 16px; font-weight: 500; box-shadow: 0 2px 8px rgba(168, 85, 247, 0.3);">
+                        <i class="fas fa-plus me-1"></i> Create New
+                    </button>
+                </div>
+                <div class="table-responsive" style="border-radius: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(168, 85, 247, 0.08);">
+                    <table class="table table-hover mb-0" id="modern-audience-table">
+                        <thead style="background: linear-gradient(135deg, #a855f7 0%, #9333ea 100%);">
                             <tr>
-                                <th>Audience name</th>
-                                <th>Contacts</th>
-                                <th>Add</th>
-                                <th>View</th>
-                                <th>Export CSV</th>
-                                <th id="espExportHeader" style="display: none;">Export to ESP</th>
-                                <th>
-                                    <div class="juez-tooltip">
-                                        <i class="far fa-plus-square fa-lg cursorr openAudienceForm"></i>
-                                    </div>
+                                <th style="padding: 16px; font-weight: 600; color: #fff; border-bottom: 2px solid rgba(255,255,255,0.2);">
+                                    <i class="fas fa-tag me-2"></i>Audience Name
+                                </th>
+                                <th style="padding: 16px; font-weight: 600; color: #fff; border-bottom: 2px solid rgba(255,255,255,0.2); text-align: center;">
+                                    <i class="fas fa-users me-2"></i>Contacts
+                                </th>
+                                <th style="padding: 16px; font-weight: 600; color: #fff; border-bottom: 2px solid rgba(255,255,255,0.2); text-align: center; width: 200px;">
+                                    Actions
                                 </th>
                             </tr>
                         </thead>
-                        <tbody id="audience-name-list"></tbody>
+                        <tbody id="audience-name-list" style="background: #fff;"></tbody>
                     </table>
                 </div>
-                <div id="pager-audience-list"></div>
+                <div id="pager-audience-list" class="mt-3"></div>
             </div>
         </div>
     </div>
@@ -139,9 +146,59 @@ window.fetchEspConfig = async () => {
     }
 };
 
-// Add custom styles for the delete confirmation modal
+// Add custom styles for the delete confirmation modal and modern table
 const customStyles = `
 <style>
+/* Modern Audience Table Styles */
+#modern-audience-table tbody tr {
+    transition: all 0.3s ease;
+}
+
+#modern-audience-table tbody tr:hover {
+    background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 119, 181, 0.08);
+}
+
+#modern-audience-table .btn-action-btn {
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+#modern-audience-table .btn-action-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+    opacity: 0.9;
+}
+
+#modern-audience-table .btn-action-btn:active {
+    transform: translateY(0);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+}
+
+/* Pulse animation for loading */
+@keyframes pulse {
+    0%, 100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+    50% {
+        transform: scale(1.05);
+        opacity: 0.8;
+    }
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    #modern-audience-table .btn-action-btn {
+        padding: 4px 8px;
+        font-size: 12px;
+    }
+    
+    #modern-audience-table tbody td {
+        padding: 12px 8px !important;
+    }
+}
 #deleteConfirmationModal .modal-content {
     border-radius: 15px;
     box-shadow: 0 10px 30px rgba(0,0,0,0.3);
@@ -236,7 +293,19 @@ const getAudienceNameList = async () => {
 
     // Show loading state
     $('#audience-name-list').empty();
-    $('#audience-name-list').html('<center><i class="fas fa-spinner fa-spin"></i> Loading audiences...</center>');
+    $('#audience-name-list').html(`
+        <tr>
+            <td colspan="3" class="text-center" style="padding: 60px 20px;">
+                <div style="text-align: center;">
+                    <div style="width: 60px; height: 60px; background: linear-gradient(135deg, rgba(168, 85, 247, 0.1) 0%, rgba(147, 51, 234, 0.1) 100%); border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; margin-bottom: 16px; animation: pulse 2s infinite;">
+                        <i class="fas fa-spinner fa-spin" style="font-size: 24px; color: #a855f7;"></i>
+                    </div>
+                    <h6 style="color: #333; font-weight: 600; margin-bottom: 4px;">Loading audiences...</h6>
+                    <p style="color: #6c757d; font-size: 14px; margin: 0;">Please wait</p>
+                </div>
+            </td>
+        </tr>
+    `);
 
     try {
         // Use the unified audience fetching function
@@ -267,53 +336,69 @@ const getAudienceNameList = async () => {
                                 $('#audience-name-list').empty()
 
                                 $.each(audienceInfo, function(i,item){
-                                    // Conditionally show ESP export column
-                                    const espExportColumn = window.hasEspConfig ? `
-                                            <td>
-                                                <div class="juez-tooltip">
-                                        <i class="fas fa-paper-plane export-esp cursorr" 
+                                    // Build action buttons
+                                    const espExportBtn = window.hasEspConfig ? `
+                                        <button class="btn btn-sm btn-action-btn export-esp" 
                                             data-audid="${item.audience_id}" 
-                                            data-name="${item.audience_name}"></i>
-                                        <span class="juez-tooltiptext">Export to ESP</span>
-                                                </div>
-                                            </td>` : '';
+                                            data-name="${item.audience_name}"
+                                            title="Export to ESP"
+                                            style="background: linear-gradient(135deg, #a855f7 0%, #9333ea 100%); color: white; border: none; border-radius: 6px; padding: 6px 12px; margin: 0 2px; transition: all 0.3s; box-shadow: 0 2px 4px rgba(168, 85, 247, 0.3);">
+                                            <i class="fas fa-paper-plane"></i>
+                                        </button>` : '';
                                     
                                     displayList = `
-                                        <tr class="audience-list${item.id}">
-                                            <td>${item.audience_name}</td>
-                                            <td>${item.total}</td>
-                                            <td>
-                                                <div class="juez-tooltip">
-                                                    <i class="fas fa-user-plus add-more-users cursorr" 
-                                                        data-audid ="${item.audience_id}" 
-                                                        data-name="${item.audience_name}"></i>
-                                                    <span class="juez-tooltiptext">Add more users</span>
+                                        <tr class="audience-list${item.id}" style="transition: all 0.3s ease; border-bottom: 1px solid #f0f0f0;">
+                                            <td style="padding: 16px; vertical-align: middle;">
+                                                <div style="display: flex; align-items: center;">
+                                                    <div style="width: 40px; height: 40px; background: linear-gradient(135deg, #a855f7 0%, #9333ea 100%); border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-right: 12px; box-shadow: 0 2px 8px rgba(168, 85, 247, 0.2);">
+                                                        <i class="fas fa-users" style="color: white; font-size: 16px;"></i>
+                                                    </div>
+                                                    <div>
+                                                        <div style="font-weight: 600; color: #333; font-size: 15px; margin-bottom: 2px;">${item.audience_name}</div>
+                                                        <div style="font-size: 12px; color: #6c757d;">
+                                                            <i class="far fa-calendar-alt me-1"></i>Created
+                                                        </div>
+                                                    </div>
                                                 </div>
                                             </td>
-                                            <td>
-                                                <div class="juez-tooltip">
-                                                    <i class="fas fa-eye cursorr get-audience-list" 
+                                            <td style="padding: 16px; text-align: center; vertical-align: middle;">
+                                                <div style="display: inline-flex; align-items: center; justify-content: center; background: linear-gradient(135deg, rgba(168, 85, 247, 0.1) 0%, rgba(147, 51, 234, 0.1) 100%); padding: 8px 16px; border-radius: 20px; font-weight: 600; color: #a855f7; min-width: 60px; border: 1px solid rgba(168, 85, 247, 0.2);">
+                                                    <i class="fas fa-user-friends me-2"></i>
+                                                    <span>${item.total}</span>
+                                                </div>
+                                            </td>
+                                            <td style="padding: 16px; text-align: center; vertical-align: middle;">
+                                                <div style="display: flex; align-items: center; justify-content: center; gap: 4px; flex-wrap: wrap;">
+                                                    <button class="btn btn-sm btn-action-btn add-more-users" 
+                                                        data-audid="${item.audience_id}" 
                                                         data-name="${item.audience_name}"
-                                                        data-audid="${item.audience_id}"></i>
-                                        <span class="juez-tooltiptext">View audience</span>
-                                                </div>
-                                            </td>
-                                            <td>
-                                                <div class="juez-tooltip">
-                                        <i class="fas fa-download export-audience cursorr" 
-                                            data-audid="${item.audience_id}" 
-                                            data-name="${item.audience_name}"></i>
-                                        <span class="juez-tooltiptext">Export CSV</span>
-                                                </div>
-                                            </td>
-                                            ${espExportColumn}
-                                            <td>
-                                                <div class="juez-tooltip">
-                                        <i class="fas fa-trash cursorr delete-audience" 
+                                                        title="Add more users"
+                                                        style="background: linear-gradient(135deg, #a855f7 0%, #9333ea 100%); color: white; border: none; border-radius: 6px; padding: 6px 12px; transition: all 0.3s; box-shadow: 0 2px 4px rgba(168, 85, 247, 0.3);">
+                                                        <i class="fas fa-user-plus"></i>
+                                                    </button>
+                                                    <button class="btn btn-sm btn-action-btn get-audience-list" 
+                                                        data-name="${item.audience_name}"
                                                         data-audid="${item.audience_id}"
-                                            data-name="${item.audience_name}"
-                                            data-rowid="${item.id}"></i>
-                                        <span class="juez-tooltiptext">Delete audience</span>
+                                                        title="View audience"
+                                                        style="background: linear-gradient(135deg, #a855f7 0%, #9333ea 100%); color: white; border: none; border-radius: 6px; padding: 6px 12px; transition: all 0.3s; box-shadow: 0 2px 4px rgba(168, 85, 247, 0.3);">
+                                                        <i class="fas fa-eye"></i>
+                                                    </button>
+                                                    <button class="btn btn-sm btn-action-btn export-audience" 
+                                                        data-audid="${item.audience_id}" 
+                                                        data-name="${item.audience_name}"
+                                                        title="Export CSV"
+                                                        style="background: linear-gradient(135deg, #a855f7 0%, #9333ea 100%); color: white; border: none; border-radius: 6px; padding: 6px 12px; transition: all 0.3s; box-shadow: 0 2px 4px rgba(168, 85, 247, 0.3);">
+                                                        <i class="fas fa-download"></i>
+                                                    </button>
+                                                    ${espExportBtn}
+                                                    <button class="btn btn-sm btn-action-btn delete-audience" 
+                                                        data-audid="${item.audience_id}"
+                                                        data-name="${item.audience_name}"
+                                                        data-rowid="${item.id}"
+                                                        title="Delete audience"
+                                                        style="background: linear-gradient(135deg, #dc3545 0%, #c82333 100%); color: white; border: none; border-radius: 6px; padding: 6px 12px; transition: all 0.3s; box-shadow: 0 2px 4px rgba(220, 53, 69, 0.3);">
+                                                        <i class="fas fa-trash"></i>
+                                                    </button>
                                                 </div>
                                             </td>
                                         </tr>
@@ -323,8 +408,22 @@ const getAudienceNameList = async () => {
                             }
             });
         } else {
-            const colspan = window.hasEspConfig ? 7 : 6;
-            $('#audience-name-list').html(`<tr><td colspan="${colspan}" class="text-center">No audiences found. Create your first audience!</td></tr>`);
+            $('#audience-name-list').html(`
+                <tr>
+                    <td colspan="3" class="text-center" style="padding: 60px 20px;">
+                        <div style="text-align: center;">
+                            <div style="width: 80px; height: 80px; background: linear-gradient(135deg, rgba(168, 85, 247, 0.1) 0%, rgba(147, 51, 234, 0.1) 100%); border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(168, 85, 247, 0.2);">
+                                <i class="fas fa-users" style="font-size: 32px; color: #a855f7;"></i>
+                            </div>
+                            <h6 style="color: #333; font-weight: 600; margin-bottom: 8px;">No audiences found</h6>
+                            <p style="color: #6c757d; margin-bottom: 20px; font-size: 14px;">Create your first audience to get started!</p>
+                            <button class="btn btn-primary openAudienceForm" style="background: linear-gradient(135deg, #a855f7 0%, #9333ea 100%); border: none; border-radius: 8px; padding: 10px 24px; font-weight: 500; box-shadow: 0 2px 8px rgba(168, 85, 247, 0.3);">
+                                <i class="fas fa-plus me-2"></i>Create New Audience
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+            `);
             console.log('ℹ️ No audiences found for this user');
                 }
         
@@ -341,10 +440,17 @@ const getAudienceNameList = async () => {
         // Show error message to user
         $('#audience-name-list').html(`
             <tr>
-                <td colspan="6" class="text-center text-danger">
-                    <i class="fas fa-exclamation-triangle"></i> 
-                    ${errorMessage}
-                    <br><small>Check console for details</small>
+                <td colspan="3" class="text-center" style="padding: 40px 20px;">
+                    <div style="text-align: center;">
+                        <div style="width: 60px; height: 60px; background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%); border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; margin-bottom: 16px;">
+                            <i class="fas fa-exclamation-triangle" style="font-size: 24px; color: #856404;"></i>
+                        </div>
+                        <h6 style="color: #dc3545; font-weight: 600; margin-bottom: 8px;">Error Loading Audiences</h6>
+                        <p style="color: #6c757d; margin-bottom: 16px; font-size: 14px;">${errorMessage}</p>
+                        <button class="btn btn-sm btn-outline-primary retry-audience-list" style="border-radius: 6px; padding: 8px 16px;">
+                            <i class="fas fa-redo me-2"></i>Retry
+                        </button>
+                    </div>
                 </td>
             </tr>
         `);
@@ -601,8 +707,22 @@ $('body').on('click','.delete-audience',function(){
                             
                             // Check if no more rows exist
                             if ($('#audience-name-list tr').length === 0) {
-                                const colspan = window.hasEspConfig ? 7 : 6;
-            $('#audience-name-list').html(`<tr><td colspan="${colspan}" class="text-center">No audiences found. Create your first audience!</td></tr>`);
+                                $('#audience-name-list').html(`
+                                    <tr>
+                                        <td colspan="3" class="text-center" style="padding: 60px 20px;">
+                                            <div style="text-align: center;">
+                                                <div style="width: 80px; height: 80px; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+                                                    <i class="fas fa-users" style="font-size: 32px; color: #6c757d;"></i>
+                                                </div>
+                                                <h6 style="color: #333; font-weight: 600; margin-bottom: 8px;">No audiences found</h6>
+                                                <p style="color: #6c757d; margin-bottom: 20px; font-size: 14px;">Create your first audience to get started!</p>
+                                                <button class="btn btn-primary openAudienceForm" style="background: linear-gradient(135deg, #0077b5 0%, #005885 100%); border: none; border-radius: 8px; padding: 10px 24px; font-weight: 500;">
+                                                    <i class="fas fa-plus me-2"></i>Create New Audience
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                `);
                             }
                         }); 
                     } else {

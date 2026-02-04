@@ -34,7 +34,7 @@
         }, 2000);
     }
     
-    // Check if current page is a feed page, search results, company, hashtag, group, or posts page
+    // Check if current page is a feed page, search results, company, hashtag, group, posts, or events page
     function isFeedPage() {
         return window.location.href.includes('linkedin.com/feed') || 
                window.location.pathname === '/feed' || 
@@ -42,7 +42,8 @@
                window.location.pathname.includes('/search/results/') ||
                window.location.pathname.includes('/company/') ||
                window.location.pathname.includes('/groups/') ||
-               window.location.pathname.includes('/posts/');
+               window.location.pathname.includes('/posts/') ||
+               window.location.pathname.includes('/events/');
     }
     
     // Check if we're on the main feed page (not a single post)
@@ -1089,9 +1090,11 @@
 
     // Global observer and initialization state
     let feedObserver = null;
+    let rootObserver = null;
     let isInitialized = false;
-    let currentUrl = window.location.href;
-    let periodicCheckInterval = null;
+    let periodicInterval = null;
+    let urlPollingInterval = null;
+    let lastUrl = location.href;
 
     /**
      * Scan for posts and add buttons
@@ -1536,11 +1539,13 @@
                     skipReasons.addButtonFailed++;
                 }
             } catch (error) {
-                console.error('Error adding button to post:', error);
+                console.error('[LinkedIn Gen] Error adding button to post:', error);
                 skippedPosts++;
                 skipReasons.error++;
             }
         });
+        
+        return buttonsAdded;
     }
 
     /**
@@ -1548,17 +1553,25 @@
      */
     function initialize() {
         // Don't re-initialize if already initialized and on same page
-        if (isInitialized && currentUrl === window.location.href) {
+        const currentUrlCheck = window.location.href;
+        const currentPathCheck = window.location.pathname;
+        
+        if (isInitialized && currentUrl === currentUrlCheck && currentPath === currentPathCheck) {
             return;
         }
         
-        // Update current URL
-        currentUrl = window.location.href;
+        // Update current URL and path
+        currentUrl = currentUrlCheck;
+        currentPath = currentPathCheck;
         
-        // Wait for page to be interactive
+        // Check if this is a single post page
+        const isSinglePost = isSinglePostPage();
+        
+        // Wait for page to be interactive (shorter wait for single post pages)
         if (document.readyState === 'loading') {
+            const delay = isSinglePost ? 500 : 1000;
             document.addEventListener('DOMContentLoaded', () => {
-                setTimeout(initialize, 1000);
+                setTimeout(initialize, delay);
             });
             return;
         }
@@ -1595,288 +1608,203 @@
             scanAndAddButtons();
         }, 8000);
 
-        // Create new observer for feed changes
-        feedObserver = new MutationObserver((mutations) => {
-            // Check if any mutations added new nodes that might be posts
-            let shouldScan = false;
-            mutations.forEach(mutation => {
-                if (mutation.addedNodes.length > 0) {
-                    // Check if any added node looks like a post or contains posts
-                    mutation.addedNodes.forEach(node => {
-                        if (node.nodeType === Node.ELEMENT_NODE) {
-                            // Check if it's a post or contains posts
-                            const isPost = node.matches && (
-                                node.matches('[role="listitem"]') ||
-                                node.matches('.feed-shared-update-v2') ||
-                                node.matches('.occludable-update') ||
-                                node.matches('[data-test-id="main-feed-activity-card"]') ||
-                                node.matches('[data-testid="main-feed-activity-card"]') ||
-                                node.matches('.search-results__search-feed-update') ||
-                                (node.getAttribute && node.getAttribute('data-urn')?.includes('activity:'))
-                            );
-                            
-                            const containsPosts = node.querySelector && (
-                                node.querySelector('[role="listitem"]') ||
-                                node.querySelector('.feed-shared-update-v2') ||
-                                node.querySelector('.occludable-update') ||
-                                node.querySelector('[data-test-id="main-feed-activity-card"]') ||
-                                node.querySelector('[data-testid="main-feed-activity-card"]') ||
-                                node.querySelector('.search-results__search-feed-update') ||
-                                node.querySelector('[data-urn*="activity:"]')
-                            );
-                            
-                            if (isPost || containsPosts) {
-                                shouldScan = true;
-                            }
-                        }
-                    });
-                }
-            });
-            
-            // Only scan if we detected potential new posts
-            if (shouldScan) {
-                // Debounce to avoid too many calls
-                clearTimeout(feedObserver.timeout);
-                feedObserver.timeout = setTimeout(() => {
-                    scanAndAddButtons();
-                }, 300);
-            }
-        });
+        // Start observing feed container for new posts
+        attachFeedObserver();
 
         // Initial scan
         scanAndAddButtons();
 
-        // Observe for new posts (LinkedIn uses infinite scroll)
-        // Try multiple container selectors - prioritize page-specific containers
-        const containerSelectors = isSearchResultsPage() ? [
-            '.search-results-container',  // Search results container
-            '.scaffold-finite-scroll__content',
-            'main',
-            '[role="main"]',
-        ] : isCompanyPage() ? [
-            '.feed-container-theme',  // Company page container
-            '.scaffold-finite-scroll__content',
-            'main',
-            '[role="main"]',
-        ] : isHashtagFeedPage() ? [
-            '[data-testid="mainFeed"]',  // Hashtag feeds use similar structure to main feed
-            '.feed-container-theme',
-            '.scaffold-finite-scroll__content',
-            'main',
-            '[role="main"]',
-        ] : isGroupPage() ? [
-            '.feed-container-theme',  // Groups use similar structure to company pages
-            '[data-testid="mainFeed"]',
-            '.scaffold-finite-scroll__content',
-            'main',
-            '[role="main"]',
-        ] : isPostsPage() ? [
-            // /posts/ pages - individual post pages
-            'main',
-            '[role="main"]',
-            '.scaffold-finite-scroll__content',
-            '[data-testid="mainFeed"]',
-            '.feed-container',
-        ] : isMainFeedPage() ? [
-            '[data-testid="mainFeed"]',  // Main feed container
-            '.scaffold-finite-scroll__content',
-            'main',
-            '[role="main"]',
-            '.feed-container',
-            '.feed-container__content',
-            '#main-content',
-            '.global-feed',
-            'div[data-view-name="feed-container"]',
-            'div[data-view-name="feed"]'
-        ] : [
-            '.scaffold-finite-scroll__content',
-            'main',
-            '[role="main"]',
-            '.feed-container',
-            '.feed-container__content',
-            '#main-content',
-            '.global-feed',
-            'div[data-view-name="feed-container"]',
-            'div[data-view-name="feed"]'
-        ];
-        
-        let feedContainer = null;
-        for (const selector of containerSelectors) {
-            feedContainer = document.querySelector(selector);
-            if (feedContainer) {
-                break;
-            }
+        isInitialized = true;
+    }
+
+    /**
+     * Layer 3: Root-level MutationObserver (fallback for DOM rebuilds)
+     * Watches for any big DOM change → check URL
+     */
+    function startRootObserver() {
+        if (rootObserver) {
+            rootObserver.disconnect();
         }
-        
-        // Fallback to body if no specific container found
-        if (!feedContainer) {
-            feedContainer = document.body;
-        }
-        
-        if (feedContainer && feedObserver) {
-            feedObserver.observe(feedContainer, {
+
+        rootObserver = new MutationObserver(() => {
+            checkForChange(); // Any big DOM change → check URL
+        });
+
+        if (document.body) {
+            rootObserver.observe(document.body, {
                 childList: true,
                 subtree: true,
                 attributes: false,
                 characterData: false
             });
-        } else {
-            // Retry after a delay
-            setTimeout(() => {
-                let retryContainer = null;
-                for (const selector of containerSelectors) {
-                    retryContainer = document.querySelector(selector);
-                    if (retryContainer) break;
-                }
-                if (!retryContainer) {
-                    retryContainer = document.body;
-                }
-                
-                if (retryContainer && feedObserver) {
-                    feedObserver.observe(retryContainer, {
-                        childList: true,
-                        subtree: true,
-                        attributes: false,
-                        characterData: false
-                    });
-                }
-            }, 2000);
         }
-
-        isInitialized = true;
-
-        // Set up periodic check to catch posts that load slowly
-        if (periodicCheckInterval) {
-            clearInterval(periodicCheckInterval);
+    }
+    
+    /**
+     * Layer 2: Polling-based URL check (catches EVERYTHING, including weird navigations)
+     * This is the most reliable method for LinkedIn's SPA
+     */
+    function startUrlPolling() {
+        if (urlPollingInterval) {
+            clearInterval(urlPollingInterval);
         }
-        
-        periodicCheckInterval = setInterval(() => {
-            if (!isFeedPage()) {
-                clearInterval(periodicCheckInterval);
-                periodicCheckInterval = null;
-                return;
-            }
-            // Always scan periodically to catch posts that load slowly or were missed
-            // Use comprehensive selectors to find all posts
-            const allPostSelectors = [
-                '[role="listitem"]',  // Main feed posts
-                '.feed-shared-update-v2',
-                '.occludable-update',
-                '[data-test-id="main-feed-activity-card"]',
-                '[data-testid="main-feed-activity-card"]',
-                'div[data-urn*="activity:"]',
-                'article[data-urn*="activity:"]',
-                '.search-results__search-feed-update'
-            ];
-            
-            let allPosts = [];
-            allPostSelectors.forEach(selector => {
-                const found = document.querySelectorAll(selector);
-                found.forEach(post => {
-                    if (!allPosts.includes(post)) {
-                        allPosts.push(post);
-                    }
-                });
-            });
-            
-            // Filter to only visible posts
-            allPosts = allPosts.filter(post => {
-                const rect = post.getBoundingClientRect();
-                return rect.height > 0 && rect.width > 0;
-            });
-            
-            // Check how many posts don't have buttons
-            const postsWithoutButtons = allPosts.filter(post => {
-                // Check if post or any ancestor has the button
-                return !post.querySelector('.ld-comment-gen-btn') && 
-                       !post.closest('[class*="ld-comment"]') &&
-                       !Array.from(post.querySelectorAll('*')).some(el => el.classList.contains('ld-comment-gen-btn'));
-            });
-            
-            // If there are posts without buttons, scan and add buttons
-            if (postsWithoutButtons.length > 0) {
-                scanAndAddButtons();
-            } else if (allPosts.length > 0 && document.querySelectorAll('.ld-comment-gen-btn').length === 0) {
-                // Posts exist but no buttons at all - force a scan
-                scanAndAddButtons();
-            }
-        }, 1500); // Check every 1.5 seconds for faster detection
+        urlPollingInterval = setInterval(() => {
+            checkForChange();
+        }, 300); // 300ms - more frequent to catch fast navigations
+    }
+    
+    /**
+     * Check for URL changes - called by polling and observers
+     */
+    function checkForChange() {
+        const now = location.href;
+        if (now !== lastUrl) {
+            lastUrl = now;
+            onNavigation();
+        }
     }
 
     /**
-     * Handle SPA navigation
+     * Attach feed observer to watch for new posts
      */
-    function handleNavigation() {
-        const newUrl = window.location.href;
-        
-        // Check if we're on a feed page
-        if (!isFeedPage()) {
-            // Clean up if we left feed page
-            if (feedObserver) {
-                feedObserver.disconnect();
-                feedObserver = null;
+    function attachFeedObserver() {
+        if (feedObserver) {
+            feedObserver.disconnect();
+        }
+
+        const possibleTargets = [
+            'div[role="feed"]',
+            '[data-testid="mainFeed"]',
+            '.scaffold-finite-scroll__content',
+            'main',
+            '.feed-shared-update-v2', // posts
+            'div.feed-identity-module__actor-meta', // profile-like feeds
+            '.feed-container-theme',
+            '.search-results-container'
+        ];
+
+        let target = document.querySelector(possibleTargets.join(',')) || document.body;
+
+        feedObserver = new MutationObserver(mutations => {
+            if (mutations.some(m => m.addedNodes.length > 0)) {
+                clearTimeout(feedObserver.debounce);
+                feedObserver.debounce = setTimeout(() => {
+                    scanAndAddButtons();
+                }, 200);
             }
-            if (periodicCheckInterval) {
-                clearInterval(periodicCheckInterval);
-                periodicCheckInterval = null;
-            }
+        });
+
+        feedObserver.observe(target, { 
+            childList: true, 
+            subtree: true,
+            attributes: false,
+            characterData: false
+        });
+    }
+    
+    /**
+     * Main navigation handler - called on every route change
+     */
+    function onNavigation() {
+        // Clean up old stuff
+        if (feedObserver) {
+            feedObserver.disconnect();
+            feedObserver = null;
+        }
+        if (periodicInterval) {
+            clearInterval(periodicInterval);
+            periodicInterval = null;
+        }
+
+        // Only continue if we're on a relevant page
+        if (!isFeedPage() && !isSinglePostPage()) {
             isInitialized = false;
             return;
         }
-        
-        // Only reinitialize if URL actually changed and we're still on a feed page
-        if (newUrl !== currentUrl) {
-            isInitialized = false;
-            currentUrl = newUrl;
-            
-            // Wait a bit for LinkedIn to render new content
-            setTimeout(() => {
-                initialize();
-            }, 800);
-        } else if (!isInitialized) {
-            // URL didn't change but we're not initialized, initialize now
-            setTimeout(() => {
-                initialize();
-            }, 800);
+
+        isInitialized = false;
+        const isSinglePost = isSinglePostPage();
+        const delay = isSinglePost ? 300 : 600;
+
+        // Multiple scans at different intervals to catch posts that load at different times
+        setTimeout(() => {
+            scanAndAddButtons();
+            attachFeedObserver();
+        }, delay);
+
+        // Second scan - catch posts that load a bit later
+        setTimeout(() => {
+            scanAndAddButtons();
+        }, delay + 1000);
+
+        // Third scan - catch posts that load even later
+        setTimeout(() => {
+            scanAndAddButtons();
+        }, delay + 2500);
+
+        // Fourth scan - catch very slow loading posts
+        setTimeout(() => {
+            scanAndAddButtons();
+        }, delay + 4000);
+
+        // Fifth scan - final catch for extremely slow posts
+        setTimeout(() => {
+            scanAndAddButtons();
+        }, delay + 6000);
+
+        // Light polling only while on feed (safety net)
+        if (isFeedPage() && !periodicInterval) {
+            periodicInterval = setInterval(() => {
+                if (isFeedPage()) {
+                    scanAndAddButtons();
+                } else {
+                    clearInterval(periodicInterval);
+                    periodicInterval = null;
+                }
+            }, 4000);
         }
     }
 
-    // Intercept pushState and replaceState for SPA navigation
-    const originalPushState = history.pushState;
-    const originalReplaceState = history.replaceState;
-
+    // Layer 1: History API interception (catches most client-side navigations)
+    const originalPush = history.pushState;
     history.pushState = function(...args) {
-        originalPushState.apply(history, args);
-        setTimeout(handleNavigation, 100);
+        originalPush.apply(this, args);
+        setTimeout(checkForChange, 100);
     };
 
+    const originalReplace = history.replaceState;
     history.replaceState = function(...args) {
-        originalReplaceState.apply(history, args);
-        setTimeout(handleNavigation, 100);
+        originalReplace.apply(this, args);
+        setTimeout(checkForChange, 100);
     };
 
-    // Listen for popstate (back/forward navigation)
-    window.addEventListener('popstate', () => {
-        setTimeout(handleNavigation, 100);
-    });
+    window.addEventListener('popstate', () => setTimeout(checkForChange, 100));
 
     // Also listen for hash changes (though LinkedIn doesn't use them much)
-    window.addEventListener('hashchange', () => {
-        setTimeout(handleNavigation, 100);
-    });
+    window.addEventListener('hashchange', () => setTimeout(checkForChange, 100));
 
-    // Start initialization after a short delay to ensure page is loaded
-    if (document.readyState === 'complete') {
-        setTimeout(initialize, 1500);
+    /**
+     * Initialize extension - run once on page load
+     */
+    function init() {
+        startRootObserver();
+        startUrlPolling();
+        onNavigation();
+    }
+
+    // Run now or on DOMContentLoaded
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
     } else {
-        window.addEventListener('load', () => {
-            setTimeout(initialize, 1500);
-        });
+        init();
     }
-
-    // Also initialize immediately if DOM is already ready
-    if (document.readyState === 'interactive' || document.readyState === 'complete') {
-        setTimeout(initialize, 1500);
-    }
+    
+    // Keep-alive check for URL changes (backup)
+    const keepAliveInterval = setInterval(() => {
+        checkForChange();
+    }, 3000);
+    
+    // Store interval in window so it persists
+    window._linkedinGenKeepAlive = keepAliveInterval;
 })();
 

@@ -7,25 +7,27 @@ var audienceCreationForm = `
                 <h5 class="modal-title">Create Audience</h5>
                 <button type="button" class="close closeAudienceForm" >&times;</button>
             </div>
-            <div class="modal-body">
-                <div class="row newAudience-notice" style="display: none;">
+            <div class="modal-body" style="padding: 24px;">
+                <div class="row newAudience-notice" style="display: none; margin-bottom: 20px;">
                     <div class="col-md-12">
-                        <div class="card card-body" style="background: #F3F6F8;">
-                            <ul id="afc-displayNewAudienceStatus" style="list-style: none"></ul>
+                        <div class="card card-body" style="background: linear-gradient(135deg, rgba(168, 85, 247, 0.1) 0%, rgba(147, 51, 234, 0.1) 100%); border: 1px solid rgba(168, 85, 247, 0.2); border-radius: 12px;">
+                            <ul id="afc-displayNewAudienceStatus" style="list-style: none; margin: 0;"></ul>
                         </div>
                     </div>
                 </div>
-                <div class="form-group">
-                    <label for="audience-name" class="font-weight-bold c-header">Audience name</label>
-                    <input type="text" class="form-control shadow-none" id="audience-name" data-name="Audience name" placeholder="Enter audience name">
+                <div class="form-group" style="margin-bottom: 24px;">
+                    <label for="audience-name" class="font-weight-bold c-header" style="display: flex; align-items: center; margin-bottom: 8px; color: #333; font-size: 14px;">
+                        <i class="fas fa-tag me-2" style="color: #a855f7;"></i>Audience name
+                    </label>
+                    <input type="text" class="form-control shadow-none modern-input" id="audience-name" data-name="Audience name" placeholder="Enter audience name" style="border-radius: 8px; border: 1px solid #e0e0e0; padding: 12px 16px; transition: all 0.3s ease;">
                 </div>
-                <div class="row">
+                <div class="row" style="margin-bottom: 24px;">
                     <div class="col-md-12">
-                        <ul class="nav nav-pills" role="tablist">
-                            <li class="nav-item">
-                                <a class="nav-link active" id="nav-link-fsearch" data-toggle="pill" href="#fsearch">
-                                    <div class="juez-tooltip">
-                                        <i class="fa fa-search"></i> From search
+                        <ul class="nav nav-pills modern-tabs" role="tablist" style="background: #f8f9fa; border-radius: 12px; padding: 4px; display: flex; gap: 8px;">
+                            <li class="nav-item" style="flex: 1;">
+                                <a class="nav-link active modern-tab-link" id="nav-link-fsearch" data-toggle="pill" href="#fsearch" style="border-radius: 8px; text-align: center; padding: 12px 16px; transition: all 0.3s ease; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                                    <div class="juez-tooltip" style="display: flex; align-items: center; gap: 8px;">
+                                        <i class="fa fa-search"></i> <span>From search</span>
                                         <span class="juez-tooltiptext">
                                             Collect users from Linkedin search.
                                         </span>
@@ -45,11 +47,10 @@ var audienceCreationForm = `
                                 </a>
                             </li>
                             -->
-                            <li class="nav-item">
-                                <a class="nav-link" id="nav-link-fpost" data-toggle="pill" href="#fpost">
-                                    
-                                    <div class="juez-tooltip">
-                                        <i class="far fa-file-alt fa-lg"></i> From post
+                            <li class="nav-item" style="flex: 1;">
+                                <a class="nav-link modern-tab-link" id="nav-link-fpost" data-toggle="pill" href="#fpost" style="border-radius: 8px; text-align: center; padding: 12px 16px; transition: all 0.3s ease; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                                    <div class="juez-tooltip" style="display: flex; align-items: center; gap: 8px;">
+                                        <i class="far fa-file-alt"></i> <span>From post</span>
                                         <span class="juez-tooltiptext">
                                             Collect users from post feeds.
                                         </span>
@@ -84,18 +85,21 @@ var audienceCreationForm = `
                                 -->        
                         </ul>
 
-                        <div class="tab-content">
+                        <div class="tab-content" style="margin-top: 20px;">
                             <div id="fsearch" class="container tab-pane active">
-                                <div class="form-group">
-                                    <label for="afs-search-term" class="font-weight-bold c-header">Search</label>
-                                    <input type="text" class="form-control shadow-none" id="afs-search-term" placeholder="Enter your search term">
+                                <div class="form-group" style="margin-bottom: 24px;">
+                                    <label for="afs-search-term" class="font-weight-bold c-header" style="display: flex; align-items: center; margin-bottom: 8px; color: #333; font-size: 14px;">
+                                        <i class="fas fa-search me-2" style="color: #a855f7;"></i>Search
+                                    </label>
+                                    <input type="text" class="form-control shadow-none modern-input" id="afs-search-term" placeholder="Enter your search term" style="border-radius: 8px; border: 1px solid #e0e0e0; padding: 12px 16px; transition: all 0.3s ease;">
                                 </div>
                                 <div class="row">
                                     <div class="col-md-6">
                                         <div id="afs-accordion7">
-                                            <div class="card">
-                                                <a class="card-link card-header c-header" data-toggle="collapse" href="#afs-collapseLanguage"  style="color:black">
-                                                    Profile Language<span class="float-right dropdown-toggle"></span>
+                                            <div class="card modern-filter-card" style="border-radius: 12px; border: 1px solid #e0e0e0; margin-bottom: 12px; overflow: hidden; transition: all 0.3s ease;">
+                                                <a class="card-link card-header c-header modern-filter-header" data-toggle="collapse" href="#afs-collapseLanguage" style="color: #333; padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; font-weight: 600; font-size: 14px; background: linear-gradient(135deg, rgba(168, 85, 247, 0.05) 0%, rgba(147, 51, 234, 0.05) 100%); border: none;">
+                                                    <span style="display: flex; align-items: center; gap: 8px;"><i class="fas fa-language" style="color: #a855f7;"></i> Profile Language</span>
+                                                    <span class="dropdown-toggle" style="transition: transform 0.3s ease;"></span>
                                                 </a>
                                                 <div id="afs-collapseLanguage" class="collapse" data-parent="#afs-accordion7">
                                                     <div class="card-body">
@@ -119,10 +123,10 @@ var audienceCreationForm = `
                                     </div>
                                     <div class="col-md-6">
                                         <div id="afs-accordionKeywords">
-                                            <div class="card">
-                                                <a class="card-link card-header c-header" data-toggle="collapse" href="#afs-collapseKeywords"
-                                                    style="color:black">
-                                                    Keywords <span class="float-right dropdown-toggle"></span>
+                                            <div class="card modern-filter-card" style="border-radius: 12px; border: 1px solid #e0e0e0; margin-bottom: 12px; overflow: hidden; transition: all 0.3s ease;">
+                                                <a class="card-link card-header c-header modern-filter-header" data-toggle="collapse" href="#afs-collapseKeywords" style="color: #333; padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; font-weight: 600; font-size: 14px; background: linear-gradient(135deg, rgba(168, 85, 247, 0.05) 0%, rgba(147, 51, 234, 0.05) 100%); border: none;">
+                                                    <span style="display: flex; align-items: center; gap: 8px;"><i class="fas fa-key" style="color: #a855f7;"></i> Keywords</span>
+                                                    <span class="dropdown-toggle" style="transition: transform 0.3s ease;"></span>
                                                 </a>
                                                 <div id="afs-collapseKeywords" class="collapse" data-parent="#afs-accordionKeywords">
                                                     <div class="card-body">
@@ -150,10 +154,10 @@ var audienceCreationForm = `
                                 <div class="row">
                                     <div class="col-md-6">
                                         <div id="afs-accordion1">
-                                            <div class="card">
-                                                <a class="card-link card-header c-header" data-toggle="collapse" href="#afs-collapseConnectionOf"
-                                                    style="color:black">
-                                                    Connections Of <span class="float-right dropdown-toggle"></span>
+                                            <div class="card modern-filter-card" style="border-radius: 12px; border: 1px solid #e0e0e0; margin-bottom: 12px; overflow: hidden; transition: all 0.3s ease;">
+                                                <a class="card-link card-header c-header modern-filter-header" data-toggle="collapse" href="#afs-collapseConnectionOf" style="color: #333; padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; font-weight: 600; font-size: 14px; background: linear-gradient(135deg, rgba(168, 85, 247, 0.05) 0%, rgba(147, 51, 234, 0.05) 100%); border: none;">
+                                                    <span style="display: flex; align-items: center; gap: 8px;"><i class="fas fa-user-friends" style="color: #a855f7;"></i> Connections Of</span>
+                                                    <span class="dropdown-toggle" style="transition: transform 0.3s ease;"></span>
                                                 </a>
                                                 <div id="afs-collapseConnectionOf" class="collapse" data-parent="#afs-accordion1">
                                                     <div class="card-body">
@@ -177,9 +181,10 @@ var audienceCreationForm = `
                                     </div>
                                     <div class="col-md-6">
                                         <div id="afs-accordion2">
-                                            <div class="card">                  
-                                                <a class="card-link card-header c-header" data-toggle="collapse" href="#afs-collapseLocation"   style="color:black">
-                                                    Locations<span class="float-right dropdown-toggle"></span>
+                                            <div class="card modern-filter-card" style="border-radius: 12px; border: 1px solid #e0e0e0; margin-bottom: 12px; overflow: hidden; transition: all 0.3s ease;">
+                                                <a class="card-link card-header c-header modern-filter-header" data-toggle="collapse" href="#afs-collapseLocation" style="color: #333; padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; font-weight: 600; font-size: 14px; background: linear-gradient(135deg, rgba(168, 85, 247, 0.05) 0%, rgba(147, 51, 234, 0.05) 100%); border: none;">
+                                                    <span style="display: flex; align-items: center; gap: 8px;"><i class="fas fa-map-marker-alt" style="color: #a855f7;"></i> Locations</span>
+                                                    <span class="dropdown-toggle" style="transition: transform 0.3s ease;"></span>
                                                 </a>
                                                 <div id="afs-collapseLocation" class="collapse" data-parent="#afs-accordion2">
                                                     <div class="card-body">
@@ -205,9 +210,10 @@ var audienceCreationForm = `
                                 <div class="row">
                                     <div class="col-md-6">
                                         <div id="afs-accordion3">
-                                            <div class="card">
-                                                <a class="card-link card-header c-header" data-toggle="collapse" href="#afs-collapseCurrComp"  style="color:black">
-                                                    Current companies<span class="float-right dropdown-toggle"></span>
+                                            <div class="card modern-filter-card" style="border-radius: 12px; border: 1px solid #e0e0e0; margin-bottom: 12px; overflow: hidden; transition: all 0.3s ease;">
+                                                <a class="card-link card-header c-header modern-filter-header" data-toggle="collapse" href="#afs-collapseCurrComp" style="color: #333; padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; font-weight: 600; font-size: 14px; background: linear-gradient(135deg, rgba(168, 85, 247, 0.05) 0%, rgba(147, 51, 234, 0.05) 100%); border: none;">
+                                                    <span style="display: flex; align-items: center; gap: 8px;"><i class="fas fa-building" style="color: #a855f7;"></i> Current companies</span>
+                                                    <span class="dropdown-toggle" style="transition: transform 0.3s ease;"></span>
                                                 </a>
                                                 <div id="afs-collapseCurrComp" class="collapse" data-parent="#afs-accordion3">
                                                     <div class="card-body">
@@ -231,9 +237,10 @@ var audienceCreationForm = `
                                     </div>
                                     <div class="col-md-6">
                                         <div id="afs-accordion4">
-                                            <div class="card">
-                                                <a class="card-link card-header c-header" data-toggle="collapse" href="#afs-collapsePastComp" style="color:black">
-                                                    Past companies<span class="float-right dropdown-toggle"></span>
+                                            <div class="card modern-filter-card" style="border-radius: 12px; border: 1px solid #e0e0e0; margin-bottom: 12px; overflow: hidden; transition: all 0.3s ease;">
+                                                <a class="card-link card-header c-header modern-filter-header" data-toggle="collapse" href="#afs-collapsePastComp" style="color: #333; padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; font-weight: 600; font-size: 14px; background: linear-gradient(135deg, rgba(168, 85, 247, 0.05) 0%, rgba(147, 51, 234, 0.05) 100%); border: none;">
+                                                    <span style="display: flex; align-items: center; gap: 8px;"><i class="fas fa-briefcase" style="color: #a855f7;"></i> Past companies</span>
+                                                    <span class="dropdown-toggle" style="transition: transform 0.3s ease;"></span>
                                                 </a>
                                                 <div id="afs-collapsePastComp" class="collapse" data-parent="#afs-accordion4">
                                                     <div class="card-body">
@@ -259,9 +266,10 @@ var audienceCreationForm = `
                                 <div class="row">
                                     <div class="col-md-6">
                                         <div id="afs-accordion5">
-                                            <div class="card">
-                                                <a class="card-link card-header c-header" data-toggle="collapse" href="#afs-collapseIndustry" style="color:black">
-                                                    Industry<span class="float-right dropdown-toggle"></span>
+                                            <div class="card modern-filter-card" style="border-radius: 12px; border: 1px solid #e0e0e0; margin-bottom: 12px; overflow: hidden; transition: all 0.3s ease;">
+                                                <a class="card-link card-header c-header modern-filter-header" data-toggle="collapse" href="#afs-collapseIndustry" style="color: #333; padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; font-weight: 600; font-size: 14px; background: linear-gradient(135deg, rgba(168, 85, 247, 0.05) 0%, rgba(147, 51, 234, 0.05) 100%); border: none;">
+                                                    <span style="display: flex; align-items: center; gap: 8px;"><i class="fas fa-industry" style="color: #a855f7;"></i> Industry</span>
+                                                    <span class="dropdown-toggle" style="transition: transform 0.3s ease;"></span>
                                                 </a>
                                                 <div id="afs-collapseIndustry" class="collapse" data-parent="#afs-accordion5">
                                                     <div class="card-body">
@@ -285,9 +293,10 @@ var audienceCreationForm = `
                                     </div>
                                     <div class="col-md-6">
                                         <div id="afs-accordion6">
-                                            <div class="card">
-                                                <a class="card-link card-header c-header" data-toggle="collapse" href="#afs-collapseSchool" style="color:black">
-                                                    School<span class="float-right dropdown-toggle"></span>
+                                            <div class="card modern-filter-card" style="border-radius: 12px; border: 1px solid #e0e0e0; margin-bottom: 12px; overflow: hidden; transition: all 0.3s ease;">
+                                                <a class="card-link card-header c-header modern-filter-header" data-toggle="collapse" href="#afs-collapseSchool" style="color: #333; padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; font-weight: 600; font-size: 14px; background: linear-gradient(135deg, rgba(168, 85, 247, 0.05) 0%, rgba(147, 51, 234, 0.05) 100%); border: none;">
+                                                    <span style="display: flex; align-items: center; gap: 8px;"><i class="fas fa-graduation-cap" style="color: #a855f7;"></i> School</span>
+                                                    <span class="dropdown-toggle" style="transition: transform 0.3s ease;"></span>
                                                 </a>
                                                 <div id="afs-collapseSchool" class="collapse" data-parent="#afs-accordion6">
                                                     <div class="card-body">
@@ -313,19 +322,21 @@ var audienceCreationForm = `
                                 
                             </div>
                             <div id="fpost" class="container tab-pane">
-                                <div class="row">
+                                <div class="row" style="margin-bottom: 24px;">
                                     <div class="col-md-12">
                                         <div class="form-group">
-                                            <label class="font-weight-bold c-header">Add users who liked</label>
+                                            <label class="font-weight-bold c-header" style="display: flex; align-items: center; margin-bottom: 12px; color: #333; font-size: 14px;">
+                                                <i class="fas fa-heart me-2" style="color: #dc3545;"></i>Add users who liked
+                                            </label>
                                             <!-- <div class="custom-control custom-radio custom-control-inline">
                                                 <input type="radio" class="custom-control-input afs-liked-check"
                                                     id="afs-liked-none" name="user_liked" value="none">
                                                 <label class="custom-control-label" for="afs-liked-none">None</label>
                                             </div> -->
-                                            <div class="custom-control custom-radio custom-control-inline">
+                                            <div class="custom-control custom-radio custom-control-inline" style="margin-right: 16px;">
                                                 <input type="radio" class="custom-control-input afs-liked-check" 
-                                                    id="afs-liked-post" name="user_liked" value="post" checked>
-                                                <label class="custom-control-label" for="afs-liked-post">Post</label>
+                                                    id="afs-liked-post" name="user_liked" value="post" checked style="width: 18px; height: 18px; cursor: pointer; margin-right: 6px;">
+                                                <label class="custom-control-label" for="afs-liked-post" style="cursor: pointer; font-weight: 500; color: #333;">Post</label>
                                             </div>
                                             <!-- Commented out - Article and Video options not currently used in payload -->
                                             <!-- <div class="custom-control custom-radio custom-control-inline">
@@ -339,9 +350,9 @@ var audienceCreationForm = `
                                                 <label class="custom-control-label" for="afs-liked-video">Video</label>
                                             </div> -->
                                         </div>
-                                        <div class="form-group">
-                                            <input type="text" class="form-control afs-user-like afs-post-validate" id="afs-liked-postid" 
-                                                placeholder="Enter post URL or ID... Ex: https://www.linkedin.com/feed/update/urn:li:activity:7414954869389848576/ or 7414954869389848576" style="display: block;">
+                                        <div class="form-group" style="margin-top: 12px;">
+                                            <input type="text" class="form-control afs-user-like afs-post-validate modern-input" id="afs-liked-postid" 
+                                                placeholder="Enter post URL or ID... Ex: https://www.linkedin.com/feed/update/urn:li:activity:7414954869389848576/ or 7414954869389848576" style="display: block; border-radius: 8px; border: 1px solid #e0e0e0; padding: 12px 16px; transition: all 0.3s ease;">
                                             <!-- Commented out - Article and Video inputs not currently used -->
                                             <!-- <input type="number" class="form-control afs-user-like afs-post-validate" id="afs-liked-articleid" 
                                                 placeholder="Enter article ID... Ex: 8936076462107920273">
@@ -353,17 +364,19 @@ var audienceCreationForm = `
                                 <div class="row">
                                     <div class="col-md-12">
                                         <div class="form-group">
-                                            <label class="font-weight-bold c-header">Add users who commented on</label>
+                                            <label class="font-weight-bold c-header" style="display: flex; align-items: center; margin-bottom: 12px; color: #333; font-size: 14px;">
+                                                <i class="fas fa-comment me-2" style="color: #007bff;"></i>Add users who commented on
+                                            </label>
                                             <!-- Commented out - None, Article, and Video options not currently used -->
                                             <!-- <div class="custom-control custom-radio custom-control-inline">
                                                 <input type="radio" class="custom-control-input afs-commented-check" 
                                                     id="afs-commented-none" name="user_commented" value="none">
                                                 <label class="custom-control-label" for="afs-commented-none">None</label>
                                             </div> -->
-                                            <div class="custom-control custom-radio custom-control-inline">
+                                            <div class="custom-control custom-radio custom-control-inline" style="margin-right: 16px;">
                                                 <input type="radio" class="custom-control-input afs-commented-check" 
-                                                    id="afs-commented-post" name="user_commented" value="post" checked>
-                                                <label class="custom-control-label" for="afs-commented-post">Post</label>
+                                                    id="afs-commented-post" name="user_commented" value="post" checked style="width: 18px; height: 18px; cursor: pointer; margin-right: 6px;">
+                                                <label class="custom-control-label" for="afs-commented-post" style="cursor: pointer; font-weight: 500; color: #333;">Post</label>
                                             </div>
                                             <!-- Commented out - Article and Video options not currently used -->
                                             <!-- <div class="custom-control custom-radio custom-control-inline">
@@ -377,9 +390,9 @@ var audienceCreationForm = `
                                                 <label class="custom-control-label" for="afs-commented-video">Video</label>
                                             </div> -->
                                         </div>
-                                        <div class="form-group">
-                                            <input type="text" class="form-control afs-user-commented afs-post-validate" id="afs-commented-postid" 
-                                                placeholder="Enter post URL or ID... Ex: https://www.linkedin.com/feed/update/urn:li:activity:7414954869389848576/ or 7414954869389848576" style="display: block;">
+                                        <div class="form-group" style="margin-top: 12px;">
+                                            <input type="text" class="form-control afs-user-commented afs-post-validate modern-input" id="afs-commented-postid" 
+                                                placeholder="Enter post URL or ID... Ex: https://www.linkedin.com/feed/update/urn:li:activity:7414954869389848576/ or 7414954869389848576" style="display: block; border-radius: 8px; border: 1px solid #e0e0e0; padding: 12px 16px; transition: all 0.3s ease;">
                                             <!-- Commented out - Article and Video inputs not currently used -->
                                             <!-- <input type="number" class="form-control afs-user-commented afs-post-validate" id="afs-commented-articleid" 
                                                 placeholder="Enter article ID... Ex: 8936076462107920273">
@@ -424,93 +437,102 @@ var audienceCreationForm = `
                     </div>
                 </div>
 
-                <div class="row">
+                <div class="row" style="margin-bottom: 24px;">
                     <div class="col-md-12">
                         <div class="form-group">
-                            <label for="afs-connectionDegree" class="font-weight-bold c-header">Connections</label>
-                            <div class="card-body afs-conn-degree">
-                                <div class="custom-control custom-checkbox custom-control-inline">
-                                    <input type="checkbox" class="shadow-none" id="afs-connFirstCheck" name="first_check" value="F">
-                                    <label class="" for="afs-connFirstCheck">1st</label>
-                                </div>
-                                <div class="custom-control custom-checkbox custom-control-inline nfn">
-                                    <input type="checkbox" class="shadow-none" id="afs-connSecondCheck" name="second_check" value="S">
-                                    <label class="" for="afs-connSecondCheck">2nd</label>
-                                </div>
-                                <div class="custom-control custom-checkbox custom-control-inline nfn">
-                                    <input type="checkbox" class="shadow-none" id="afs-connThirdCheck" name="third_check" value="O">
-                                    <label class="" for="afs-connThirdCheck">3rd+</label>
+                            <label for="afs-connectionDegree" class="font-weight-bold c-header" style="display: flex; align-items: center; margin-bottom: 12px; color: #333; font-size: 14px;">
+                                <i class="fas fa-network-wired me-2" style="color: #a855f7;"></i>Connections
+                            </label>
+                            <div class="card-body afs-conn-degree" style="background: #f8f9fa; border-radius: 12px; padding: 16px; border: 1px solid #e0e0e0;">
+                                <div style="display: flex; gap: 24px; flex-wrap: wrap;">
+                                    <div class="custom-control custom-checkbox" style="display: flex; align-items: center;">
+                                        <input type="checkbox" class="shadow-none modern-checkbox" id="afs-connFirstCheck" name="first_check" value="F" style="width: 20px; height: 20px; cursor: pointer; margin-right: 8px;">
+                                        <label class="" for="afs-connFirstCheck" style="margin: 0; cursor: pointer; font-weight: 500; color: #333;">1st</label>
+                                    </div>
+                                    <div class="custom-control custom-checkbox nfn" style="display: flex; align-items: center;">
+                                        <input type="checkbox" class="shadow-none modern-checkbox" id="afs-connSecondCheck" name="second_check" value="S" style="width: 20px; height: 20px; cursor: pointer; margin-right: 8px;">
+                                        <label class="" for="afs-connSecondCheck" style="margin: 0; cursor: pointer; font-weight: 500; color: #333;">2nd</label>
+                                    </div>
+                                    <div class="custom-control custom-checkbox nfn" style="display: flex; align-items: center;">
+                                        <input type="checkbox" class="shadow-none modern-checkbox" id="afs-connThirdCheck" name="third_check" value="O" style="width: 20px; height: 20px; cursor: pointer; margin-right: 8px;">
+                                        <label class="" for="afs-connThirdCheck" style="margin: 0; cursor: pointer; font-weight: 500; color: #333;">3rd+</label>
+                                    </div>
                                 </div>
                             </div>
                         </div>
                     </div>
                 </div>
-                <div class="row">
+                <div class="row" style="margin-bottom: 24px;">
                     <div class="col-md-12">
                         <div class="form-group">
-                            <label for="afs-positiveKeywords" class="font-weight-bold c-header">Positive keyword
-                                <div class="juez-tooltip">
-                                    <i class="fa fa-exclamation-circle"></i>
+                            <label for="afs-positiveKeywords" class="font-weight-bold c-header" style="display: flex; align-items: center; margin-bottom: 8px; color: #333; font-size: 14px;">
+                                <i class="fas fa-check-circle me-2" style="color: #28a745;"></i>Positive keyword
+                                <div class="juez-tooltip" style="margin-left: 6px;">
+                                    <i class="fa fa-exclamation-circle" style="color: #6c757d; font-size: 12px;"></i>
                                     <span class="juez-tooltiptext">
                                         Enter comma separated keywords to search in user profile title or name to include users into audience.
                                         Keywords are not case-sensitive
                                     </span>
                                 </div>
                             </label>
-                            <textarea class="form-control shadow-none text-area-size" rows="3" id="afs-positiveKeywords" 
-                                data-name="Positive keyword" placeholder="Ex: Ecommerce, Shopify, Affiliate Marketing"></textarea>
+                            <textarea class="form-control shadow-none text-area-size modern-input" rows="3" id="afs-positiveKeywords" 
+                                data-name="Positive keyword" placeholder="Ex: Ecommerce, Shopify, Affiliate Marketing" style="border-radius: 8px; border: 1px solid #e0e0e0; padding: 12px 16px; transition: all 0.3s ease; resize: vertical;"></textarea>
                         </div>
                     </div>
                 </div>
-                <div class="row">
+                <div class="row" style="margin-bottom: 24px;">
                     <div class="col-md-12">
                         <div class="form-group">
-                            <label for="afs-negativeKeywords" class="font-weight-bold c-header">Negative keyword
-                                <div class="juez-tooltip">
-                                    <i class="fa fa-exclamation-circle"></i>
+                            <label for="afs-negativeKeywords" class="font-weight-bold c-header" style="display: flex; align-items: center; margin-bottom: 8px; color: #333; font-size: 14px;">
+                                <i class="fas fa-times-circle me-2" style="color: #dc3545;"></i>Negative keyword
+                                <div class="juez-tooltip" style="margin-left: 6px;">
+                                    <i class="fa fa-exclamation-circle" style="color: #6c757d; font-size: 12px;"></i>
                                     <span class="juez-tooltiptext">
                                         Enter comma separated keywords to search in user profile title or name to exclude users from 
                                         adding into audience. Keywords are not case-sensitive
                                     </span>
                                 </div>
                             </label>
-                            <textarea class="form-control shadow-none text-area-size" rows="3" id="afs-negativeKeywords" 
-                                placeholder="Ex: Marketing, Manager, John"></textarea>
+                            <textarea class="form-control shadow-none text-area-size modern-input" rows="3" id="afs-negativeKeywords" 
+                                placeholder="Ex: Marketing, Manager, John" style="border-radius: 8px; border: 1px solid #e0e0e0; padding: 12px 16px; transition: all 0.3s ease; resize: vertical;"></textarea>
                         </div>
                     </div>
                 </div>
-                <div class="row">
-                    <div class="col-lg-4 col-sm-4">
+                <div class="row" style="margin-bottom: 24px;">
+                    <div class="col-lg-4 col-sm-4" style="margin-bottom: 16px;">
                         <div class="form-group">
-                            <label for="afs-startPosition" style="color:black;font-weight:bold;">Start position 
-                                <div class="juez-tooltip">
-                                    <i class="fa fa-exclamation-circle"></i>
+                            <label for="afs-startPosition" style="display: flex; align-items: center; margin-bottom: 8px; color: #333; font-weight: 600; font-size: 14px;">
+                                <i class="fas fa-play me-2" style="color: #a855f7;"></i>Start position
+                                <div class="juez-tooltip" style="margin-left: 6px;">
+                                    <i class="fa fa-exclamation-circle" style="color: #6c757d; font-size: 12px;"></i>
                                     <span class="juez-tooltiptext">Start position 0 is the most recently added connection.</span>
                                 </div>
                             </label>
-                            <input type="number" class="form-control shadow-none" id="afs-startPosition" placeholder="Ex: 0">
+                            <input type="number" class="form-control shadow-none modern-input" id="afs-startPosition" placeholder="Ex: 0" style="border-radius: 8px; border: 1px solid #e0e0e0; padding: 12px 16px; transition: all 0.3s ease;">
                         </div>
                     </div>
-                    <div class="col-lg-4 col-sm-4">
+                    <div class="col-lg-4 col-sm-4" style="margin-bottom: 16px;">
                         <div class="form-group">
-                            <label for="afs-total" style="color:black;font-weight:bold;">Total 
-                                <div class="juez-tooltip">
-                                    <i class="fa fa-exclamation-circle"></i>
+                            <label for="afs-total" style="display: flex; align-items: center; margin-bottom: 8px; color: #333; font-weight: 600; font-size: 14px;">
+                                <i class="fas fa-users me-2" style="color: #a855f7;"></i>Total
+                                <div class="juez-tooltip" style="margin-left: 6px;">
+                                    <i class="fa fa-exclamation-circle" style="color: #6c757d; font-size: 12px;"></i>
                                     <span class="juez-tooltiptext">Total number of people you want to add to audience.</span>
                                 </div>
                             </label>
-                            <input type="number" class="form-control shadow-none" id="afs-total" data-name="Total" placeholder="Ex: 10">
+                            <input type="number" class="form-control shadow-none modern-input" id="afs-total" data-name="Total" placeholder="Ex: 10" style="border-radius: 8px; border: 1px solid #e0e0e0; padding: 12px 16px; transition: all 0.3s ease;">
                         </div>
                     </div>
-                    <div class="col-lg-4 col-sm-4">
+                    <div class="col-lg-4 col-sm-4" style="margin-bottom: 16px;">
                         <div class="form-group">
-                            <label for="afs-delayTime" style="color:black;font-weight:bold;">Delay 
-                                <div class="juez-tooltip">
-                                    <i class="fa fa-exclamation-circle"></i>
+                            <label for="afs-delayTime" style="display: flex; align-items: center; margin-bottom: 8px; color: #333; font-weight: 600; font-size: 14px;">
+                                <i class="fas fa-clock me-2" style="color: #a855f7;"></i>Delay
+                                <div class="juez-tooltip" style="margin-left: 6px;">
+                                    <i class="fa fa-exclamation-circle" style="color: #6c757d; font-size: 12px;"></i>
                                     <span class="juez-tooltiptext">Delay between each search request in seconds.</span>
                                 </div>
                             </label>
-                            <input type="number" class="form-control shadow-none" id="afs-delayTime" data-name="Delay" placeholder="Ex: 30">
+                            <input type="number" class="form-control shadow-none modern-input" id="afs-delayTime" data-name="Delay" placeholder="Ex: 30" style="border-radius: 8px; border: 1px solid #e0e0e0; padding: 12px 16px; transition: all 0.3s ease;">
                         </div>
                     </div>
                 </div>
@@ -540,7 +562,11 @@ $('body').on('click','.closeAudienceForm',function(){
     $('#afc-error-notice').html('')
     $('.newAudience-notice').hide()
     $('#afc-displayNewAudienceStatus').empty()
-    $('.newAudienceAction').attr('disabled', false)
+    if (typeof restoreAudienceCreationButton === 'function') {
+        restoreAudienceCreationButton();
+    } else {
+        $('.newAudienceAction').attr('disabled', false);
+    }
     
     $('#audienceCreationForm').modal('hide')
     // Refresh audience list when returning to menu

@@ -146,22 +146,74 @@ const setCampaigns = () => {
     if(campaignData.length > 0){
         $('#campaign-tbody').empty();
         $.each(campaignData, function(i,item) {
+            const status = helper.transformText(item.status,'capitalize');
+            // Treat 'active' and 'running' as the same - both mean campaign is running
+            const isRunning = item.status == 'running' || item.status == 'active';
+            const statusBadgeColor = isRunning ? 'linear-gradient(135deg, #28a745 0%, #218838 100%)' : 
+                                      item.status == 'stop' || item.status == 'stopped' ? 'linear-gradient(135deg, #dc3545 0%, #c82333 100%)' : 
+                                      'linear-gradient(135deg, #6c757d 0%, #5a6268 100%)';
+            const statusIcon = isRunning ? 'fa-play-circle' : (item.status == 'stop' || item.status == 'stopped' ? 'fa-stop-circle' : 'fa-pause-circle');
+            
             $('#campaign-tbody').append(`
-                <tr class="campaign-${item.id}">
-                    <td title="${item.name}">${item.name}</td>
-                    <td title="${item.sequenceType}">${item.sequenceType}</td>
-                    <td title="${helper.transformText(item.status,'capitalize')}">${helper.transformText(item.status,'capitalize')}</td>
-                    <td>
-                        <div class="form-check form-switch custom-control custom-checkbox custom-control-inline">
-                            <input class="form-check-input shadow-none runSwitch" type="checkbox" role="switch" id="runSwitch-${item.id}" data-campaignid="${item.id}" ${item.status == 'running'? 'checked':''}>
-                            <label class="form-check-label" for="runSwitch-${item.id}">Launch</label>
+                <tr class="campaign-${item.id}" style="transition: all 0.3s ease; border-bottom: 1px solid #f0f0f0;">
+                                            <td style="padding: 16px; vertical-align: middle;">
+                                                <div style="display: flex; align-items: center;">
+                                                    <div style="width: 40px; height: 40px; background: linear-gradient(135deg, #f97316 0%, #ea580c 100%); border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-right: 12px; box-shadow: 0 2px 8px rgba(249, 115, 22, 0.2);">
+                                                        <i class="fas fa-bullhorn" style="color: white; font-size: 16px;"></i>
+                                                    </div>
+                            <div>
+                                <div style="font-weight: 600; color: #333; font-size: 15px; margin-bottom: 2px;" title="${item.name}">${item.name}</div>
+                                <div style="font-size: 12px; color: #6c757d;">
+                                    <i class="fas fa-layer-group me-1"></i>${item.sequenceType || 'N/A'}
+                                </div>
+                            </div>
+                        </div>
+                    </td>
+                    <td style="padding: 16px; vertical-align: middle;">
+                        <div style="display: inline-flex; align-items: center; padding: 6px 12px; background: linear-gradient(135deg, rgba(249, 115, 22, 0.1) 0%, rgba(234, 88, 12, 0.1) 100%); border-radius: 8px; font-weight: 500; color: #f97316; border: 1px solid rgba(249, 115, 22, 0.2);">
+                            <i class="fas fa-list-ol me-2"></i>
+                            <span>${item.sequenceType || 'N/A'}</span>
+                        </div>
+                    </td>
+                    <td style="padding: 16px; text-align: center; vertical-align: middle;">
+                        <div style="display: inline-flex; align-items: center; justify-content: center; background: ${statusBadgeColor}; padding: 8px 16px; border-radius: 20px; font-weight: 600; color: white; min-width: 100px;">
+                            <i class="fas ${statusIcon} me-2"></i>
+                            <span>${status}</span>
+                        </div>
+                    </td>
+                    <td style="padding: 16px; text-align: center; vertical-align: middle;">
+                        <div style="display: flex; align-items: center; justify-content: center;">
+                            <div class="form-check form-switch" style="margin: 0; display: flex; align-items: center;">
+                                <input class="form-check-input runSwitch" 
+                                    type="checkbox" 
+                                    role="switch" 
+                                    id="runSwitch-${item.id}" 
+                                    data-campaignid="${item.id}" 
+                                    ${isRunning ? 'checked' : ''}
+                                    style="width: 50px; height: 26px; cursor: pointer; margin-right: 10px; transition: all 0.3s;">
+                                <label class="form-check-label" for="runSwitch-${item.id}" style="font-weight: 500; color: #333; cursor: pointer; margin: 0;">
+                                    ${isRunning ? '<i class="fas fa-play-circle me-1" style="color: #28a745;"></i>Running' : '<i class="fas fa-pause-circle me-1" style="color: #6c757d;"></i>Launch'}
+                                </label>
+                            </div>
                         </div>
                     </td>
                 </tr>
             `);
         });
     } else {
-        $('#campaign-tbody').html('<tr><td colspan="4" class="text-center">No campaigns found</td></tr>');
+        $('#campaign-tbody').html(`
+            <tr>
+                <td colspan="4" class="text-center" style="padding: 60px 20px;">
+                        <div style="text-align: center;">
+                            <div style="width: 80px; height: 80px; background: linear-gradient(135deg, rgba(249, 115, 22, 0.1) 0%, rgba(234, 88, 12, 0.1) 100%); border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(249, 115, 22, 0.2);">
+                                <i class="fas fa-bullhorn" style="font-size: 32px; color: #f97316;"></i>
+                            </div>
+                        <h6 style="color: #333; font-weight: 600; margin-bottom: 8px;">No campaigns found</h6>
+                        <p style="color: #6c757d; margin-bottom: 20px; font-size: 14px;">Create your first campaign to get started!</p>
+                    </div>
+                </td>
+            </tr>
+        `);
     }
 }
 

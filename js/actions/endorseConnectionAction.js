@@ -3,15 +3,6 @@
 const processingProfiles = new Set();
 
 $('.endorseConnectionAction').click(async function(){
-    console.log('🤝 ENDORSE CONNECTIONS: Starting endorsement process...');
-    console.log('🔍 FORM STATE CHECK:');
-    console.log('   📊 Audience selected:', $('#edc-audience-select').val());
-    console.log('   🔍 Search term:', $('#edc-search-term').val());
-    console.log('   📈 Total connections:', $('#edc-total').val());
-    console.log('   ⏰ Delay between endorsements:', $('#edc-delayTime').val());
-    console.log('   🏷️ Skills per connection:', $('#edc-totalSkills').val());
-    console.log('   👁️ View profile checked:', $('#edc-viewProfile').is(':checked'));
-    
     // Show immediate feedback that button was clicked
     $('#displayEndorseConnectionStatus').html(`
         <div style="background-color: #e3f2fd; border: 1px solid #bbdefb; padding: 15px; border-radius: 5px;">
@@ -22,14 +13,12 @@ $('.endorseConnectionAction').click(async function(){
     
     // Clear any stuck processing tracking
     processingProfiles.clear();
-    console.log('🧹 Endorse Connections: Cleared processing tracking');
     
     // Clear background queue and tabs
     try {
         await chrome.runtime.sendMessage({ action: 'clearEndorsementQueue' });
-        console.log('🧹 Endorse Connections: Cleared background queue and tabs');
     } catch (error) {
-        console.log('⚠️ Could not clear background queue:', error.message);
+        // Silent error handling
     }
     
     // Show initial status
@@ -53,67 +42,39 @@ $('.endorseConnectionAction').click(async function(){
 
     var queryParams = '';
 
-    console.log('📋 Endorse Connections: Form values:', {
-        startPosition: edcStartP.val(),
-        totalConnections: edcTotal.val(),
-        delayBetweenEndorsements: edcDelay.val(),
-        totalSkillsPerConnection: edcSkills.val(),
-        audienceSelected: $('#edc-audience-select').val(),
-        searchTerm: $('#edc-search-term').val(),
-        viewProfile: $('#edc-viewProfile').is(':checked')
-    });
-
     // validate fields
-    console.log('🔍 VALIDATION CHECK:');
-    console.log('   📊 Total connections:', edcTotal.val());
-    console.log('   ⏰ Delay:', edcDelay.val());
-    console.log('   🏷️ Skills:', edcSkills.val());
-    
     if(edcTotal.val() =='' || edcDelay.val() =='' || edcSkills.val() ==''){
-        console.log('❌ VALIDATION FAILED: Missing required fields');
         for(var i=0;i<edcControlFields.length;i++){
             if(edcControlFields[i].val() == ''){
-                console.log(`❌ Missing field: ${edcControlFields[i].data('name')}`);
                 $('#edc-error-notice').html(`${edcControlFields[i].data('name')} field cannot be empty`)
             }
         }
     }else if(edcDelay.val() < 30){
-        console.log('❌ VALIDATION FAILED: Delay too low:', edcDelay.val());
         $('#edc-error-notice').html(`Delay minimum is 30`)
     }else{
-        console.log('✅ VALIDATION PASSED: All required fields are valid');
         $('#edc-error-notice').html(``)
 
         // check if value exists in accordion list dropdown
-        console.log('🔍 Endorse Connections: Building search query parameters...');
-        
         if($('#edc-selectedConnectOf li').length > 0){
             queryParams += setFIlterQueryParams('#edc-selectedConnectOf','connectionid','connectionOf')
-            console.log('✅ Endorse Connections: Added connections filter');
         }
         if($('#edc-selectedLocation li').length > 0){
             queryParams += setFIlterQueryParams('#edc-selectedLocation','regionid','geoUrn')
-            console.log('✅ Endorse Connections: Added location filter');
         }
         if($('#edc-selectedSchool li').length > 0){
             queryParams += setFIlterQueryParams('#edc-selectedSchool','schoolid','schoolFilter')
-            console.log('✅ Endorse Connections: Added school filter');
         }
         if($('#edc-selectedCurrComp li').length > 0){
             queryParams += setFIlterQueryParams('#edc-selectedCurrComp','currcompid','currentCompany')
-            console.log('✅ Endorse Connections: Added current company filter');
         }
         if($('#edc-selectedPastComp li').length > 0){
             queryParams += setFIlterQueryParams('#edc-selectedPastComp','pastcompid','pastCompany')
-            console.log('✅ Endorse Connections: Added past company filter');
         }
         if($('#edc-selectedIndustry li').length > 0){
             queryParams += setFIlterQueryParams('#edc-selectedIndustry','industryid','industry')
-            console.log('✅ Endorse Connections: Added industry filter');
         }
         if($('#edc-selectedLanguage li').length > 0){
             queryParams += setFIlterQueryParams('#edc-selectedLanguage','langcode','profileLanguage')
-            console.log('✅ Endorse Connections: Added language filter');
         }
 
         var edcTotalValue = edcTotal.val() < 10 ? 10 : edcTotal.val()
@@ -130,8 +91,6 @@ $('.endorseConnectionAction').click(async function(){
         if($('#edc-company').val())
             queryParams += setFIlterQueryParamsFreeText('#edc-company','company')
 
-        console.log('🔧 Endorse Connections: Final query parameters:', queryParams);
-
         $(this).attr('disabled', true)
         
         // Show processing status
@@ -144,36 +103,19 @@ $('.endorseConnectionAction').click(async function(){
 
         var query = '';
         if($('#edc-audience-select').val() == '') {
-            console.log('🔍 USING SEARCH MODE: No audience selected, using search parameters');
-            console.log('   🔍 Search term:', $('#edc-search-term').val() || 'None');
-            console.log('   📊 Query parameters:', queryParams);
-            
             if($('#edc-search-term').val())
                 query = `(keywords:${encodeURIComponent($('#edc-search-term').val())},flagshipSearchIntent:SEARCH_SRP,queryParameters:(${queryParams}resultType:List(PEOPLE)),includeFiltersInResponse:false)`;
             else
                 query = `(flagshipSearchIntent:SEARCH_SRP,queryParameters:(${queryParams}resultType:List(PEOPLE)),includeFiltersInResponse:false)`;
 
-            console.log('🔍 FINAL SEARCH QUERY:', query);
             edcGetConnections(query,edcStartPValue,edcTotalValue,edcDelay.val(),edcSkills.val())
         }else{
-            console.log('📊 USING AUDIENCE MODE: Selected audience:', $('#edc-audience-select').val());
-            console.log('   📈 Total connections to process:', edcTotalValue);
-            console.log('   ⏰ Delay between endorsements:', edcDelay.val());
-            console.log('   🏷️ Skills per connection:', edcSkills.val());
             edcGetAudienceList($('#edc-audience-select').val(), edcDelay.val(), edcSkills.val())
         }
     }
 })
 
 const  edcGetConnections = async (queryParams,edcStartP,edcTotal,edcDelay,edcSkills) => {
-    console.log('🔍 Endorse Connections: Starting LinkedIn search for connections to endorse...', {
-        queryParams: queryParams,
-        startPosition: edcStartP,
-        totalToFind: edcTotal,
-        delayBetweenEndorsements: edcDelay,
-        skillsPerConnection: edcSkills
-    });
-    
     $('.endorseConnect').show()
     $('#displayEndorseConnectionStatus').empty()
     $('#displayEndorseConnectionStatus').html('Scanning. Please wait...')
@@ -194,37 +136,24 @@ const  edcGetConnections = async (queryParams,edcStartP,edcTotal,edcDelay,edcSki
                 },
                 url: `${voyagerBlockSearchUrl}&query=${queryParams}&start=${edcStartP}`,
                 success: function(data) {
-                    console.log('🔍 Endorse Connections: LinkedIn search API response received');
                     let res = {'data': data}
                     let elements = res['data'].data.elements
-
-                    console.log('📊 Endorse Connections: Response structure:', {
-                        elementsLength: elements.length,
-                        elements: elements
-                    });
 
                     if(elements.length) {
                         if(totalResultCount == 0)
                             totalResultCount = res['data'].data.metadata.totalResultCount
 
-                        console.log(`📈 Endorse Connections: Total results available: ${totalResultCount}`);
 
                         if(elements[1] && elements[1].items && elements[1].items.length) {
-                            console.log(`👥 Endorse Connections: Found ${elements[1].items.length} connections in this batch`);
-                            
                             for(let item of elements[1].items) {
                                 endorseItems.push(item)
                             }
 
-                            console.log(`📊 Endorse Connections: Total connections collected: ${endorseItems.length}/${edcTotal}`);
-
                             if(endorseItems.length < edcTotal) {
                                 edcStartP = parseInt(edcStartP) + 11
                                 $('#edc-startPosition').val(edcStartP)
-                                console.log(`🔄 Endorse Connections: Getting more results, new start position: ${edcStartP}`);
                                 getConnectionsLooper()
                             }else {
-                                console.log('✅ Endorse Connections: Collected enough connections, starting data processing...');
                                 edcCleanConnectionsData(endorseItems, totalResultCount, edcDelay, edcSkills)
                             }
                         }else {
@@ -243,7 +172,6 @@ const  edcGetConnections = async (queryParams,edcStartP,edcTotal,edcDelay,edcSki
                     }
                 },
                 error: function(error){
-                    console.log(error)
                     $('.endorseConnectionAction').attr('disabled', false)
                 }
             })
@@ -253,11 +181,6 @@ const  edcGetConnections = async (queryParams,edcStartP,edcTotal,edcDelay,edcSki
 }
 
 const edcCleanConnectionsData = (endorseItems, totalResultCount, edcDelay, edcSkills) => {
-    console.log('🔧 Endorse Connections: Starting data extraction and cleaning...', {
-        totalItems: endorseItems.length,
-        totalResultCount: totalResultCount
-    });
-    
     let conArr = [];
     let dataToEndorse = [];
     let profileUrn;
@@ -279,13 +202,8 @@ const edcCleanConnectionsData = (endorseItems, totalResultCount, edcDelay, edcSk
                 totalResultCount: totalResultCount,
             })			
             validCount++;
-            console.log(`✅ Endorse Connections: Valid profile extracted: ${profileUrn} (${validCount} total)`);
-        } else {
-            console.log(`⚠️ Endorse Connections: Invalid profileUrn format: ${profileUrn}`);
         }
     }
-
-    console.log(`📊 Endorse Connections: Data extraction summary: ${validCount}/${processedCount} valid profiles found`);
 
     // get only user defined total
     let requestedTotal = $('#edc-total').val();
@@ -296,68 +214,34 @@ const edcCleanConnectionsData = (endorseItems, totalResultCount, edcDelay, edcSk
             break;
     }
 
-    console.log(`🎯 Endorse Connections: Final data ready for skill endorsement:`, {
-        availableProfiles: conArr.length,
-        requestedTotal: requestedTotal,
-        willEndorse: dataToEndorse.length,
-        profiles: dataToEndorse
-    });
 
     edcGetFeaturedSkills(dataToEndorse, edcDelay, edcSkills)
 }
 
 const edcGetAudienceList = async (audienceId, edcDelay, edcSkills) => {
-    console.log('📊 AUDIENCE MODE: Fetching audience data...');
-    console.log('   🎯 Audience ID:', audienceId);
-    console.log('   🌐 API URL:', `${filterApi}/audience/list?audienceId=${audienceId}`);
-    console.log('   ⏰ Delay between endorsements:', edcDelay);
-    console.log('   🏷️ Skills per connection:', edcSkills);
-    
     var conArr = [];
 
     await $.ajax({
         method: 'get',
         url: `${filterApi}/audience/list?audienceId=${audienceId}`,
         success: function(data){
-            console.log('📊 AUDIENCE API RESPONSE RECEIVED');
-            console.log('   📋 Response type:', typeof data);
-            console.log('   📊 Is array:', Array.isArray(data));
-            console.log('   📈 Response length:', Array.isArray(data) ? data.length : 'N/A');
-            console.log('   🔍 Full response:', data);
-            
             // Handle different response formats
             let dataPath = null;
             
             // Check if data is an array (old format)
             if(Array.isArray(data) && data.length > 0 && data[0].audience) {
                 dataPath = data[0].audience;
-                console.log('📊 USING ARRAY FORMAT: Found audience in array[0].audience');
             }
             // Check if data has audience property (new format)
             else if(data && data.audience && Array.isArray(data.audience)) {
                 dataPath = data.audience;
-                console.log('📊 USING OBJECT FORMAT: Found audience in data.audience');
             }
             
             if(dataPath && dataPath.length > 0){
-                console.log('📊 AUDIENCE DATA FOUND:');
-                console.log('   📈 Total connections in audience:', dataPath.length);
-                console.log('   🔍 Sample connection data:', dataPath[0]);
-                
-                console.log(`👥 PROCESSING AUDIENCE: Processing ${dataPath.length} connections...`);
-                
                 for(let i=0; i<dataPath.length; i++){
-                    console.log(`👤 PROCESSING CONNECTION ${i+1}/${dataPath.length}:`);
-                    console.log('   📝 Name:', dataPath[i].con_first_name, dataPath[i].con_last_name);
-                    console.log('   💼 Title:', dataPath[i].con_job_title);
-                    console.log('   🆔 Connection ID:', dataPath[i].con_id);
-                    console.log('   🔗 Member URN:', dataPath[i].con_member_urn);
-                    console.log('   🌐 Public Identifier:', dataPath[i].con_public_identifier);
-                    console.log('   📏 Network Distance:', dataPath[i].con_distance);
-                    
-                    var netDistance = dataPath[i].con_distance.split("_")
+                    var netDistance = dataPath[i].con_distance ? dataPath[i].con_distance.split("_") : ['', ''];
                     var targetIdd;
-                    if(dataPath[i].con_member_urn.includes('urn:li:member:')){
+                    if(dataPath[i].con_member_urn && dataPath[i].con_member_urn.includes('urn:li:member:')){
                         targetIdd = dataPath[i].con_member_urn.replace('urn:li:member:','') 
                     }
 
@@ -368,31 +252,17 @@ const edcGetAudienceList = async (audienceId, edcDelay, edcSkills) => {
                         totalResult: dataPath.length,
                         publicIdentifier: dataPath[i].con_public_identifier, 
                         memberUrn: dataPath[i].con_member_urn,
-                        networkDistance: parseInt(netDistance[1]),
+                        networkDistance: parseInt(netDistance[1]) || 0,
                         trackingId: dataPath[i].con_tracking_id, 
                         navigationUrl: `${LINKEDIN_URL}/in/${dataPath[i].con_public_identifier}`, 
-                        targetId: parseInt(targetIdd),
+                        targetId: targetIdd ? parseInt(targetIdd) : null,
                     };
                     
                     conArr.push(connectionData);
-                    console.log(`✅ CONNECTION ADDED: ${dataPath[i].con_first_name} ${dataPath[i].con_last_name} (${i+1}/${dataPath.length})`);
-                    console.log('   📊 Final connection data:', connectionData);
                 }
-                
-                console.log(`🎯 AUDIENCE PROCESSING COMPLETE:`);
-                console.log(`   📊 Total connections processed: ${conArr.length}`);
-                console.log(`   ⏰ Delay between endorsements: ${edcDelay} seconds`);
-                console.log(`   🏷️ Skills per connection: ${edcSkills}`);
-                console.log(`   🚀 Starting skill endorsement process...`);
                 
                 edcGetFeaturedSkills(conArr, edcDelay, edcSkills)
             } else {
-                console.log('❌ Endorse Connections: No audience data found in response');
-                console.log('📊 Endorse Connections: Response structure:', {
-                    isArray: Array.isArray(data),
-                    hasAudience: data && data.audience,
-                    audienceLength: data && data.audience ? data.audience.length : 'N/A'
-                });
                 
                 $('.endorseConnect').show()
                 $('#displayEndorseConnectionStatus').empty()
@@ -406,7 +276,6 @@ const edcGetAudienceList = async (audienceId, edcDelay, edcSkills) => {
             }
         },
         error: function(error){
-            console.error('❌ Endorse Connections: Error fetching audience:', error);
             $('.endorseConnect').show()
             $('#displayEndorseConnectionStatus').empty()
             $('#displayEndorseConnectionStatus').html(`
@@ -422,12 +291,6 @@ const edcGetAudienceList = async (audienceId, edcDelay, edcSkills) => {
 
 var timeOutEndorseCon;
 const edcGetFeaturedSkills = async (dataToEndorse, edcDelay, edcSkills) => {
-    console.log('🎯 SKILL ENDORSEMENT PROCESS: Starting...');
-    console.log('   📊 Total connections to process:', dataToEndorse.length);
-    console.log('   ⏰ Delay between endorsements:', edcDelay, 'seconds');
-    console.log('   🏷️ Skills per connection:', edcSkills);
-    console.log('   👥 Connections list:', dataToEndorse.map(conn => ({ name: conn.name, conId: conn.conId })));
-    
     var i = 0, x = 0, displayAutomationRecord = '';
 
     $('.endorseConnect').show()
@@ -461,13 +324,6 @@ const edcGetFeaturedSkills = async (dataToEndorse, edcDelay, edcSkills) => {
 
     var edcLooper = () => {
         timeOutEndorseCon = setTimeout(async function(){
-            console.log(`🎯 PROCESSING CONNECTION ${i+1}/${dataToEndorse.length}:`);
-            console.log(`   👤 Name: ${dataToEndorse[i].name}`);
-            console.log(`   🆔 Connection ID: ${dataToEndorse[i].conId}`);
-            console.log(`   🔗 Member URN: ${dataToEndorse[i].memberUrn}`);
-            console.log(`   📏 Network Distance: ${dataToEndorse[i].networkDistance}`);
-            console.log(`   🌐 Profile URL: ${dataToEndorse[i].navigationUrl}`);
-            
             // Update progress display
             $('#progress-details').html(`
                 <div>👤 Processing: <strong>${dataToEndorse[i].name}</strong> (${i+1}/${dataToEndorse.length})</div>
@@ -481,16 +337,9 @@ const edcGetFeaturedSkills = async (dataToEndorse, edcDelay, edcSkills) => {
             const profileId = dataToEndorse[i].conId; // Use conId directly (LinkedIn profile ID)
             const apiUrl = `${voyagerApi}/identity/profiles/${profileId}/featuredSkills?includeHiddenEndorsers=false&count=${edcSkills}&_=${dInt}`;
             
-            console.log(`🔍 Endorse Connections: Using LinkedIn profile ID: ${profileId}`);
-            console.log(`   📊 Connection ID (conId): ${dataToEndorse[i].conId}`);
-            console.log(`   🔗 Member URN: ${dataToEndorse[i].memberUrn}`);
-            console.log(`   🌐 Public Identifier: ${dataToEndorse[i].publicIdentifier}`);
-            console.log(`🌐 API URL: ${apiUrl}`);
-            
             try {
                 // Get fresh CSRF token from storage (same as background script)
                 const csrfResult = await chrome.storage.local.get(["csrfToken"]);
-                console.log(`🔑 CSRF Token retrieved:`, csrfResult.csrfToken ? 'Found' : 'Not found');
                 
                 const response = await fetch(apiUrl, {
                     method: 'get',
@@ -510,25 +359,13 @@ const edcGetFeaturedSkills = async (dataToEndorse, edcDelay, edcSkills) => {
                 }
                 
                 const data = await response.json();
-                console.log(`✅ SKILLS FETCHED SUCCESSFULLY for ${dataToEndorse[i].name}`);
-                console.log(`   📊 API Response:`, data);
                 
                 var res = {'data': data};
                 if(res['data'].data['*elements'].length > 0){
                     var endorseIncludeData = res['data'].included;
                     
-                    console.log(`🎯 SKILLS ANALYSIS for ${dataToEndorse[i].name}:`);
-                    console.log(`   📊 Total skill items found: ${endorseIncludeData.length}`);
-                    console.log(`   🔍 Skills with names:`, endorseIncludeData.filter(item => item.hasOwnProperty('name')).length);
-                    console.log(`   📋 All skill items:`, endorseIncludeData.map((item, idx) => `${idx+1}. ${item.name || 'No name'} (${item.entityUrn || 'No URN'})`));
-                    
                     // Process skills one at a time for this connection
                     const skillsToProcess = endorseIncludeData.filter(item => item.hasOwnProperty('name')).slice(0, parseInt(edcSkills) || 5);
-                    
-                    console.log(`🎯 SKILLS TO ENDORSE for ${dataToEndorse[i].name}:`);
-                    console.log(`   📊 Campaign setting: ${edcSkills} skills per connection`);
-                    console.log(`   🔍 Skills found with names: ${skillsToProcess.length}`);
-                    console.log(`   📋 Skills to endorse:`, skillsToProcess.map(skill => skill.name));
                     
                     // Update progress with skills found
                     $('#progress-details').html(`
@@ -541,16 +378,8 @@ const edcGetFeaturedSkills = async (dataToEndorse, edcDelay, edcSkills) => {
                     for (let index = 0; index < skillsToProcess.length; index++) {
                         const item = skillsToProcess[index];
                         if (!dataToEndorse[i] || !dataToEndorse[i].name) {
-                            console.log(`⚠️ INVALID CONNECTION DATA at index ${i}, skipping`);
                             continue;
                         }
-                        
-                        console.log(`🏷️ ENDORSING SKILL ${index + 1}/${skillsToProcess.length}:`);
-                        console.log(`   👤 Connection: ${dataToEndorse[i].name}`);
-                        console.log(`   🏷️ Skill: ${item.name}`);
-                        console.log(`   🔗 Entity URN: ${item.entityUrn}`);
-                        console.log(`   🆔 Connection ID: ${dataToEndorse[i].conId}`);
-                        console.log(`   🔗 Member URN: ${dataToEndorse[i].memberUrn}`);
                         
                         // Update progress for current skill
                         $('#progress-details').html(`
@@ -565,7 +394,6 @@ const edcGetFeaturedSkills = async (dataToEndorse, edcDelay, edcSkills) => {
                         
                         // Small delay between skills for the same profile
                         if (index < skillsToProcess.length - 1) {
-                            console.log(`⏳ Waiting 2 seconds before next skill...`);
                             await new Promise(resolve => setTimeout(resolve, 2000));
                         }
                     }
@@ -589,17 +417,12 @@ const edcGetFeaturedSkills = async (dataToEndorse, edcDelay, edcSkills) => {
                     // Small delay before processing next profile
                     if (x < dataToEndorse.length - 1) {
                         const delaySeconds = parseInt($('#edc-delayBetweenEndorsements').val()) || 30;
-                        console.log(`⏳ Endorse Connections: Waiting ${delaySeconds} seconds before next profile...`);
                         await new Promise(resolve => setTimeout(resolve, delaySeconds * 1000));
                     }
                     
                     x++;
                 }
             } catch (fetchError) {
-                console.log(`❌ ERROR FETCHING SKILLS for ${dataToEndorse[i].name}:`, fetchError);
-                console.log(`   📊 Error message: ${fetchError.message}`);
-                console.log(`   🔍 Error details:`, fetchError);
-                
                 // Update progress to show error but continue processing
                 $('#progress-details').html(`
                     <div>❌ Error: <strong>${dataToEndorse[i].name}</strong> (${i+1}/${dataToEndorse.length})</div>
@@ -611,10 +434,8 @@ const edcGetFeaturedSkills = async (dataToEndorse, edcDelay, edcSkills) => {
                 x++;
                 i++;
                 if(i < dataToEndorse.length) {
-                    console.log(`⏭️ SKIPPING TO NEXT CONNECTION: ${i+1}/${dataToEndorse.length}`);
                     edcLooper();
                 } else {
-                    console.log(`🏁 PROCESS COMPLETED: Processed ${x} connections (with ${dataToEndorse.length - x} errors)`);
                     $('.endorseConnectionAction').attr('disabled', false);
                 }
             }
@@ -622,7 +443,6 @@ const edcGetFeaturedSkills = async (dataToEndorse, edcDelay, edcSkills) => {
             if(i < dataToEndorse.length)
                 edcLooper()
             if(i >= dataToEndorse.length){
-                console.log(`🏁 Endorse Connections: Process completed! Endorsed ${x} connections out of ${dataToEndorse.length}`);
                 
                 $('.endorseConnectionAction').attr('disabled', false)
 
@@ -664,22 +484,18 @@ const edcGetFeaturedSkills = async (dataToEndorse, edcDelay, edcSkills) => {
 }
 
 const triggerEndorsement = async (skillName, entityUrn, connectId, memberUrn, totalResult, currentCnt) => {
-    console.log(`🎯 Endorse Connections: Processing skill endorsement for "${skillName}" via direct API`);
     
     // Check if this profile is already being processed for this specific skill
     const profileSkillKey = `${connectId}_${skillName}`;
     if (processingProfiles.has(profileSkillKey)) {
-        console.log(`⚠️ Endorse Connections: Profile ${connectId} already being processed for skill "${skillName}", skipping`);
         return;
     }
     
     // Mark this profile-skill combination as being processed
     processingProfiles.add(profileSkillKey);
-    console.log(`📝 Endorse Connections: Marked profile ${connectId} for skill "${skillName}" as being processed`);
 
     try {
         // Use direct API endorsement only
-        console.log(`🌐 Endorse Connections: Using direct API for skill "${skillName}"`);
         
         // Update UI to show processing
         $('#displayEndorseConnectionStatus').empty()
@@ -695,7 +511,6 @@ const triggerEndorsement = async (skillName, entityUrn, connectId, memberUrn, to
         const directResult = await endorseSkillDirectly(skillName, entityUrn, connectId, memberUrn);
         
         if (directResult.success) {
-            console.log('✅ Direct skill endorsement successful:', directResult.message);
             
             // Update UI with success
             $('#displayEndorseConnectionStatus').empty()
@@ -706,14 +521,11 @@ const triggerEndorsement = async (skillName, entityUrn, connectId, memberUrn, to
                 <li><small>🎉 Direct API endorsement completed successfully!</small></li>
             `;
             $('#displayEndorseConnectionStatus').append(successLi)
-            console.log(`✅ Endorse Connections: Direct API endorsement completed successfully`);
         } else {
-            console.log('❌ Direct skill endorsement failed:', directResult.message);
             throw new Error(directResult.message || 'Direct API endorsement failed');
         }
         
     } catch (error) {
-        console.log(`❌ Endorse Connections: Direct API endorsement failed for skill "${skillName}": ${error}`);
         
         // Update UI with error
         $('#displayEndorseConnectionStatus').empty()
@@ -728,20 +540,17 @@ const triggerEndorsement = async (skillName, entityUrn, connectId, memberUrn, to
     } finally {
         // Always clean up tracking
         processingProfiles.delete(profileSkillKey);
-        console.log(`📝 Endorse Connections: Removed profile ${connectId} for skill "${skillName}" from processing tracking`);
     }
 }
 
 // Alternative approach: Web interface interaction for skill endorsements
 const attemptWebInterfaceEndorsement = async (skillName, connectId, currentCnt, totalResult) => {
-    console.log(`🌐 Endorse Connections: Attempting web interface endorsement for skill "${skillName}"`);
     
     try {
         // Step 1: Try to find and click endorsement buttons on the current page
         const endorsementButtons = document.querySelectorAll('[data-control-name="skill_endorsement"], [aria-label*="endorse"], .pv-skill-category-entity__endorse-button, button[aria-label*="Endorse"], .artdeco-button[aria-label*="endorse"]');
         
         if (endorsementButtons.length > 0) {
-            console.log(`🎯 Endorse Connections: Found ${endorsementButtons.length} endorsement buttons on page`);
             
             // Try to click the first endorsement button found
             for (let button of endorsementButtons) {
@@ -749,7 +558,6 @@ const attemptWebInterfaceEndorsement = async (skillName, connectId, currentCnt, 
                     button.closest('[data-skill-name]')?.getAttribute('data-skill-name')?.toLowerCase().includes(skillName.toLowerCase()) ||
                     button.getAttribute('aria-label')?.toLowerCase().includes(skillName.toLowerCase())) {
                     
-                    console.log(`🎯 Endorse Connections: Clicking endorsement button for skill "${skillName}"`);
                     button.click();
                     
                     // Wait for the endorsement to process
@@ -764,7 +572,6 @@ const attemptWebInterfaceEndorsement = async (skillName, connectId, currentCnt, 
             }
             
             // If no specific skill button found, try clicking any endorsement button
-            console.log(`🎯 Endorse Connections: No specific skill button found, trying any endorsement button`);
             if (endorsementButtons.length > 0) {
                 endorsementButtons[0].click();
                 await new Promise(resolve => setTimeout(resolve, 2000));
@@ -780,7 +587,6 @@ const attemptWebInterfaceEndorsement = async (skillName, connectId, currentCnt, 
         // Step 2: Try to find and click any skill endorsement buttons
         const skillEndorsementButtons = document.querySelectorAll('.pv-skill-category-entity__endorse-button, .artdeco-button[data-control-name="skill_endorsement"], button[data-control-name="skill_endorsement"]');
         if (skillEndorsementButtons.length > 0) {
-            console.log(`🎯 Endorse Connections: Found ${skillEndorsementButtons.length} skill endorsement buttons`);
             
             // Click the first available skill endorsement button
             skillEndorsementButtons[0].click();
@@ -796,14 +602,12 @@ const attemptWebInterfaceEndorsement = async (skillName, connectId, currentCnt, 
         // Step 3: If no buttons found, try to navigate to the skill section
         const skillSections = document.querySelectorAll('.pv-skill-category-entity, [data-section="skills"], .pv-skill-category-entity__name-text');
         if (skillSections.length > 0) {
-            console.log(`🎯 Endorse Connections: Found skill sections, attempting to interact`);
             
             // Try to find the specific skill and endorse it
             for (let section of skillSections) {
                 if (section.textContent.toLowerCase().includes(skillName.toLowerCase())) {
                     const endorseBtn = section.querySelector('button[aria-label*="endorse"], .pv-skill-category-entity__endorse-button, .artdeco-button[aria-label*="endorse"]');
                     if (endorseBtn) {
-                        console.log(`🎯 Endorse Connections: Found endorsement button in skill section`);
                         endorseBtn.click();
                         await new Promise(resolve => setTimeout(resolve, 2000));
                         
@@ -820,7 +624,6 @@ const attemptWebInterfaceEndorsement = async (skillName, connectId, currentCnt, 
         // Step 4: Try to find any clickable endorsement elements
         const allEndorsementElements = document.querySelectorAll('[data-control-name*="endorsement"], [aria-label*="endorse"], .endorse-button, .skill-endorsement');
         if (allEndorsementElements.length > 0) {
-            console.log(`🎯 Endorse Connections: Found ${allEndorsementElements.length} endorsement-related elements`);
             
             // Try clicking the first one
             allEndorsementElements[0].click();
@@ -834,7 +637,6 @@ const attemptWebInterfaceEndorsement = async (skillName, connectId, currentCnt, 
         }
         
         // Step 5: Fallback - simulate the endorsement process
-        console.log(`🔄 Endorse Connections: No web interface elements found, using simulation`);
         
         return {
             success: true,
@@ -843,7 +645,6 @@ const attemptWebInterfaceEndorsement = async (skillName, connectId, currentCnt, 
         };
         
     } catch (error) {
-        console.log(`❌ Endorse Connections: Web interface interaction failed: ${error}`);
         
         return {
             success: false,
@@ -902,7 +703,6 @@ const edcViewProfile = async (dataToEndorse) => {
             
         },
         error: function(error){
-            console.log(error)
             $('.endorseConnectionAction').attr('disabled', false)
         }
     })
@@ -910,22 +710,13 @@ const edcViewProfile = async (dataToEndorse) => {
 
 // Direct skill endorsement function using the same approach as background script
 const endorseSkillDirectly = async (skillName, entityUrn, connectId, memberUrn) => {
-    console.log(`🏷️ DIRECT ENDORSEMENT: ${skillName} for connection ${connectId}`);
-    console.log(`🔗 Entity URN: ${entityUrn}`);
-    console.log(`👤 Member URN: ${memberUrn}`);
     
     try {
         // Use the LinkedIn profile ID (connectId) directly - this is the actual LinkedIn profile ID
         const profileId = connectId; // Use connectId directly (LinkedIn profile ID)
         const endorseUrl = `${voyagerApi}/identity/profiles/${profileId}/normEndorsements`;
-        console.log(`🌐 Direct endorsement API URL: ${endorseUrl}`);
-        console.log(`👤 Using LinkedIn profile ID: ${profileId}`);
-        console.log(`   📊 Connect ID: ${connectId}`);
-        console.log(`   🔗 Member URN: ${memberUrn}`);
-        
         // Get fresh CSRF token from storage (same as background script)
         const csrfResult = await chrome.storage.local.get(["csrfToken"]);
-        console.log(`🔑 CSRF Token for endorsement:`, csrfResult.csrfToken ? 'Found' : 'Not found');
         
         const response = await fetch(endorseUrl, {
             method: 'post',
@@ -946,16 +737,13 @@ const endorseSkillDirectly = async (skillName, entityUrn, connectId, memberUrn) 
             })
         });
         
-        console.log(`📊 Direct endorsement response status: ${response.status} ${response.statusText}`);
         
         if(response.status == 201){
-            console.log(`✅ DIRECT SKILL ENDORSED SUCCESSFULLY: ${skillName}`);
             return { 
                 success: true, 
                 message: `Successfully endorsed "${skillName}" directly via API` 
             };
         } else {
-            console.log(`❌ Failed to endorse skill directly: ${response.status} ${response.statusText}`);
             return { 
                 success: false, 
                 message: `Failed to endorse skill: ${response.status}` 

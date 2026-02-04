@@ -64,37 +64,82 @@ const angCleanConnectionsData = (res, angMessage, angDelay, angPeriod, angTotal,
 
     if(connectionResponse.length > 0){
         $.each(connectionResponse, function(i, item){
-            var itemHeadline = item.headline.text.toLowerCase();
+            var itemHeadline = item.headline ? item.headline.text.toLowerCase() : '';
+            var itemEntityUrn = item.entityUrn || '';
             var includeByPeriod = true;
+            
+            // Check if this is a work anniversary notification by entityUrn
+            var isAnniversaryNotification = false;
+            if(itemEntityUrn.includes('WORK_ANNIVERSARY') || itemEntityUrn.includes('ANNIVERSARY') || 
+               (itemEntityUrn.includes('PROP') && !itemEntityUrn.includes('BIRTHDAY'))){
+                isAnniversaryNotification = true;
+            }
+            
+            // Also check headline for anniversary-related keywords
+            var headlineKeywords = ['anniversary', 'congratulate', 'celebrating', 'work anniversary', 'year at'];
+            var hasAnniversaryKeyword = headlineKeywords.some(keyword => itemHeadline.includes(keyword));
+            var hasYearKeyword = itemHeadline.includes('year') || itemHeadline.includes('years');
+            
             try {
                 if(item.publishedAt){
                     var now = new Date();
                     var published = new Date(item.publishedAt);
                     var diffTime = Math.abs(now - published);
                     var diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                    includeByPeriod = diffDays > angPeriod;
+                    includeByPeriod = diffDays <= angPeriod; // Include notifications within the period
                 }
             } catch(e) { includeByPeriod = true; }
 
-            if(includeByPeriod && itemHeadline.includes('congratulate') && itemHeadline.includes('year')){
-                var headLineArr = itemHeadline.split(" ")
-                for(var i=0; i<headLineArr.length; i++){
-                    if(headLineArr[i] == 'year' || headLineArr[i] == 'years'){
-                        var userWorkYear = headLineArr[i -1]
-                        break;
+            // Check if it's an anniversary notification (by entityUrn or headline)
+            if(includeByPeriod && (isAnniversaryNotification || (hasAnniversaryKeyword && hasYearKeyword))){
+                var userWorkYear = null;
+                
+                // Extract year from headline
+                if(hasYearKeyword){
+                    var headLineArr = itemHeadline.split(" ");
+                    for(var j=0; j<headLineArr.length; j++){
+                        if(headLineArr[j] == 'year' || headLineArr[j] == 'years'){
+                            var yearCandidate = headLineArr[j - 1];
+                            if(!isNaN(yearCandidate)){
+                                userWorkYear = yearCandidate;
+                                break;
+                            }
+                        }
                     }
-               }
+                }
+                
+                // Try to get profile picture from headerImage
+                var profilePicture = null;
+                try {
+                    if(item.headerImage && item.headerImage.attributes && item.headerImage.attributes.length > 0){
+                        var firstAttr = item.headerImage.attributes[0];
+                        if(firstAttr.detailData && firstAttr.detailData.profilePicture){
+                            profilePicture = firstAttr.detailData.profilePicture;
+                        }
+                    }
+                } catch(e) {
+                    // Try alternative path
+                    try {
+                        if(item.headerImage && item.headerImage.attributes && item.headerImage.attributes.length > 0){
+                            var attr = item.headerImage.attributes[0];
+                            if(attr.detailDataUnion && attr.detailDataUnion.profilePicture){
+                                // Need to look up the profile from included data
+                                profilePicture = { entityUrn: attr.detailDataUnion.profilePicture };
+                            }
+                        }
+                    } catch(e2) {
+                        // Skip if we can't find profile picture
+                    }
+                }
 
-                if('entityUrn' in item.headerImage.attributes[0].detailData.profilePicture){
-                    
-                    var entityUrn = item.headerImage.attributes[0].detailData.profilePicture.entityUrn;
-
+                if(profilePicture && profilePicture.entityUrn){
+                    var entityUrn = profilePicture.entityUrn;
                     if(entityUrn.includes('urn:li:fsd_profile:')){
                         var connectId = entityUrn.replace('urn:li:fsd_profile:','')
                         connectionIds.push({
                             connectId: connectId, 
-                            userWorkYear: userWorkYear,
-                            postUrn: item.cardAction.actionTarget,
+                            userWorkYear: userWorkYear || '1', // Default to 1 if not found
+                            postUrn: item.cardAction ? item.cardAction.actionTarget : null,
                         })
                     }
                 }

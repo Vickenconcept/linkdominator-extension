@@ -1,3 +1,11 @@
+// Helper function to restore button state
+const restoreWithdrawInviteButton = () => {
+    var $button = $('.withdrawInviteAction');
+    var originalText = $button.data('original-text') || 'Start';
+    $button.attr('disabled', false)
+        .html(originalText)
+        .css('cursor', 'pointer');
+}
 
 $('.withdrawInviteAction').click(function(){
     $('#displayWithdrawStatus').empty()
@@ -7,24 +15,15 @@ $('.withdrawInviteAction').click(function(){
         wsiPeriod = $('#wsi-period');
     var wsiControlFiels = [wsiDelay,wasiTotal,wsiPeriod];
 
-    console.log('WSI Start clicked', {
-        startPosition: wsiStartP.val(),
-        total: wasiTotal.val(),
-        delay: wsiDelay.val(),
-        periodDays: wsiPeriod.val()
-    });
-
     // validate fields
     if(wasiTotal.val() =='' || wsiDelay.val() =='' || wsiPeriod.val() ==''){
         for(var i=0;i<wsiControlFiels.length;i++){
             if(wsiControlFiels[i].val() == ''){
                 $('#wsi-error-notice').html(`${wsiControlFiels[i].data('name')} field cannot be empty`)
-                console.warn('WSI validation: empty field', wsiControlFiels[i].attr('id'))
             }
         }
     }else if(wsiDelay.val() < 10){
         $('#wsi-error-notice').html(`Delay minimum is 10`)
-        console.warn('WSI validation: delay below minimum', { delay: wsiDelay.val() })
     }else{
         $('#wsi-error-notice').html(``)
 
@@ -34,14 +33,17 @@ $('.withdrawInviteAction').click(function(){
         // Show immediate progress to user
         $('.withdraw-invite').show()
         $('#displayWithdrawStatus').html('Fetching sent invitations...')
-
-        console.log('WSI fetching invitations', {
-            start: wsiStartP,
-            count: wasiTotal,
-            periodDays: wsiPeriod.val(),
-            delaySeconds: wsiDelay.val()
-        });
-        $(this).attr('disabled', true)
+        
+        // Store original button text and add loading state
+        var $button = $(this);
+        var originalText = $button.html();
+        $button.attr('disabled', true)
+            .html('<i class="fas fa-spinner fa-spin me-2"></i>Processing...')
+            .css('cursor', 'not-allowed');
+        
+        // Store original text for restoration
+        $button.data('original-text', originalText);
+        
         wsiGetInvitations(wsiStartP, wasiTotal, wsiPeriod.val(), wsiDelay.val())
     }
 })
@@ -49,7 +51,7 @@ $('.withdrawInviteAction').click(function(){
 const wsiGetInvitations = async (wsiStartP, wasiTotal, wsiPeriod, wsiDelay) => {
     $.ajax({
         method: 'get',
-        timeout: 30000,
+        timeout: 10000,
         beforeSend: function(request) {
             request.setRequestHeader('csrf-token', jsession);
             request.setRequestHeader('accept', accept);
@@ -61,17 +63,11 @@ const wsiGetInvitations = async (wsiStartP, wasiTotal, wsiPeriod, wsiDelay) => {
         },
         url: `${voyagerApi}/relationships/sentInvitationView?count=${wasiTotal}&q=sent&start=${wsiStartP}&type=SINGLES_ALL`,
         success: function(data){
-            try {
-                console.log('WSI fetch success', { elements: (data && data.elements) ? data.elements.length : 0 });
-            } catch (e) {
-                console.warn('WSI fetch success: unable to read elements length');
-            }
             wsiCheckDataMatchPeriod(data, wsiPeriod, wsiDelay)
         },
         error: function(error){
-            console.error('WSI fetch error', error)
             $('#displayWithdrawStatus').html('Failed to fetch sent invitations. Please refresh the LinkedIn page and try again.')
-            $('.withdrawInviteAction').attr('disabled', false)
+            restoreWithdrawInviteButton()
         }
     })
 }
@@ -82,11 +78,6 @@ const wsiCheckDataMatchPeriod = async (res, wsiPeriod, wsiDelay) => {
     var currentTime = new Date();
     var totalWithdraw = $('#wsi-totalFollow').val();
     var withdrawData = [];
-    console.log('WSI filtering', {
-        returnedInvites: treePath ? treePath.length : 0,
-        periodDays: wsiPeriod,
-        totalRequested: totalWithdraw
-    });
 
     if(treePath.length > 0){
         $.each(treePath, function(i, item){
@@ -110,9 +101,8 @@ const wsiCheckDataMatchPeriod = async (res, wsiPeriod, wsiDelay) => {
         })
         // No matches for the chosen period
         if(dataTimeMatch.length === 0){
-            console.warn('WSI no matches older than period', { returnedInvites: treePath.length, periodDays: wsiPeriod })
             $('#displayWithdrawStatus').html(`Found ${treePath.length} sent invites, but none older than ${wsiPeriod} days. Try lowering days, increasing Start position, or increasing Total.`)
-            $('.withdrawInviteAction').attr('disabled', false)
+            restoreWithdrawInviteButton()
             return
         }
 
@@ -126,17 +116,15 @@ const wsiCheckDataMatchPeriod = async (res, wsiPeriod, wsiDelay) => {
                 }
             }
             $('#displayWithdrawStatus').html(`Processing ${withdrawData.length} invitations...`)
-            console.log('WSI will process (trimmed)', { willProcess: withdrawData.length })
             wsiPostWithdraw(withdrawData, wsiDelay)
         }else{
             $('#displayWithdrawStatus').html(`Processing ${dataTimeMatch.length} invitations...`)
-            console.log('WSI will process', { willProcess: dataTimeMatch.length })
             wsiPostWithdraw(dataTimeMatch, wsiDelay)
         }
     }else{
         $('.withdraw-invite').show()
         $('#displayWithdrawStatus').html(`No match found in the current page. Try increasing Start position to check older invites or increase Total.`)
-        $('.withdrawInviteAction').attr('disabled', false)
+        restoreWithdrawInviteButton()
     }
 }
 
@@ -147,7 +135,6 @@ const wsiPostWithdraw = (res, wsiDelay) => {
 
         $('.withdraw-invite').show()
         $('#displayWithdrawStatus').html('Starting withdrawal...')
-        console.log('WSI starting withdrawal loop', { total: res.length, delaySeconds: wsiDelay })
 
         // automation table data setup
         displayAutomationRecord = `
@@ -185,7 +172,6 @@ const wsiPostWithdraw = (res, wsiDelay) => {
                         inviteActionType: "WITHDRAW"
                     }),
                     success: function(data){
-                        console.log('WSI withdrawn', { index: i, name: res[i] ? res[i].name : undefined });
                         let treatedAsSuccess = false;
                         try {
                             if(data && data.value && data.value.statusCodeMap){
@@ -193,7 +179,6 @@ const wsiPostWithdraw = (res, wsiDelay) => {
                             }
                         } catch(e) {}
                         if(!treatedAsSuccess){
-                            console.warn('WSI warning: Missing statusCodeMap, treating as success based on HTTP 200');
                             treatedAsSuccess = true;
                         }
                         if(treatedAsSuccess){
@@ -205,7 +190,6 @@ const wsiPostWithdraw = (res, wsiDelay) => {
                                 <li>Invitation sent <b>${res[i].inviteTime}</b> days ago</li>
                             `;
                             $('#displayWithdrawStatus').append(displayLi)
-                            console.log( new Date())
 
                             // update automation count done and time remained
                             $('#wsi-numbered').text(`${x +1}/${res.length}`)
@@ -215,15 +199,14 @@ const wsiPostWithdraw = (res, wsiDelay) => {
                         }
                     },
                     error: function(error){
-                        console.error('WSI withdraw error', { index: i, error: error })
-                        $('.withdrawInviteAction').attr('disabled', false)
+                        restoreWithdrawInviteButton()
                     }
                 })
                 i++;
                 if(i < res.length)
                     wsiLooper()
                 if(i >= res.length){
-                    $('.withdrawInviteAction').attr('disabled', false)
+                    restoreWithdrawInviteButton()
 
                     let module = 'Invitation withdrawn';
                     sendStats(x, module)
@@ -237,7 +220,6 @@ const wsiPostWithdraw = (res, wsiDelay) => {
                         summaryMsg += ` Only ${res.length} matched your filter (requested ${requestedTotal}).`;
                     }
                     $('#displayWithdrawStatus').html(summaryMsg)
-                    console.log('WSI completed withdrawal loop', { totalWithdrawn: x });
                     setTimeout(function(){
                         $('#withdraw-invites-record').remove()
                     }, 5000)
@@ -248,7 +230,7 @@ const wsiPostWithdraw = (res, wsiDelay) => {
     }else{
         $('.withdraw-invite').show()
         $('#displayWithdrawStatus').html(`No match found!`)
-        $('.withdrawInviteAction').attr('disabled', false)
+        restoreWithdrawInviteButton()
     }
 }
 
@@ -256,7 +238,7 @@ const wsiPostWithdraw = (res, wsiDelay) => {
 $('body').on('click','#wsi-bot-action',function(){
     clearTimeout(timeOutWithdrawInvite);
     $('#wsi-status').text('Stopped')
-    $('.withdrawInviteAction').attr('disabled', false)
+    restoreWithdrawInviteButton()
     setTimeout(function(){
         $('#withdraw-invites-record').remove()
     }, 5000)

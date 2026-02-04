@@ -1,6 +1,13 @@
+// Helper function to restore button state
+const restoreViewConnectionsButton = () => {
+    var $button = $('.viewConnetionsAction');
+    var originalText = $button.data('original-text') || 'View';
+    $button.attr('disabled', false)
+        .html(originalText)
+        .css('cursor', 'pointer');
+}
 
 $('.viewConnetionsAction').click(function(){
-    console.log('👁️ View Connections: Starting process...');
     $('#displayViewConnectionStatus').empty()
     var vcpStartP = $('#vcp-startPosition'),
         vcpTotal = $('#vcp-total'),
@@ -17,28 +24,16 @@ $('.viewConnetionsAction').click(function(){
 
     let queryParams = '';
 
-    console.log('📋 View Connections: Form values:', {
-        audienceSelected: $('#vcp-audience-select').val(),
-        searchTerm: $('#vcp-search-term').val(),
-        startPosition: vcpStartP.val(),
-        totalToView: vcpTotal.val(),
-        delayBetweenViews: vcpDelay.val()
-    });
-
     // validate fields
     if(vcpTotal.val() =='' || vcpDelay.val() ==''){
-        console.log('❌ View Connections: Validation failed - missing required fields');
         for(var i=0;i<vcpControlFields.length;i++){
             if(vcpControlFields[i].val() == ''){
-                console.log(`❌ View Connections: Missing field: ${vcpControlFields[i].data('name')}`);
                 $('#vcp-error-notice').html(`${vcpControlFields[i].data('name')} field cannot be empty`)
             }
         }
     }else if(vcpDelay.val() < 30){
-        console.log('❌ View Connections: Validation failed - delay too low:', vcpDelay.val());
         $('#vcp-error-notice').html(`Delay minimum is 30`)
     }else{
-        console.log('✅ View Connections: Validation passed');
         $('#vcp-error-notice').html(``)
 
         // check if value exists in accordion list dropdown
@@ -95,7 +90,15 @@ $('.viewConnetionsAction').click(function(){
         if($('#vcp-company').val())
             queryParams += setFIlterQueryParamsFreeText('#vcp-company','company')
 
-        $(this).attr('disabled', true)  
+        // Store original button text and add loading state
+        var $button = $(this);
+        var originalText = $button.html();
+        $button.attr('disabled', true)
+            .html('<i class="fas fa-spinner fa-spin me-2"></i>Processing...')
+            .css('cursor', 'not-allowed');
+        
+        // Store original text for restoration
+        $button.data('original-text', originalText);
 
         // Check which method is selected (improved logic)
         let audienceMethodSelected = $('#vcp-audience-method-card').hasClass('selected');
@@ -103,26 +106,17 @@ $('.viewConnetionsAction').click(function(){
         let audienceSelected = $('#vcp-audience-select').val() != '';
         let searchTermEntered = $('#vcp-search-term').val() != '';
         
-        console.log('📊 View Connections: Method selection:', {
-            audienceMethodSelected: audienceMethodSelected,
-            searchMethodSelected: searchMethodSelected,
-            audienceSelected: audienceSelected,
-            searchTermEntered: searchTermEntered
-        });
-        
         // Determine method based on both class and actual form state
         if (audienceSelected) {
-            console.log('📊 View Connections: Using selected audience:', $('#vcp-audience-select').val());
             vcpGetAudienceList($('#vcp-audience-select').val(), vcpDelay.val())
         } else if (searchTermEntered || queryParams != '') {
-            console.log('🔍 View Connections: Using PhantomBuster search');
             
             // Get keywords
             const keywords = $('#vcp-search-term').val() ? $('#vcp-search-term').val().trim() : '';
             
             if (!keywords) {
                 $('#vcp-error-notice').html('Please enter search keywords');
-                $('.viewConnetionsAction').attr('disabled', false);
+                restoreViewConnectionsButton();
                 return;
             }
 
@@ -154,27 +148,16 @@ $('.viewConnetionsAction').click(function(){
             const searchUrl = window.buildLinkedInSearchUrl ? 
                 window.buildLinkedInSearchUrl(keywords, 'vcp-', ['S', 'O']) : '';
 
-            console.log('🔍 View Connections: Using PhantomBuster search:', { searchUrl, keywords, connectionDegrees });
             vcpGetConnections(searchUrl, keywords, connectionDegrees, vcpStartP, vcpTotal, vcpDelay.val())
         } else {
-            console.log('❌ View Connections: No method properly selected');
             $('#vcp-error-notice').html('Please select a method: either choose an audience or use search parameters');
-            $('.viewConnetionsAction').attr('disabled', false);
+            restoreViewConnectionsButton();
             return;
         }
     }
 })
 
 const vcpGetConnections = async (searchUrl, keywords, connectionDegrees, vcpStartP, vcpTotal, vcpDelay) => {
-    console.log('🔍 View Connections: Starting PhantomBuster search...', {
-        searchUrl: searchUrl,
-        keywords: keywords,
-        connectionDegrees: connectionDegrees,
-        startPosition: vcpStartP,
-        totalToFind: vcpTotal,
-        delay: vcpDelay
-    });
-    
     $('.viewConnect').show()
     $('#displayViewConnectionStatus').empty()
     $('#displayViewConnectionStatus').html('Scanning. Please wait...')
@@ -195,76 +178,53 @@ const vcpGetConnections = async (searchUrl, keywords, connectionDegrees, vcpStar
             let elements = response.data?.elements || response.elements || [];
             let included = response.included || [];
 
-            console.log('📊 View Connections: Response structure:', {
-                elementsLength: elements.length,
-                includedLength: included.length
-            });
-
             if(elements && elements.length) {
                 if(totalResultCount == 0) {
                     totalResultCount = response.data?.metadata?.totalResultCount || included.length;
                 }
 
-                console.log(`📈 View Connections: Total results available: ${totalResultCount}`);
-
                 // Find the element that contains the search results
                 let searchResultElement = null;
                 for(let i = 0; i < elements.length; i++) {
                     if(elements[i] && elements[i].items && elements[i].items.length > 0) {
-                        console.log(`✅ View Connections: Found search results in elements[${i}]`);
                         searchResultElement = elements[i];
                         break;
                     }
                 }
 
                 if(searchResultElement && searchResultElement.items.length) {
-                    console.log(`👥 View Connections: Found ${searchResultElement.items.length} connections in search results`);
-                    
                     for(let item of included) {
                         if(item.hasOwnProperty('title') && item.hasOwnProperty('primarySubtitle')) {
                             if(item.title.text && item.primarySubtitle.text && item.title.text.includes('LinkedIn Member') == false) {
                                 viewItems.push(item)
-                                console.log(`✅ View Connections: Added profile: ${item.title.text} - ${item.primarySubtitle.text}`);
-                            } else {
-                                console.log(`⚠️ View Connections: Skipped LinkedIn Member or invalid profile`);
                             }
-                        } else {
-                            console.log(`⚠️ View Connections: Item missing title or subtitle:`, item);
                         }
                     }
-
-                    console.log(`📊 View Connections: Total profiles collected: ${viewItems.length}/${vcpTotal}`);
 
                     if(viewItems.length < vcpTotal) {
                         vcpStartP = parseInt(vcpStartP) + viewItems.length;
                         $('#vcp-startPosition').val(vcpStartP);
-                        console.log(`🔄 View Connections: Getting more results, new start position: ${vcpStartP}`);
                         setTimeout(() => {
                             getConnectionsLooper();
                         }, 10000);
                     } else {
-                        console.log('✅ View Connections: Collected enough profiles, starting data extraction...');
                         vcpCleanConnectionsData(viewItems, totalResultCount, vcpDelay);
                     }
                 } else {
-                    console.log('⚠️ View Connections: No search result items found in any elements');
                     if(viewItems.length) {
-                        console.log(`✅ View Connections: No more results from API, but have ${viewItems.length} profiles to process`);
                         $('#displayViewConnectionStatus').html(`Found ${viewItems.length}. Viewing...`);
                         vcpCleanConnectionsData(viewItems, totalResultCount, vcpDelay);
                     } else {
                         $('#displayViewConnectionStatus').html('No result found, change your search criteria and try again!');
-                        $('.viewConnetionsAction').attr('disabled', false);
+                        restoreViewConnectionsButton();
                     }
                 }
             } else if(viewItems.length) {
-                console.log(`✅ View Connections: No more results from API, but have ${viewItems.length} profiles to process`);
                 $('#displayViewConnectionStatus').html(`Found ${viewItems.length}. Viewing...`);
                 vcpCleanConnectionsData(viewItems, totalResultCount, vcpDelay);
             } else {
-                console.log('❌ View Connections: No results found at all');
                 $('#displayViewConnectionStatus').html('No result found, change your search criteria and try again!');
-                $('.viewConnetionsAction').attr('disabled', false);
+                restoreViewConnectionsButton();
             }
         } catch(error) {
             console.error('❌ View Connections: Error fetching connections:', error);
@@ -276,7 +236,7 @@ const vcpGetConnections = async (searchUrl, keywords, connectionDegrees, vcpStar
                 $('#displayViewConnectionStatus').html(`Error: ${error.message || 'Something went wrong while trying to get connections!'}`);
             }
             
-            $('.viewConnetionsAction').attr('disabled', false);
+            restoreViewConnectionsButton();
         }
     }
     
@@ -284,11 +244,6 @@ const vcpGetConnections = async (searchUrl, keywords, connectionDegrees, vcpStar
 }
 
 const vcpCleanConnectionsData = (viewItems, totalResultCount, vcpDelay) => {
-    console.log('🔧 View Connections: Starting data extraction...', {
-        totalItems: viewItems.length,
-        sampleItem: viewItems[0]
-    });
-    
     let con = [], conArr = [];
     let profileUrn;
     let processedCount = 0;
@@ -296,11 +251,9 @@ const vcpCleanConnectionsData = (viewItems, totalResultCount, vcpDelay) => {
 
     for(let item of viewItems) {
         processedCount++;
-        console.log(`🔍 View Connections: Processing item ${processedCount}/${viewItems.length}:`, item);
         
         if(item && item.entityUrn) {
             profileUrn = item.entityUrn;
-            console.log(`📝 View Connections: Found profileUrn: ${profileUrn}`);
 
             if(profileUrn && typeof profileUrn === 'string' && 
                profileUrn.includes('urn:li:fsd_entityResultViewModel:(urn:li:fsd_profile:') && 
@@ -323,16 +276,9 @@ const vcpCleanConnectionsData = (viewItems, totalResultCount, vcpDelay) => {
 
                 conArr.push(profileData);
                 validCount++;
-                console.log(`✅ View Connections: Valid profile extracted: ${item.title.text} (${validCount} total)`);
-            } else {
-                console.log(`⚠️ View Connections: Invalid profileUrn format: ${profileUrn}`);
             }
-        } else {
-            console.log(`⚠️ View Connections: Item missing entityUrn:`, item);
         }
     }
-
-    console.log(`📊 View Connections: Extraction summary: ${validCount}/${processedCount} valid profiles found`);
 
     // get only user defined total
     let vcpTotal = $('#vcp-total').val();
@@ -344,60 +290,41 @@ const vcpCleanConnectionsData = (viewItems, totalResultCount, vcpDelay) => {
         }
     }
 
-    console.log(`🎯 View Connections: Final data ready for viewing:`, {
-        availableProfiles: conArr.length,
-        requestedTotal: vcpTotal,
-        willView: con.length,
-        profiles: con
-    });
-
     if(con.length > 0) {
         vcpViewProfile(con, vcpDelay);
     } else {
-        console.log('❌ View Connections: No valid profiles found to view');
         $('#displayViewConnectionStatus').html('No valid profiles found in search results. Try different search criteria.');
-        $('.viewConnetionsAction').attr('disabled', false);
+        restoreViewConnectionsButton();
     }
 }
 
 const vcpGetAudienceList = async (audienceId, vcpDelay) => {
-    console.log('📊 View Connections: Fetching audience data...', {
-        audienceId: audienceId,
-        url: `${filterApi}/audience/list?audienceId=${audienceId}`
-    });
-    
     var conArr = [];
 
     await $.ajax({
         method: 'get',
         url: `${filterApi}/audience/list?audienceId=${audienceId}`,
         success: function(data){
-            console.log('📊 View Connections: Audience API response:', data);
-            
             // Handle different API response formats (same fix as other functions)
             let dataPath = null;
             
             if (data && data.audience && Array.isArray(data.audience)) {
                 // New format: {audience: Array}
-                console.log('✅ View Connections: Found direct audience array');
                 dataPath = data.audience;
             } else if (data && Array.isArray(data) && data.length > 0 && data[0].audience) {
                 // Old format: [{audience: Array}]
-                console.log('✅ View Connections: Found audience in array format');
                 dataPath = data[0].audience;
             } else if (data && Array.isArray(data)) {
                 // Direct array format: [connection1, connection2, ...]
-                console.log('✅ View Connections: Found direct connection array');
                 dataPath = data;
             }
             
             if(dataPath && dataPath.length > 0){
-                console.log(`👥 View Connections: Found ${dataPath.length} connections in audience`);
                 
                 for(let i=0; i<dataPath.length; i++){
-                    var netDistance = dataPath[i].con_distance.split("_")
+                    var netDistance = dataPath[i].con_distance ? dataPath[i].con_distance.split("_") : ['', ''];
                     var targetIdd;
-                    if(dataPath[i].con_member_urn.includes('urn:li:member:')){
+                    if(dataPath[i].con_member_urn && dataPath[i].con_member_urn.includes('urn:li:member:')){
                         targetIdd = dataPath[i].con_member_urn.replace('urn:li:member:','') 
                     }
 
@@ -408,20 +335,17 @@ const vcpGetAudienceList = async (audienceId, vcpDelay) => {
                         totalResultCount: dataPath.length,
                         publicIdentifier: dataPath[i].con_public_identifier, 
                         memberUrn: dataPath[i].con_member_urn,
-                        networkDistance: parseInt(netDistance[1]),
+                        networkDistance: parseInt(netDistance[1]) || 0,
                         trackingId: dataPath[i].con_tracking_id, 
                         navigationUrl: `${LINKEDIN_URL}/in/${dataPath[i].con_public_identifier}`, 
-                        targetId: parseInt(targetIdd)
+                        targetId: targetIdd ? parseInt(targetIdd) : null
                     };
 
                     conArr.push(profileData);
-                    console.log(`✅ View Connections: Added profile: ${profileData.name} - ${profileData.title}`);
                 }
                 
-                console.log(`🚀 View Connections: Starting profile viewing for ${conArr.length} connections`);
                 vcpViewProfile(conArr, vcpDelay);
             }else{
-                console.log('⚠️ View Connections: No connections found in audience');
                 $('.viewConnect').show()
                 $('#displayViewConnectionStatus').empty()
                 $('#displayViewConnectionStatus').html('No data found!')
@@ -440,12 +364,6 @@ const vcpGetAudienceList = async (audienceId, vcpDelay) => {
 
 var timeOutFollowConViewProfile;
 const vcpViewProfile = (profileToViewData, vcpDelay) => {
-    console.log('👁️ View Connections: Starting profile viewing process...', {
-        totalProfiles: profileToViewData.length,
-        delayBetweenViews: vcpDelay,
-        profiles: profileToViewData
-    });
-    
     var displayLi = '', i = 0, x = 0, displayAutomationRecord = '';
     var d = new Date();
     var dInt = new Date(d).getTime();
@@ -476,20 +394,8 @@ const vcpViewProfile = (profileToViewData, vcpDelay) => {
 
     var vcpLooper = () => {
         timeOutFollowConViewProfile = setTimeout(async function(){
-            console.log(`👁️ View Connections: Processing ${i+1}/${profileToViewData.length} - ${profileToViewData[i].name}`);
-            
-            // Log the profile data being processed
-            console.log('🔍 View Connections: Processing profile:', {
-                name: profileToViewData[i].name,
-                title: profileToViewData[i].title,
-                targetId: profileToViewData[i].targetId,
-                memberUrn: profileToViewData[i].memberUrn,
-                networkDistance: profileToViewData[i].networkDistance
-            });
-
             // Simulate profile viewing without relying on LinkedIn's tracking API
             // This approach focuses on the core functionality of viewing profiles
-            console.log(`👁️ View Connections: Simulating profile view for ${profileToViewData[i].name}`);
             
             // Update status immediately to show progress
             $('#displayViewConnectionStatus').empty()
@@ -506,20 +412,12 @@ const vcpViewProfile = (profileToViewData, vcpDelay) => {
             $('#vcp-numbered').text(`${x +1}/${profileToViewData.length}`)
             $('#vcp-remained-time').text(`${remainedTime(vcpDelay, profileToViewData.length - (x +1))}`)
 
-            console.log(`✅ View Connections: Successfully processed profile ${i+1}/${profileToViewData.length} - ${profileToViewData[i].name}`);
-            
             x++;
             i++;
             if(i < profileToViewData.length){
-                console.log(`⏳ View Connections: Waiting ${vcpDelay} seconds before next profile...`);
                 vcpLooper()
             }
             if(i >= profileToViewData.length){
-                console.log('🏁 View Connections: All profiles viewed successfully!', {
-                    totalViewed: x,
-                    totalRequested: profileToViewData.length,
-                    successRate: `${Math.round((x / profileToViewData.length) * 100)}%`
-                });
                 
                 // Show completion message
                 $('#displayViewConnectionStatus').empty()

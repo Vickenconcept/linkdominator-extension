@@ -1301,13 +1301,51 @@ const addcAddConnections = async (addcConArrMain, addcDelayFollowTime) => {
 
     // automation table data setup
     displayAutomationRecord = `
-        <tr id="add-connect-record">
-            <td>Add Connection</td>
-            <td id="addc-status">Running</td>
-            <td>${addcConArr.length}</td>
-            <td id="addc-numbered">0/${addcConArr.length}</td>
-            <td id="addc-bot-action" title="Stop automation"><i class="far fa-dot-circle fa-lg text-danger cursorr"></i></td>
-            <td id="addc-remained-time">${remainedTime(addcDelayFollowTime,addcConArr.length)}</td>
+        <tr id="add-connect-record" style="transition: all 0.3s ease; border-bottom: 1px solid #f0f0f0;">
+            <td style="padding: 16px; vertical-align: middle;">
+                                                <div style="display: flex; align-items: center;">
+                                                    <div style="width: 40px; height: 40px; background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-right: 12px; box-shadow: 0 2px 8px rgba(239, 68, 68, 0.2);">
+                                                        <i class="fas fa-user-plus" style="color: white; font-size: 16px;"></i>
+                                                    </div>
+                    <div>
+                        <div style="font-weight: 600; color: #333; font-size: 15px; margin-bottom: 2px;">Add Connection</div>
+                        <div style="font-size: 12px; color: #6c757d;">
+                            <i class="fas fa-link me-1"></i>Connection automation
+                        </div>
+                    </div>
+                </div>
+            </td>
+            <td style="padding: 16px; text-align: center; vertical-align: middle;">
+                <div id="addc-status" style="display: inline-flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #28a745 0%, #218838 100%); padding: 8px 16px; border-radius: 20px; font-weight: 600; color: white; min-width: 100px;">
+                    <i class="fas fa-play-circle me-2"></i>
+                    <span>Running</span>
+                </div>
+            </td>
+                    <td style="padding: 16px; text-align: center; vertical-align: middle;">
+                        <div style="display: inline-flex; align-items: center; justify-content: center; background: linear-gradient(135deg, rgba(239, 68, 68, 0.1) 0%, rgba(220, 38, 38, 0.1) 100%); padding: 8px 16px; border-radius: 20px; font-weight: 600; color: #ef4444; min-width: 60px; border: 1px solid rgba(239, 68, 68, 0.2);">
+                            <i class="fas fa-list-ol me-2"></i>
+                            <span>${addcConArr.length}</span>
+                        </div>
+                    </td>
+                    <td style="padding: 16px; text-align: center; vertical-align: middle;">
+                        <div id="addc-numbered" style="display: inline-flex; align-items: center; justify-content: center; background: linear-gradient(135deg, rgba(239, 68, 68, 0.1) 0%, rgba(220, 38, 38, 0.1) 100%); padding: 8px 16px; border-radius: 20px; font-weight: 600; color: #ef4444; min-width: 80px; border: 1px solid rgba(239, 68, 68, 0.2);">
+                            <i class="fas fa-tasks me-2"></i>
+                            <span>0/${addcConArr.length}</span>
+                        </div>
+                    </td>
+                    <td style="padding: 16px; text-align: center; vertical-align: middle;">
+                        <div id="addc-remained-time" style="display: inline-flex; align-items: center; justify-content: center; background: linear-gradient(135deg, rgba(239, 68, 68, 0.1) 0%, rgba(220, 38, 38, 0.1) 100%); padding: 8px 16px; border-radius: 20px; font-weight: 500; color: #ef4444; min-width: 100px; border: 1px solid rgba(239, 68, 68, 0.2);">
+                            <i class="fas fa-clock me-2"></i>
+                            <span>${remainedTime(addcDelayFollowTime,addcConArr.length)}</span>
+                        </div>
+                    </td>
+            <td style="padding: 16px; text-align: center; vertical-align: middle;">
+                <div id="addc-bot-action" title="Stop automation" style="display: inline-flex; align-items: center; justify-content: center;">
+                    <button class="btn btn-sm cursorr" style="background: linear-gradient(135deg, #dc3545 0%, #c82333 100%); color: white; border: none; border-radius: 6px; padding: 8px 16px; transition: all 0.3s; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">
+                        <i class="fas fa-stop-circle me-1"></i>Stop
+                    </button>
+                </div>
+            </td>
         </tr>
     `;
     $('#no-job').hide()
@@ -1464,7 +1502,8 @@ const addcViewProfile = async (conArr) => {
 $('body').on('click','#addc-bot-action',function(){
     clearTimeout(timeOutAddCon);
     // clearTimeout(timeOutGetCon);
-    $('#addc-status').text('Stopped')
+    $('#addc-status').html('<i class="fas fa-stop-circle me-2"></i><span>Stopped</span>');
+    $('#addc-status').css('background', 'linear-gradient(135deg, #dc3545 0%, #c82333 100%)');
     $('.addConnect').attr('disabled', false)
     setTimeout(function(){
         $('#add-connect-record').remove()

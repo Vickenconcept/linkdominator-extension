@@ -28,7 +28,7 @@ var followConnetForm = `
                     <input type="text" class="form-control shadow-none" id="search-term" placeholder="Enter your search term">
                 </div>
                 <div class="row">
-                    <div class="col-md-12">
+                    <div class="col-md-6" style="margin-bottom: 12px;">
                         <div id="accordion">
                             <div class="card">
                                 <a class="card-link card-header c-header" data-toggle="collapse" href="#collapseConnectionStage"
@@ -54,9 +54,7 @@ var followConnetForm = `
                             </div>
                         </div>
                     </div>
-                </div>
-                <div class="row">
-                    <div class="col-md-12">
+                    <div class="col-md-6" style="margin-bottom: 12px;">
                         <div id="accordionKeywords">
                             <div class="card">
                                 <a class="card-link card-header c-header" data-toggle="collapse" href="#collapseKeywords"
@@ -87,7 +85,7 @@ var followConnetForm = `
                     </div>
                 </div>
                 <div class="row">
-                    <div class="col-md-12">
+                    <div class="col-md-6" style="margin-bottom: 12px;">
                         <div id="accordion1">
                             <div class="card">
                                 <a class="card-link card-header c-header" data-toggle="collapse" href="#collapseConnectionOf"
@@ -114,9 +112,7 @@ var followConnetForm = `
                             </div>
                         </div>
                     </div>
-                </div>
-                <div class="row">
-                    <div class="col-md-12">
+                    <div class="col-md-6" style="margin-bottom: 12px;">
                         <div id="accordion2">
                             <div class="card">
                                 <a class="card-link card-header c-header" data-toggle="collapse" href="#collapseLocation"   style="color:black">
@@ -144,7 +140,7 @@ var followConnetForm = `
                     </div>
                 </div>
                 <div class="row">
-                    <div class="col-md-12">
+                    <div class="col-md-6" style="margin-bottom: 12px;">
                         <div id="accordion3">
                             <div class="card">
                                 <a class="card-link card-header c-header" data-toggle="collapse" href="#collapseCurrComp" style="color:black">
@@ -170,9 +166,7 @@ var followConnetForm = `
                             </div>
                         </div>
                     </div>
-                </div>
-                <div class="row">
-                    <div class="col-md-12">
+                    <div class="col-md-6" style="margin-bottom: 12px;">
                         <div id="accordion4">
                             <div class="card">
                                 <a class="card-link card-header c-header" data-toggle="collapse" href="#collapsePastComp" style="color:black">
@@ -200,7 +194,7 @@ var followConnetForm = `
                     </div>
                 </div>
                 <div class="row">
-                    <div class="col-md-12">
+                    <div class="col-md-6" style="margin-bottom: 12px;">
                         <div id="accordion5">
                             <div class="card">
                                 <a class="card-link card-header c-header" data-toggle="collapse" href="#collapseIndustry" style="color:black">
@@ -226,9 +220,7 @@ var followConnetForm = `
                             </div>
                         </div>
                     </div>
-                </div>
-                <div class="row">
-                    <div class="col-md-12">
+                    <div class="col-md-6" style="margin-bottom: 12px;">
                         <div id="accordion6">
                             <div class="card">
                                 <a class="card-link card-header c-header" data-toggle="collapse" href="#collapseSchool" style="color:black">
@@ -256,7 +248,7 @@ var followConnetForm = `
                     </div>
                 </div>
                 <div class="row">
-                    <div class="col-md-12">
+                    <div class="col-md-6" style="margin-bottom: 12px;">
                         <div id="accordion7">
                             <div class="card">
                                 <a class="card-link card-header c-header" data-toggle="collapse" href="#collapseLanguage" style="color:black">

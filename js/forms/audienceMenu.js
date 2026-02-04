@@ -81,7 +81,11 @@ $('body').on('click','.openAudienceForm',function(){
     $('#afc-error-notice').html('')
     $('.newAudience-notice').hide()
     $('#afc-displayNewAudienceStatus').empty()
-    $('.newAudienceAction').attr('disabled', false)
+    if (typeof restoreAudienceCreationButton === 'function') {
+        restoreAudienceCreationButton();
+    } else {
+        $('.newAudienceAction').attr('disabled', false);
+    }
     
     $('#audienceCreationForm').modal({backdrop:'static', keyboard:false, show:true})
 })

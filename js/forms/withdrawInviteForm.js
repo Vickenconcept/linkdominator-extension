@@ -50,7 +50,7 @@ var withdrawInviteForm = `
                                     <span class="juez-tooltiptext">Delay between each follow in seconds.</span>
                                 </div>
                             </label>
-                            <input type="number" class="form-control shadow-none" data-name="Delay" id="wsi-delayFollowTime" placeholder="Ex: 30">
+                            <input type="number" class="form-control shadow-none" data-name="Delay" id="wsi-delayFollowTime" placeholder="Ex: 10">
                         </div>
                     </div>
                 </div>

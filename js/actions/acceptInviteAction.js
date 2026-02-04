@@ -1,3 +1,11 @@
+// Helper function to restore button state
+const restoreAcceptInviteButton = () => {
+    var $button = $('.acceptInviteAction');
+    var originalText = $button.data('original-text') || 'Start';
+    $button.attr('disabled', false)
+        .html(originalText)
+        .css('cursor', 'pointer');
+}
 
 $('.acceptInviteAction').click(function(){
     var ariStartP = $('#ari-startPosition'),
@@ -5,24 +13,16 @@ $('.acceptInviteAction').click(function(){
         ariDelay = $('#ari-delayFollowTime'),
         ariPeriod = $('#ari-period');
     var ariControlFiels = [ariDelay,ariTotal,ariPeriod];
-    console.log('ARI Start clicked', {
-        startPosition: ariStartP.val(),
-        total: ariTotal.val(),
-        delay: ariDelay.val(),
-        periodDays: ariPeriod.val()
-    });
 
     // validate fields
     if(ariTotal.val() =='' || ariDelay.val() =='' || ariPeriod.val() ==''){
         for(var i=0;i<ariControlFiels.length;i++){
             if(ariControlFiels[i].val() == ''){
                 $('#ari-error-notice').html(`${ariControlFiels[i].data('name')} field cannot be empty`)
-                console.warn('ARI validation: empty field', ariControlFiels[i].attr('id'))
             }
         }
     }else if(ariDelay.val() < 10){
         $('#ari-error-notice').html(`Delay minimum is 10`)
-        console.warn('ARI validation: delay below minimum', { delay: ariDelay.val() })
     }else{
         $('#ari-error-notice').html(``)
 
@@ -32,14 +32,17 @@ $('.acceptInviteAction').click(function(){
         // Show immediate progress to user
         $('.accept-invite-notice').show()
         $('#displayAcceptStatus').html('Fetching invitations...')
-
-        console.log('ARI fetching invitations', {
-            start: ariStartP,
-            count: ariTotal,
-            periodDays: ariPeriod.val(),
-            delaySeconds: ariDelay.val()
-        });
-        $(this).attr('disabled', true)
+        
+        // Store original button text and add loading state
+        var $button = $(this);
+        var originalText = $button.html();
+        $button.attr('disabled', true)
+            .html('<i class="fas fa-spinner fa-spin me-2"></i>Processing...')
+            .css('cursor', 'not-allowed');
+        
+        // Store original text for restoration
+        $button.data('original-text', originalText);
+        
         ariGetInvitations(ariStartP, ariTotal, ariPeriod.val(), ariDelay.val())
     }
 })
@@ -90,13 +93,11 @@ const ariGetInvitations = (ariStartP, ariTotal, ariPeriod, ariDelay, collected =
         url: `${voyagerApi}/relationships/invitationViews?count=20&includeInsights=true&q=receivedInvitation&start=${ariStartP}&type=SINGLES_ALL`,
         success: function(data){
             let elements = (data && data.elements) ? data.elements : [];
-            console.log('ARI fetch success', { pageStart: ariStartP, returned: elements.length });
 
             collected = collected.concat(elements);
 
             // If LinkedIn gave us fewer than 20, it means no more pages left
             if (elements.length < 20 || collected.length >= ariTotal) {
-                console.log('ARI finished fetching pages', { totalCollected: collected.length });
                 ariCheckDataMatchPeriod({ elements: collected }, ariPeriod, ariDelay);
             } else {
                 // Fetch next page
@@ -104,9 +105,8 @@ const ariGetInvitations = (ariStartP, ariTotal, ariPeriod, ariDelay, collected =
             }
         },
         error: function(error){
-            console.error('ARI fetch error', error)
             $('#displayAcceptStatus').html('Failed to fetch invitations. Please refresh the LinkedIn page and try again.');
-            $('.acceptInviteAction').attr('disabled', false)
+            restoreAcceptInviteButton()
         }
     })
 }
@@ -118,11 +118,6 @@ const ariCheckDataMatchPeriod = (res, ariPeriod, ariDelay) => {
     var currentTime = new Date();
     var totalAccept = $('#ari-totalAccept').val();
     var acceptData = [];
-    console.log('ARI filtering', {
-        returnedInvites: treePath ? treePath.length : 0,
-        periodDays: ariPeriod,
-        totalRequested: totalAccept
-    });
 
     if(treePath.length > 0){
         $.each(treePath, function(i, item){
@@ -151,14 +146,12 @@ const ariCheckDataMatchPeriod = (res, ariPeriod, ariDelay) => {
 
         // No matches for the chosen period
         if(dataTimeMatch.length === 0){
-            console.warn('ARI no matches older than period', { returnedInvites: treePath.length, periodDays: ariPeriod })
             $('#displayAcceptStatus').html(`Found ${treePath.length} invitations, but none older than ${ariPeriod} days. Try lowering days, increasing Start position, or increasing Total.`)
-            $('.acceptInviteAction').attr('disabled', false)
+            restoreAcceptInviteButton()
             return
         }
 
         // take only user total accept 
-        console.log('ARI matches found', { matches: dataTimeMatch.length });
         if(dataTimeMatch.length > totalAccept){
             for(var x=0;x<dataTimeMatch.length;x++){
                 if(acceptData.length == totalAccept){
@@ -169,20 +162,17 @@ const ariCheckDataMatchPeriod = (res, ariPeriod, ariDelay) => {
             }
             // Update UI to show processing count
             $('#displayAcceptStatus').html(`Processing ${acceptData.length} invitations...`)
-            console.log('ARI will process (trimmed)', { willProcess: acceptData.length });
             ariPostAccept(acceptData, ariDelay)
         }else{
             // Update UI to show processing count
             $('#displayAcceptStatus').html(`Processing ${dataTimeMatch.length} invitations...`)
-            console.log('ARI will process', { willProcess: dataTimeMatch.length });
             ariPostAccept(dataTimeMatch, ariDelay)
         }
 
     }else{
-        console.log('ARI no invitations returned from API')
         $('.accept-invite-notice').show()
         $('#displayAcceptStatus').html(`No match found!`)
-        $('.acceptInviteAction').attr('disabled', false)
+        restoreAcceptInviteButton()
     }
 }
 
@@ -193,7 +183,6 @@ const ariPostAccept = (res, ariDelay) => {
 
         $('.accept-invite-notice').show()
         $('#displayAcceptStatus').html('Starting acceptance...')
-        console.log('ARI starting acceptance loop', { total: res.length, delaySeconds: ariDelay });
 
         // automation table data setup
         displayAutomationRecord = `
@@ -232,7 +221,6 @@ const ariPostAccept = (res, ariDelay) => {
                         inviteActionType: "ACCEPT"
                     }),
                     success: function(data){
-                        console.log('ARI accepted', { index: i, name: res[i] ? res[i].name : undefined });
                         let treatedAsSuccess = false;
                         try {
                             if(data && data.value && data.value.statusCodeMap){
@@ -240,7 +228,6 @@ const ariPostAccept = (res, ariDelay) => {
                             }
                         } catch(e) {}
                         if(!treatedAsSuccess){
-                            console.warn('ARI warning: Missing statusCodeMap, treating as success based on HTTP 200');
                             treatedAsSuccess = true;
                         }
                         if(treatedAsSuccess){
@@ -253,7 +240,6 @@ const ariPostAccept = (res, ariDelay) => {
                             `;
                             $('#displayAcceptStatus').append(displayLi)
                             if($('#ari-activate-pm').prop('checked') == true && $('#ari-personalMessage').val() != ''){
-                                console.log('ARI messaging enabled, sending DM', { to: res[i].name });
                                 var inviteeData = {
                                     // Existing fields used elsewhere
                                     fullName: res[i].name,
@@ -270,7 +256,6 @@ const ariPostAccept = (res, ariDelay) => {
                                 }
                                 ariSendPersonalMessage(inviteeData)
                             }
-                            console.log( new Date())
                             // update automation count done and time remained
                             $('#ari-numbered').text(`${x +1}/${res.length}`)
                             $('#ari-remained-time').text(`${remainedTime(ariDelay, res.length - (x +1))}`)
@@ -279,15 +264,14 @@ const ariPostAccept = (res, ariDelay) => {
                         }
                     },
                     error: function(error){
-                        console.error('ARI accept error', { index: i, error: error })
-                        $('.acceptInviteAction').attr('disabled', false)
+                        restoreAcceptInviteButton()
                     }
                 })
                 i++;
                 if(i < res.length)
                     ariLooper()
                 if(i >= res.length){
-                    $('.acceptInviteAction').attr('disabled', false)
+                    restoreAcceptInviteButton()
                     let module = 'Invitation accepted';
                     sendStats(x, module)
 
@@ -302,7 +286,6 @@ const ariPostAccept = (res, ariDelay) => {
                         summaryMsg += ` Only ${res.length} matched your filter (requested ${requestedTotal}).`;
                     }
                     $('#displayAcceptStatus').html(summaryMsg)
-                    console.log('ARI completed acceptance loop', { totalAccepted: x });
                     // update automation status
                     $('#ari-status').text('Completed')
                     setTimeout(function(){
@@ -316,7 +299,7 @@ const ariPostAccept = (res, ariDelay) => {
     }else{
         $('.accept-invite-notice').show()
         $('#displayAcceptStatus').html(`No match found!`)
-        $('.acceptInviteAction').attr('disabled', false)
+        restoreAcceptInviteButton()
     }
 }
 
@@ -325,7 +308,6 @@ const ariSendPersonalMessage = async (inviteeData) => {
     var message = $('#ari-personalMessage').val();
 
     newMessage = changeMessageVariableNames(message, inviteeData)
-    console.log('ARI sending DM', { to: inviteeData.fullName, messageLength: newMessage.length });
 
     if(inviteeData.connectId.includes('urn:li:fs_miniProfile:')){
         var newConnectId = inviteeData.connectId.replace('urn:li:fs_miniProfile:','')
@@ -359,7 +341,6 @@ const ariSendPersonalMessage = async (inviteeData) => {
         }),
         success: function(data){
             if(data.value.createdAt){
-                console.log('ARI DM sent', { to: inviteeData.fullName });
                 $('#displayAcceptStatus').empty()
                 displayLi = `
                     <li>Message sent to: <b>${inviteeData.fName}</b></li>
@@ -369,8 +350,7 @@ const ariSendPersonalMessage = async (inviteeData) => {
             }
         },
         error: function(error){
-            console.error('ARI DM error', error)
-            $('.acceptInviteAction').attr('disabled', false)
+            restoreAcceptInviteButton()
         }
     })
 }
@@ -379,9 +359,8 @@ const ariSendPersonalMessage = async (inviteeData) => {
 $('body').on('click','#ari-bot-action',function(){
     clearTimeout(timeOutAcceptInvite);
     $('#ari-status').text('Stopped')
-    $('.acceptInviteAction').attr('disabled', false)
+    restoreAcceptInviteButton()
     setTimeout(function(){
         $('#accept-invites-record').remove()
     }, 5000)
-    console.log('ARI stopped by user')
 })

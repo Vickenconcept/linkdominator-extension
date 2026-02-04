@@ -68,6 +68,15 @@ const makeLinkedInApiRequest = async (url, options = {}, retryCount = 0) => {
     }
 };
 
+// Helper function to restore button state
+const restoreAudienceCreationButton = () => {
+    var $button = $('.newAudienceAction');
+    var originalText = $button.data('original-text') || 'Add';
+    $button.attr('disabled', false)
+        .html(originalText)
+        .css('cursor', 'pointer');
+}
+
 // Enhanced error handling for audience creation
 const handleAudienceCreationError = (error, context) => {
     console.error(`Audience creation error in ${context}:`, error);
@@ -98,7 +107,7 @@ const handleAudienceCreationError = (error, context) => {
     `);
     
     // Re-enable the action button
-    $('.newAudienceAction').attr('disabled', false);
+    restoreAudienceCreationButton();
     
     // Show notification if available
     if (typeof NotificationSystem !== 'undefined') {
@@ -108,9 +117,12 @@ const handleAudienceCreationError = (error, context) => {
 
 // Global retry function for audience creation
 window.retryAudienceCreation = function() {
-    console.log('Retrying audience creation...');
     $('#afc-displayNewAudienceStatus').html('<i class="fas fa-spinner fa-spin"></i> Retrying...');
-    $('.newAudienceAction').attr('disabled', true);
+    var $button = $('.newAudienceAction');
+    var originalText = $button.data('original-text') || 'Add';
+    $button.attr('disabled', true)
+        .html('<i class="fas fa-spinner fa-spin me-2"></i>Processing...')
+        .css('cursor', 'not-allowed');
     
     // Restart the audience creation process
     setTimeout(() => {
@@ -141,7 +153,7 @@ window.stopAudienceSearch = function() {
     $('#afc-displayNewAudienceStatus').html(
         `<i class="fas fa-stop"></i> Search stopped. Found ${audConnectionItems.length} connections.`
     );
-    $('.newAudienceAction').attr('disabled', false);
+    restoreAudienceCreationButton();
     
     // Add buttons without inline handlers
     $('#afc-displayNewAudienceStatus').append(`
@@ -203,7 +215,7 @@ window.finishWithCurrentResults = function() {
         $('#afc-displayNewAudienceStatus').html(
             '<i class="fas fa-info-circle"></i> No connections found. Try different search criteria.'
         );
-        $('.newAudienceAction').attr('disabled', false);
+        restoreAudienceCreationButton();
     }
 };
 
@@ -230,7 +242,7 @@ const fsGetConnections = async () => {
             $('#afc-displayNewAudienceStatus').html(
                 `<i class="fas fa-info-circle"></i> Maximum search depth reached. Found ${audConnectionItems.length} connections.`
             );
-            $('.newAudienceAction').attr('disabled', false);
+            restoreAudienceCreationButton();
             window.searchActive = false;
             return;
         }
@@ -570,7 +582,7 @@ const fsGetConnections = async () => {
                     $('#afc-displayNewAudienceStatus').html(
                         '<i class="fas fa-info-circle"></i> No results found, change your search criteria and try again!'
                     );
-                    $('.newAudienceAction').attr('disabled', false);
+                    restoreAudienceCreationButton();
 
                 } else if (((elements.length > 1 && (!elements[1].items || !elements[1].items.length)) || 
                            (elements.length == 1 && (!elements[0].items || !elements[0].items.length))) && 
@@ -614,7 +626,7 @@ const fsGetConnections = async () => {
                 $('#afc-displayNewAudienceStatus').html(
                     '<i class="fas fa-info-circle"></i> No results found, change your search criteria and try again!'
                 );
-                $('.newAudienceAction').attr('disabled', false);
+                restoreAudienceCreationButton();
             }
             
             // Reset retry count on success
@@ -778,8 +790,21 @@ $('.newAudienceAction').click(function(){
         afcDelay = $('#afs-delayTime'),
         afcAudienceName = $('#audience-name'),
         afcPositiveKeywords = $('#afs-positiveKeywords');
-    var afcFieldList = [afcDelay,afcTotal,afcAudienceName,afcPositiveKeywords];
     var audienceType = '';
+
+    // Check which tab is active to determine if positive keywords are required
+    var isFromSearch = $('#nav-link-fsearch').hasClass('active');
+    var isFromPost = $('#nav-link-fpost').hasClass('active');
+    var isFromNetwork = $('#nav-link-network').hasClass('active');
+    
+    // Positive keywords are required for search and network, but optional for post
+    var isPositiveKeywordsRequired = isFromSearch || isFromNetwork;
+    
+    // Build field list - only include positive keywords if it's required
+    var afcFieldList = [afcDelay, afcTotal, afcAudienceName];
+    if (isPositiveKeywordsRequired) {
+        afcFieldList.push(afcPositiveKeywords);
+    }
 
     // field validation
     var isTotalEmpty = afcTotal.val()=='' || afcTotal.val().trim()=='';
@@ -787,7 +812,10 @@ $('.newAudienceAction').click(function(){
     var isAudienceNameEmpty = afcAudienceName.val()=='' || afcAudienceName.val().trim()=='';
     var isPositiveKeywordsEmpty = afcPositiveKeywords.val()=='' || afcPositiveKeywords.val().trim()=='';
     
-    if(isTotalEmpty || isDelayEmpty || isAudienceNameEmpty || isPositiveKeywordsEmpty){
+    // Check required fields (positive keywords only if required)
+    var hasRequiredFieldEmpty = isTotalEmpty || isDelayEmpty || isAudienceNameEmpty || (isPositiveKeywordsRequired && isPositiveKeywordsEmpty);
+    
+    if(hasRequiredFieldEmpty){
         for(let i=0; i<afcFieldList.length; i++){
             var fieldValue = afcFieldList[i].val();
             if(fieldValue == '' || (typeof fieldValue === 'string' && fieldValue.trim() == '')){
@@ -805,6 +833,16 @@ $('.newAudienceAction').click(function(){
         afcTotal = afcTotal.val() < 10 ? 10 : afcTotal.val()
         afcStartP.val() == '' ? afcStartP.val(0) : afcStartP.val()
 
+        // Store original button text and add loading state
+        var $button = $(this);
+        var originalText = $button.html();
+        $button.attr('disabled', true)
+            .html('<i class="fas fa-spinner fa-spin me-2"></i>Processing...')
+            .css('cursor', 'not-allowed');
+        
+        // Store original text for restoration
+        $button.data('original-text', originalText);
+
         if($('#nav-link-network').hasClass('active')){
             if($('#afs-connFirstCheck').prop('checked') == false){
                 $('#afs-connFirstCheck').prop('checked', true)
@@ -814,7 +852,6 @@ $('.newAudienceAction').click(function(){
             $('#afc-displayNewAudienceStatus').html('Scanning. Please wait...')
 
             audienceType = 'myNetwork';
-            $(this).attr('disabled', true);
 
             queryParams += `network:List(F),`
 
@@ -1162,7 +1199,7 @@ $('.newAudienceAction').click(function(){
                     afcPostId = normalizeLinkedInPostUrl(postIdValue);
                     if (!afcPostId) {
                         $('#afc-displayNewAudienceStatus').html('<span style="color: #dc3545;">Invalid post URL or ID format.</span>');
-                        $('.newAudienceAction').attr('disabled', false);
+                        restoreAudienceCreationButton();
                         return;
                     }
                     afcGetLikedProfiles(afcPostId,afcTotal,afcDelay.val(), afcAudienceName.val(),audienceType);
@@ -1181,7 +1218,7 @@ $('.newAudienceAction').click(function(){
                     let commentPostUrl = normalizeLinkedInPostUrl(commentPostIdValue);
                     if (!commentPostUrl) {
                         $('#afc-displayNewAudienceStatus').html('<span style="color: #dc3545;">Invalid post URL or ID format.</span>');
-                        $('.newAudienceAction').attr('disabled', false);
+                        restoreAudienceCreationButton();
                         return;
                     }
                     afcGetCommentProfiles(commentPostUrl, afcTotal, afcStartP.val(), afcDelay.val(), afcAudienceName.val(), audienceType);
@@ -1839,7 +1876,7 @@ const afcGetLikedProfiles = async (postUrl, afcTotal, afcDelay, afcAudienceName,
 
         if (!profiles.length) {
             $('#afc-displayNewAudienceStatus').html('No likers found for this post.');
-            $('.newAudienceAction').attr('disabled', false);
+            restoreAudienceCreationButton();
             return;
         }
 
@@ -1853,14 +1890,14 @@ const afcGetLikedProfiles = async (postUrl, afcTotal, afcDelay, afcAudienceName,
         
         if (!profiles.length) {
             $('#afc-displayNewAudienceStatus').html('No profiles matched your filters.');
-            $('.newAudienceAction').attr('disabled', false);
+            restoreAudienceCreationButton();
             return;
         }
 
         const connections = transformProfilesToConnections(profiles, afcAudienceName);
         if (!connections.length) {
             $('#afc-displayNewAudienceStatus').html('No connections could be created from the returned data.');
-            $('.newAudienceAction').attr('disabled', false);
+            restoreAudienceCreationButton();
             return;
         }
 
@@ -1877,7 +1914,7 @@ const afcGetLikedProfiles = async (postUrl, afcTotal, afcDelay, afcAudienceName,
     } catch (error) {
         handleAudienceCreationError(error, 'post-likers');
     } finally {
-        $('.newAudienceAction').attr('disabled', false);
+        restoreAudienceCreationButton();
     }
 }
 
@@ -1941,7 +1978,7 @@ const afcGetCommentProfiles = async (postUrl, afcTotal, afcStartP, afcDelay, afc
 
         if (!profiles.length) {
             $('#afc-displayNewAudienceStatus').html('<span style="color: #856404;">No commenters found for this post.</span>');
-            $('.newAudienceAction').attr('disabled', false);
+            restoreAudienceCreationButton();
             return;
         }
         
@@ -1958,7 +1995,7 @@ const afcGetCommentProfiles = async (postUrl, afcTotal, afcStartP, afcDelay, afc
         
         if (!profiles.length) {
             $('#afc-displayNewAudienceStatus').html('No profiles matched your filters.');
-            $('.newAudienceAction').attr('disabled', false);
+            restoreAudienceCreationButton();
             return;
         }
 
@@ -1969,7 +2006,7 @@ const afcGetCommentProfiles = async (postUrl, afcTotal, afcStartP, afcDelay, afc
         
         if (!connections || connections.length === 0) {
             $('#afc-displayNewAudienceStatus').html('<span style="color: #856404;">No valid profiles to process after transformation.</span>');
-            $('.newAudienceAction').attr('disabled', false);
+            restoreAudienceCreationButton();
             return;
         }
         
@@ -1999,7 +2036,7 @@ const afcGetCommentProfiles = async (postUrl, afcTotal, afcStartP, afcDelay, afc
         $('#afc-displayNewAudienceStatus').html(`<span style="color: #dc3545;">Error: ${errorMessage}</span>`);
         handleAudienceCreationError(error, 'post-comments');
     } finally {
-        $('.newAudienceAction').attr('disabled', false);
+        restoreAudienceCreationButton();
     }
 }
 
@@ -2376,7 +2413,7 @@ const afcEventAttendees = async () => {
                     $('#afc-displayNewAudienceStatus').html(
                         '<i class="fas fa-info-circle"></i> No event attendees found, change your search criteria and try again!'
                     );
-                    $('.newAudienceAction').attr('disabled', false);
+                    restoreAudienceCreationButton();
 
                 } else if (!elements[1].items.length && audConnectionItems.length) {
                     $('#afc-displayNewAudienceStatus').html(
@@ -2394,7 +2431,7 @@ const afcEventAttendees = async () => {
                 $('#afc-displayNewAudienceStatus').html(
                     '<i class="fas fa-info-circle"></i> No event attendees found, change your search criteria and try again!'
                 );
-                $('.newAudienceAction').attr('disabled', false);
+                restoreAudienceCreationButton();
             }
             
             // Reset retry count on success
@@ -2573,7 +2610,7 @@ const afcSetPhantomConnectionData = (totalResultCount) => {
 
     if (!profiles.length) {
         $('#afc-displayNewAudienceStatus').html('No profiles matched your filters.');
-        $('.newAudienceAction').attr('disabled', false);
+        restoreAudienceCreationButton();
         return;
     }
 
@@ -2582,7 +2619,7 @@ const afcSetPhantomConnectionData = (totalResultCount) => {
     
     if (!connections.length) {
         $('#afc-displayNewAudienceStatus').html('No connections could be created from the returned data.');
-        $('.newAudienceAction').attr('disabled', false);
+        restoreAudienceCreationButton();
         return;
     }
 
@@ -3561,7 +3598,7 @@ const newAudienceList = async (audienceData, con, memberBadgesData, networkInfoD
         $('#afc-displayNewAudienceStatus').empty();
         
         // Re-enable the action button
-        $('.newAudienceAction').attr('disabled', false);
+        restoreAudienceCreationButton();
         
         // Close the form
         $('#audienceCreationForm').modal('hide');

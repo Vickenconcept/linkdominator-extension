@@ -300,8 +300,6 @@ const getUserProfile = async () => {
         window.linkedinId = linkedinId;
         profileUrn = rootPath.entityUrn.replace('urn:li:fs_miniProfile:','');
         
-        console.log('✅ LinkedIn ID set:', linkedinId);
-        console.log('✅ Window LinkedIn ID set:', window.linkedinId);
         
         connectionStat();
         userPermissions();
@@ -439,10 +437,12 @@ const profileViewStat = async (totalConnection, numTotalSentInvitations, publicI
         let changePercentage = realPath[realPoint].changePercentage
         
 
-        if (parseInt(changePercentage) < 0)
-          profileView = changePercentage
-        else
-          profileView = '+'+ changePercentage
+        // Ensure changePercentage is a valid number
+        changePercentage = parseFloat(changePercentage) || 0;
+        
+        // Store as number (negative values are valid - means views decreased)
+        // The dashboard will format it with proper sign and color
+        profileView = changePercentage;
       }
       sendMiniStats(totalConnection, numTotalSentInvitations, profileView)
     },
@@ -487,7 +487,6 @@ const userPermissions = async () => {
       }
     }
     
-    console.log('🔑 Checking permissions with LinkedIn ID:', currentLinkedInId);
     
     const response = await fetch(`${filterApi}/accessCheck`, {
       method: 'GET',

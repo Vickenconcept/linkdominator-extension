@@ -441,7 +441,6 @@ window.displaySessionExpiredError = function(error, statusElementId) {
 
 // Unified audience fetching function to avoid duplicates across modules
 window.fetchAudiencesFromAPI = async () => {
-    console.log('🔍 fetchAudiencesFromAPI called...');
     
     // Check if LinkedIn ID is available
     var publicId = $('#me-publicIdentifier').val();

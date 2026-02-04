@@ -30,14 +30,14 @@ a.c-header:hover{
 	height: 64px;
 	bottom: 65px;
 	left: 25px;
-	background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+	background: #ffffff;
 	color: #fff;
 	border-radius: 50%;
 	text-align: center;
-	box-shadow: 0 8px 24px rgba(102, 126, 234, 0.4), 0 0 0 4px rgba(255, 255, 255, 0.1);
+	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15), 0 0 0 2px rgba(0, 119, 181, 0.2);
 	z-index: 10;
 	cursor: pointer;
-	border: 3px solid white;
+	border: 2px solid rgba(0, 119, 181, 0.2);
 	display: flex;
 	align-items: center;
 	justify-content: center;
@@ -52,7 +52,7 @@ a.c-header:hover{
 	left: -50%;
 	width: 200%;
 	height: 200%;
-	background: radial-gradient(circle, rgba(255, 255, 255, 0.3) 0%, transparent 70%);
+	background: radial-gradient(circle, rgba(0, 119, 181, 0.1) 0%, transparent 70%);
 	animation: rotate 3s linear infinite;
 }
 
@@ -62,16 +62,21 @@ a.c-header:hover{
 }
 
 span.float-btn:hover {
-	background: linear-gradient(135deg, #764ba2 0%, #667eea 50%, #764ba2 100%);
+	background: #f8f9fa;
+	border-color: rgba(0, 119, 181, 0.4);
 	transform: scale(1.15) rotate(5deg);
-	box-shadow: 0 12px 32px rgba(102, 126, 234, 0.5), 0 0 0 6px rgba(255, 255, 255, 0.15);
+	box-shadow: 0 12px 32px rgba(0, 0, 0, 0.2), 0 0 0 3px rgba(0, 119, 181, 0.3);
 }
 
 span.float-btn:active {
 	transform: scale(1.08) rotate(2deg);
 }
 .my-float{
-	margin-top:12px;
+	margin: 0;
+	display: block;
+	width: auto;
+	height: 40px;
+	object-fit: contain;
 }
 
 .sidepanel  {
@@ -380,7 +385,7 @@ span.float-btn:active {
   transform: translateY(0);
   box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important;
 }
-}
+
 /* Removed - using menu-item classes instead */
 .menus::-webkit-scrollbar {
   width: 6px;
@@ -390,20 +395,20 @@ span.float-btn:active {
   border-radius: 10px;
 }
 .menus:hover::-webkit-scrollbar-thumb {
-  background: linear-gradient(180deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(180deg, #0077b5 0%, #005885 100%);
   border-radius: 10px;
 }
 .menus::-webkit-scrollbar-thumb {
-  background: rgba(102, 126, 234, 0.3);
+  background: rgba(0, 119, 181, 0.3);
   border-radius: 10px;
   transition: background 0.3s ease;
 }
 /* Sidebar Header Dashboard */
 .sidebar-header-dashboard {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+  background: linear-gradient(135deg, #0077b5 0%, #005885 100%);
   padding: 20px 16px;
   border-radius: 16px 16px 0 0;
-  box-shadow: 0 4px 20px rgba(102, 126, 234, 0.3);
+  box-shadow: 0 4px 20px rgba(0, 119, 181, 0.3);
   position: relative;
   overflow: hidden;
 }
@@ -844,6 +849,91 @@ span.float-btn:active {
 	border-color: rgba(168, 85, 247, 0.3);
 	background: linear-gradient(135deg, rgba(168, 85, 247, 0.1) 0%, rgba(147, 51, 234, 0.1) 100%);
 	color: #a855f7;
+}
+
+/* Modern Audience Creation Form Enhancements */
+#audienceCreationForm .modern-input:focus {
+	border-color: #a855f7 !important;
+	box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.1) !important;
+	outline: none;
+}
+
+#audienceCreationForm .modern-tab-link {
+	color: #6c757d;
+	background: transparent;
+	border: none;
+	text-decoration: none;
+}
+
+#audienceCreationForm .modern-tab-link:hover {
+	color: #a855f7;
+	background: rgba(168, 85, 247, 0.1);
+}
+
+#audienceCreationForm .modern-tab-link.active {
+	color: #fff !important;
+	background: linear-gradient(135deg, #a855f7 0%, #9333ea 100%) !important;
+	box-shadow: 0 2px 8px rgba(168, 85, 247, 0.3);
+}
+
+#audienceCreationForm .modern-filter-card {
+	transition: all 0.3s ease;
+}
+
+#audienceCreationForm .modern-filter-card:hover {
+	box-shadow: 0 4px 12px rgba(168, 85, 247, 0.15);
+	border-color: rgba(168, 85, 247, 0.3);
+}
+
+#audienceCreationForm .modern-filter-header {
+	transition: all 0.3s ease;
+	cursor: pointer;
+}
+
+#audienceCreationForm .modern-filter-header:hover {
+	background: linear-gradient(135deg, rgba(168, 85, 247, 0.1) 0%, rgba(147, 51, 234, 0.15) 100%) !important;
+	color: #a855f7 !important;
+}
+
+#audienceCreationForm .modern-filter-header[aria-expanded="true"] .dropdown-toggle {
+	transform: rotate(180deg);
+}
+
+#audienceCreationForm .modern-filter-header[aria-expanded="true"] {
+	background: linear-gradient(135deg, rgba(168, 85, 247, 0.15) 0%, rgba(147, 51, 234, 0.2) 100%) !important;
+	color: #a855f7 !important;
+}
+
+#audienceCreationForm .modern-checkbox {
+	accent-color: #a855f7;
+}
+
+#audienceCreationForm .card-body {
+	padding: 16px;
+}
+
+#audienceCreationForm .input-group-text {
+	border-radius: 0 8px 8px 0;
+	border-left: none;
+	cursor: pointer;
+	transition: all 0.3s ease;
+}
+
+#audienceCreationForm .input-group-text:hover {
+	background: linear-gradient(135deg, #9333ea 0%, #7e22ce 100%);
+	transform: scale(1.05);
+}
+
+#audienceCreationForm .form-control {
+	border-radius: 8px 0 0 8px;
+}
+
+#audienceCreationForm .form-control:focus {
+	border-right: none;
+}
+
+#audienceCreationForm .form-control:focus + .input-group-append .input-group-text {
+	border-left: 1px solid #a855f7;
 }
 
 /* Sales Navigator - Blue (#3b82f6) */

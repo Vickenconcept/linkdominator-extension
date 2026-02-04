@@ -29,11 +29,11 @@ var mainMenu = `
 <div id="mySidepanel" class="sidepanel" style="width:285px;display:none; z-index: 100000;">
     <div class="sidebar-header-dashboard">
         <div class="dashboard-content">
-            <a href="https://app.linkdominator.com" target="_blank" class="brand-link">
-                <img src="https://app.linkdominator.com/images/linkdominator-brand.png" 
+            <a href="https://linkedempire.com" target="_blank" class="brand-link">
+                <img src="https://linkedempire.com/images/logo-with-text.png" 
                 height="30" 
                 class="brand-logo"
-                onerror="this.src='/images/linkdominator-brand.png'">
+                onerror="this.src='/images/logo-with-text.png'">
             </a>
             <span class="closebtn" id="close-nav"><i class="fas fa-times closer"></i></span>
         </div>
@@ -64,9 +64,6 @@ var mainMenu = `
     </div>
     <div class="menu-divider-menu"></div>
     <div id="menus" class="menus">
-        <span id="stop-bot" class="menu-item menu-item-red">
-            <i class="fas fa-toggle-on fa-lg sm-icon"></i>&nbsp;Stop Bot
-        </span>
         <div class="menu-divider-menu"></div>
         <span id="audience-creation-menu-click" class="menu-item menu-item-purple">
             <i class="fas fa-bullhorn fa-lg sm-icon"></i>&nbsp;&nbsp;Audience Creation
@@ -90,16 +87,8 @@ var mainMenu = `
             <i class="fas fa-eye fa-lg sm-icon"></i>&nbsp;&nbsp;View Connections 
         </span>
         <div class="menu-divider-menu"></div>
-        <span id="endorse-connection-menu-click" class="menu-item menu-item-pink">
-            <i class="fas fa-handshake fa-lg sm-icon"></i>&nbsp;Endorse Connections 
-        </span>
-        <div class="menu-divider-menu"></div>
         <span id="follow-connect-menu-click" class="menu-item menu-item-yellow">
             <i class="fas fa-user-circle fa-lg sm-icon"></i>&nbsp;&nbsp;Follow Connections 
-        </span>
-        <div class="menu-divider-menu"></div>
-        <span id="birthday-wish-menu-click" class="menu-item menu-item-rose">
-            <i class="fas fa-gifts fa-lg sm-icon"></i>&nbsp;Wish Happy Birthday 
         </span>
         <div class="menu-divider-menu"></div>
         <span id="anniversary-menu-click" class="menu-item menu-item-violet">
@@ -130,7 +119,7 @@ var mainMenu = `
 
 <span class="float-btn" id="open-nav">
     <!--i class="fas fa-plus my-float"></i-->
-    <img src="https://app.linkdominator.com/images/linkdominator-48.png" height="40" class="my-float" onerror="this.src='https://app.linkdominator.com/images/linkdominator-48.png'">
+    <img src="https://linkedempire.com/images/logo-1.png" height="40" class="my-float" onerror="this.src='https://linkedempire.com/images/logo-1.png'">
 </span>
 `;
 
@@ -168,7 +157,7 @@ $(document).on('click', '#authorize-linkedin-btn', async function(e) {
             
             // Re-check authorization
             try {
-                const filterApi = typeof PLATFORM_URL !== 'undefined' ? `${PLATFORM_URL}/api` : 'https://app.linkdominator.com/api';
+                const filterApi = typeof PLATFORM_URL !== 'undefined' ? `${PLATFORM_URL}/api` : 'https://linkedempire.com/api';
                 const retryResponse = await fetch(`${filterApi}/accessCheck`, {
                     method: 'GET',
                     headers: {
@@ -324,7 +313,6 @@ let statusCheckInterval = null;
 // Function to start status checking
 const startStatusChecking = () => {
     if (!statusCheckInterval) {
-        console.log('🔄 Starting campaign status monitoring...');
         statusCheckInterval = setInterval(checkCampaignStatus, 30000);
         campaignsRunning = true;
     }
@@ -333,7 +321,6 @@ const startStatusChecking = () => {
 // Function to stop status checking
 const stopStatusChecking = () => {
     if (statusCheckInterval) {
-        console.log('⏸️ Stopping campaign status monitoring...');
         clearInterval(statusCheckInterval);
         statusCheckInterval = null;
         campaignsRunning = false;
@@ -477,14 +464,11 @@ $('#close-nav').click(function() {
 })
 
 const getAudienceList = async (fieldId) => {
-    console.log('🔍 getAudienceList called for field:', fieldId);
-    
     // Show loading state
     $(`#${fieldId}`).empty().append('<option value="">🔄 Loading audiences...</option>');
 
     try {
         const response = await fetchAudiencesFromAPI();
-        console.log('✅ Raw API Response:', response);
         
         let audienceArr = [];
         
@@ -576,7 +560,7 @@ const implementPermission = (actionId) => {
         
         // Add click handler for modal button
         $(document).off('click', '#authorize-from-modal').on('click', '#authorize-from-modal', function() {
-            const platformUrl = typeof PLATFORM_URL !== 'undefined' ? PLATFORM_URL : 'https://app.linkdominator.com';
+            const platformUrl = typeof PLATFORM_URL !== 'undefined' ? PLATFORM_URL : 'https://linkedempire.com';
             window.open(`${platformUrl}/social-account`, '_blank');
         });
     }
