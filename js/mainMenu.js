@@ -25,543 +25,165 @@ window.addEventListener('error', function(event) {
     console.error('A system error occurred. Please refresh the page.');
 });
 
+var ldLogoSrc = 'https://linkedempire.com/images/logo-1.png';
+try {
+    if (chrome && chrome.runtime && typeof chrome.runtime.getURL === 'function') {
+        ldLogoSrc = chrome.runtime.getURL('images/logo-1.png');
+    }
+} catch (_e) {}
+
 var mainMenu = `
-<div id="mySidepanel" class="sidepanel" style="width:285px;display:none; z-index: 100000;">
-    <div class="sidebar-header-dashboard">
-        <div class="dashboard-content">
-            <a href="https://linkedempire.com" target="_blank" class="brand-link">
-                <img src="https://linkedempire.com/images/logo-with-text.png" 
-                height="30" 
-                class="brand-logo"
-                onerror="this.src='/images/logo-with-text.png'">
-            </a>
-            <span class="closebtn" id="close-nav"><i class="fas fa-times closer"></i></span>
-        </div>
-        <div class="dashboard-stats">
-            <div class="stat-item">
-                <i class="fas fa-rocket"></i>
-                <span class="stat-label">Power Mode</span>
+<div id="mySidepanel" class="sidepanel ld-empire-panel" style="width:285px;display:none; z-index: 2147483645;">
+    <div class="ld-panel-top">
+        <div class="ld-brand-row">
+            <div class="ld-mark-wrap"><img id="ld-header-mark" src="${ldLogoSrc}" alt="" /></div>
+            <div class="ld-identity">
+                <div class="profile-section" id="ld-profile-section" style="display:none;">
+                    <a href="${LINKEDIN_URL}/in/me" id="profileSpot" class="profile-link"></a>
+                </div>
+                <div id="ld-identity-text" style="min-width:0;">
+                    <div class="ld-identity-name" id="ld-identity-name">LinkedEmpire</div>
+                    <div class="ld-identity-sub" id="ld-identity-sub">Sign in to start</div>
+                </div>
+            </div>
+            <div class="ld-header-actions">
+                <span id="le2-li-dot" style="display:none;" title="LinkedIn status"></span>
+                <button type="button" class="ld-header-signout" id="ld-header-signout" style="display:none;">Sign out</button>
+                <button type="button" class="ld-close-btn" id="close-nav" aria-label="Close">&times;</button>
             </div>
         </div>
     </div>
-    <div class="profile-section">
-        <a href="${LINKEDIN_URL}/in/me" id="profileSpot" class="profile-link"></a>
-    </div>
-    <div class="menu-divider-menu"></div>
-    <!-- Authorization Button - Shows when user is not authorized -->
-    <div id="authorize-button-container" style="display: none; padding: 12px 16px; margin: 8px 16px; background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%); border-radius: 8px; box-shadow: 0 2px 8px rgba(255, 107, 107, 0.3);">
-        <div style="color: white; font-size: 12px; font-weight: 600; margin-bottom: 8px; text-align: center;">
-            <i class="fas fa-exclamation-triangle" style="margin-right: 6px;"></i>
-            Authorization Required
+    <div id="ld-profile-ids" style="display:none;"></div>
+    <div id="ld-v2-account" class="ld-account-card">
+        <div class="ld-account-title" id="ld-v2-account-title">Account</div>
+        <div id="ld-v2-status">Sign in to connect your LinkedIn account.</div>
+        <div id="ld-v2-li-badge" style="display:none;"></div>
+        <div id="ld-v2-error" style="display:none;"></div>
+        <div id="ld-v2-signed-out">
+            <input id="ld-v2-email" class="ld-input" type="email" placeholder="Email" />
+            <input id="ld-v2-password" class="ld-input" type="password" placeholder="Password" />
+            <button id="ld-v2-signin-btn" type="button" class="ld-btn-primary">Sign in</button>
         </div>
-        <button id="authorize-linkedin-btn" style="width: 100%; padding: 10px; background: white; color: #0077b5; border: none; border-radius: 6px; font-weight: 600; font-size: 13px; cursor: pointer; transition: all 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-            <i class="fas fa-sync-alt" style="margin-right: 6px;"></i>
-            Sync & Authorize
-        </button>
-        <div style="color: white; font-size: 11px; margin-top: 8px; text-align: center; opacity: 0.9;">
-            Click to sync your LinkedIn account with the platform
+        <div id="ld-v2-signed-in" style="display:none;">
+            <button id="ld-v2-detect-btn" type="button" class="ld-btn-primary" style="margin-bottom:8px;">Detect &amp; save LinkedIn session</button>
+            <a id="ld-v2-integrations-link" class="ld-btn-secondary" href="#" target="_blank" rel="noopener noreferrer">Open CRM Integrations</a>
+            <button id="ld-v2-verify-btn" type="button" class="ld-btn-ghost" style="margin-bottom:8px;">Verify connection</button>
+            <details style="margin-bottom:8px;font-size:10px;color:#64748b;">
+                <summary style="cursor:pointer;margin-bottom:6px;">Paste session cookie manually</summary>
+                <textarea id="ld-v2-liat" class="ld-input" rows="2" placeholder="Paste LinkedIn session cookie" style="resize:vertical;margin-bottom:6px;"></textarea>
+                <button id="ld-v2-paste-btn" type="button" class="ld-btn-primary">Save pasted cookie</button>
+            </details>
+            <button id="ld-v2-signout-btn" type="button" class="ld-btn-ghost">Sign out</button>
         </div>
+        <div id="ld-v2-connected-bar" style="display:none;"></div>
     </div>
-    <div class="menu-divider-menu"></div>
-    <div id="menus" class="menus">
-        <div class="menu-divider-menu"></div>
-        <span id="audience-creation-menu-click" class="menu-item menu-item-purple">
-            <i class="fas fa-bullhorn fa-lg sm-icon"></i>&nbsp;&nbsp;Audience Creation
-        </span>
-        <div class="menu-divider-menu"></div>
-        <span id="campaign-menu-click" class="menu-item menu-item-orange">
-            <i class="fas fa-flag fa-lg sm-icon"></i>&nbsp;&nbsp;Campaign
-            <i class="fas fa-circle fa-sm" id="status-indicator" style="color: #ccc; margin-left: 8px; font-size: 8px; vertical-align: middle;" title="Campaign Status: Inactive"></i>
-        </span>
-        
-        <div class="menu-divider-menu"></div>
-        <span id="message-connect-menu-click" class="menu-item menu-item-teal">
-            <i class="fas fa-paper-plane fa-lg sm-icon"></i>&nbsp;&nbsp;Message All Connections 
-        </span>
-        <div class="menu-divider-menu"></div>
-        <span id="message-target-menu-click" class="menu-item menu-item-green">
-            <i class="fas fa-bullseye fa-lg sm-icon"></i>&nbsp;&nbsp;Message Targeted Users 
-        </span>
-        <div class="menu-divider-menu"></div>
-        <span id="view-connection-menu-click" class="menu-item menu-item-indigo">
-            <i class="fas fa-eye fa-lg sm-icon"></i>&nbsp;&nbsp;View Connections 
-        </span>
-        <div class="menu-divider-menu"></div>
-        <span id="follow-connect-menu-click" class="menu-item menu-item-yellow">
-            <i class="fas fa-user-circle fa-lg sm-icon"></i>&nbsp;&nbsp;Follow Connections 
-        </span>
-        <div class="menu-divider-menu"></div>
-        <span id="anniversary-menu-click" class="menu-item menu-item-violet">
-            <i class="fas fa-gift fa-lg sm-icon"></i>&nbsp;&nbsp;Congrats On Anniversary
-        </span>
-        <div class="menu-divider-menu"></div>
-        <span id="new-job-menu-click" class="menu-item menu-item-amber">
-            <i class="fas fa-suitcase fa-lg sm-icon"></i>&nbsp;&nbsp;Congrats On New Job
-        </span>
-        <div class="menu-divider-menu"></div>
-        <!--span id="remove-connect-menu-click" class="menu-item menu-item-red">
-            <i class="fas fa-trash fa-lg sm-icon"></i>&nbsp;&nbsp;&nbsp;Remove Connections 
-        </span-->
-        <div class="menu-divider-menu"></div>
-        <span id="withdraw-invite-menu-click" class="menu-item menu-item-gray">
-            <i class="fas fa-ban fa-lg sm-icon"></i>&nbsp;&nbsp;Withdraw Sent Invites 
-        </span>
-        <div class="menu-divider-menu"></div>
-        <span id="accept-invite-menu-click" class="menu-item menu-item-emerald">
-            <i class="fas fa-check-double fa-lg sm-icon"></i>&nbsp;&nbsp;&nbsp;Accept Received Invites 
-        </span>
-        <div class="menu-divider" style="margin-top: 20px"></div>
-        <span class="footer-text">
-            &copy; LinkDominator 
-        </span>
-    </div>
+    <div id="ld-v2-actions-divider" style="display:none;"></div>
+    <div id="ld-tools-header" class="ld-tools-hdr" style="display:none;">Empire Tools</div>
+    <div id="menus" class="menus" style="display:none;"></div>
 </div>
-
-<span class="float-btn" id="open-nav">
-    <!--i class="fas fa-plus my-float"></i-->
-    <img src="https://linkedempire.com/images/logo-1.png" height="40" class="my-float" onerror="this.src='https://linkedempire.com/images/logo-1.png'">
-</span>
 `;
 
-$('body').append(mainMenu)
-
-// Authorization button click handler - triggers auto-sync
-$(document).on('click', '#authorize-linkedin-btn', async function(e) {
-    e.preventDefault();
-    e.stopPropagation();
-    
-    console.log('🔐 Authorization button clicked - triggering auto-sync...');
-    
-    const $btn = $(this);
-    const originalHtml = $btn.html();
-    $btn.html('<i class="fas fa-spinner fa-spin" style="margin-right: 6px;"></i>Syncing...');
-    $btn.prop('disabled', true);
-    
-    // Get current LinkedIn ID
-    const currentLinkedInId = (typeof window.getLinkedInIdForApi === 'function' ? window.getLinkedInIdForApi() : (typeof linkedinId !== 'undefined' ? linkedinId : (window.linkedinId || $('#me-publicIdentifier').val())));
-    
-    if (!currentLinkedInId) {
-        alert('LinkedIn ID not found. Please refresh the page.');
-        $btn.html(originalHtml);
-        $btn.prop('disabled', false);
-        return;
+(function mountLinkedEmpireUi() {
+    var root = typeof window.__ldEnsureRoot === 'function'
+        ? window.__ldEnsureRoot()
+        : document.getElementById('ld-root');
+    if (root && window.jQuery) {
+        window.jQuery(root).append(mainMenu);
+    } else if (window.jQuery) {
+        window.jQuery('body').append(mainMenu);
     }
-    
-    // Try to sync LinkedIn ID
-    if (typeof window.syncLinkedInIdWithBackend === 'function') {
-        const syncSuccess = await window.syncLinkedInIdWithBackend(currentLinkedInId);
-        
-        if (syncSuccess) {
-            // Wait for sync to complete
-            await new Promise(resolve => setTimeout(resolve, 1500));
-            
-            // Re-check authorization
-            try {
-                const filterApi = typeof PLATFORM_URL !== 'undefined' ? `${PLATFORM_URL}/api` : 'https://linkedempire.com/api';
-                const retryResponse = await fetch(`${filterApi}/accessCheck`, {
-                    method: 'GET',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'lk-id': currentLinkedInId
-                    }
-                });
-                
-                if (retryResponse.ok) {
-                    const retryData = await retryResponse.json();
-                    if (retryData.status !== 401) {
-                        console.log('✅✅✅ Authorization successful after manual sync!');
-                        // Hide button and enable menus
-                        const $authCard = $('#authorize-button-container');
-                        $authCard.hide().removeClass('pulse-attention');
-                        $('#menus span').css('opacity', '1').css('pointer-events', 'auto');
-                        $('#accessCheck').remove();
-                        
-                        // Reload extension features
-                        if (typeof onMounted === 'function') onMounted();
-                        if (typeof getAutoRespondMessages === 'function') getAutoRespondMessages();
-                        if (typeof getAIContents === 'function') getAIContents();
-                        if (typeof getSNLeadList === 'function') getSNLeadList();
-                        if (typeof getCampaigns === 'function') getCampaigns();
-                        
-                        $btn.html('<i class="fas fa-check" style="margin-right: 6px;"></i>Synced!');
-                        setTimeout(() => {
-                            $('#authorize-button-container').hide();
-                        }, 2000);
-                        return;
-                    }
-                }
-            } catch (error) {
-                console.error('Error re-checking authorization:', error);
+
+    function syncLauncherVisibility(isOpen) {
+        var btn = document.getElementById('open-nav');
+        if (!btn) return;
+        if (isOpen) {
+            btn.classList.add('ld-launcher-hidden');
+        } else {
+            btn.classList.remove('ld-launcher-hidden');
+        }
+    }
+
+    window.toggleLinkedEmpirePanel = function toggleLinkedEmpirePanel(force) {
+        var panel = document.getElementById('mySidepanel');
+        if (!panel) return false;
+        var shouldOpen = force === true || (force !== false && !panel.classList.contains('ld-open'));
+        if (shouldOpen) {
+            panel.classList.add('ld-open');
+            panel.style.display = 'block';
+            panel.style.transform = 'none';
+            panel.style.width = '285px';
+            panel.style.visibility = 'visible';
+            panel.style.opacity = '1';
+            syncLauncherVisibility(true);
+            if (typeof window.checkAuthAndShowCard === 'function') {
+                window.checkAuthAndShowCard();
             }
+        } else {
+            panel.classList.remove('ld-open');
+            panel.style.display = 'none';
+            syncLauncherVisibility(false);
         }
-        
-        $btn.html('<i class="fas fa-exclamation-triangle" style="margin-right: 6px;"></i>Sync Failed');
-        setTimeout(() => {
-            $btn.html(originalHtml);
-            $btn.prop('disabled', false);
-        }, 3000);
-    } else {
-        alert('Sync function not available. Please refresh the page.');
-        $btn.html(originalHtml);
-        $btn.prop('disabled', false);
+        return shouldOpen;
+    };
+
+    function buildLauncherButton() {
+        var btn = document.createElement('button');
+        btn.id = 'open-nav';
+        btn.type = 'button';
+        btn.className = 'float-btn';
+        btn.setAttribute('aria-label', 'Open LinkedEmpire');
+        btn.title = 'LinkedEmpire';
+        var img = document.createElement('img');
+        img.className = 'my-float';
+        img.alt = '';
+        img.width = 40;
+        img.height = 40;
+        img.src = ldLogoSrc;
+        img.addEventListener('error', function onLogoError() {
+            img.removeEventListener('error', onLogoError);
+            img.src = 'https://linkedempire.com/images/logo-1.png';
+        });
+        btn.appendChild(img);
+        return btn;
     }
-});
 
-// Function to check campaign status
-const checkCampaignStatus = () => {
-    try {
-        // Check if extension context is still valid
-        if (chrome.runtime && chrome.runtime.id) {
-            chrome.runtime.sendMessage({
-                action: 'checkCampaignStatus'
-            }, function(response) {
-                // Check for extension context errors
-                if (chrome.runtime.lastError) {
-                    console.log('🔄 Extension context error (likely reloaded):', chrome.runtime.lastError.message);
-                    stopStatusChecking(); // Stop monitoring when context is invalid
-                    return;
-                }
-                
-                try {
-                    if (response && response.status) {
-                        const statusIndicator = $('#status-indicator');
-                        
-                        switch(response.status) {
-                            case 'running':
-                                statusIndicator.css('color', '#28a745');
-                                statusIndicator.attr('title', `Campaign Status: ${response.message || 'Running'}`);
-                                startStatusChecking(); // Ensure monitoring is active
-                                break;
-                            case 'processing':
-                                statusIndicator.css('color', '#ffc107');
-                                statusIndicator.attr('title', `Campaign Status: ${response.message || 'Processing'}`);
-                                startStatusChecking(); // Ensure monitoring is active
-                                break;
-                            case 'completed':
-                                statusIndicator.css('color', '#17a2b8');
-                                statusIndicator.attr('title', `Campaign Status: ${response.message || 'Completed'}`);
-                                stopStatusChecking(); // Stop monitoring when completed
-                                break;
-                            case 'inactive':
-                                // Check if service worker is ready
-                                if (response.message && response.message.includes('Service worker ready')) {
-                                    statusIndicator.css('color', '#6c757d'); // Dark gray - ready but no campaigns
-                                    statusIndicator.attr('title', 'Campaign Status: Ready - No active campaigns');
-                                    stopStatusChecking(); // Stop monitoring when no campaigns
-                                } else {
-                                    statusIndicator.css('color', '#ccc'); // Light gray - inactive
-                                    statusIndicator.attr('title', 'Campaign Status: Inactive');
-                                    stopStatusChecking(); // Stop monitoring when inactive
-                                }
-                                break;
-                            default:
-                                statusIndicator.css('color', '#ccc');
-                                statusIndicator.attr('title', 'Campaign Status: Inactive');
-                                stopStatusChecking(); // Stop monitoring for unknown status
-                        }
-                    } else {
-                        // If no response, service worker might be inactive
-                        const statusIndicator = $('#status-indicator');
-                        statusIndicator.css('color', '#dc3545'); // Red
-                        statusIndicator.attr('title', 'Campaign Status: Service Worker Inactive - Please refresh extension');
-                        stopStatusChecking(); // Stop monitoring when service worker is inactive
-                    }
-                } catch (error) {
-                    console.error('Error processing campaign status response:', error);
-                    const statusIndicator = $('#status-indicator');
-                    statusIndicator.css('color', '#dc3545'); // Red
-                    statusIndicator.attr('title', 'Campaign Status: Error processing response');
-                }
-            });
-        }
-        
-        // Also check service worker status
-        if (chrome.runtime && chrome.runtime.id) {
-            chrome.runtime.sendMessage({
-                action: 'checkServiceWorkerStatus'
-            }, function(response) {
-                // Check for extension context errors
-                if (chrome.runtime.lastError) {
-                    console.log('🔄 Extension context error (likely reloaded):', chrome.runtime.lastError.message);
-                    stopStatusChecking(); // Stop monitoring when context is invalid
-                    return;
-                }
-                
-                try {
-                    if (response && !response.active) {
-                        const statusIndicator = $('#status-indicator');
-                        statusIndicator.css('color', '#dc3545'); // Red
-                        statusIndicator.attr('title', 'Campaign Status: Service Worker Inactive - Please refresh extension');
-                        stopStatusChecking(); // Stop monitoring when service worker is inactive
-                    }
-                } catch (error) {
-                    console.error('Error processing service worker status response:', error);
-                }
-            });
-        }
-    } catch (error) {
-        console.error('Error in checkCampaignStatus:', error);
-        // If we get here, the extension context is definitely invalid
-        stopStatusChecking();
+    var btn = document.getElementById('open-nav');
+    if (!btn) {
+        btn = buildLauncherButton();
+        (document.body || document.documentElement).appendChild(btn);
+    } else if (!btn.querySelector('img')) {
+        btn.textContent = '';
+        btn.appendChild(buildLauncherButton().querySelector('img').cloneNode(true));
     }
-};
+    btn.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        window.toggleLinkedEmpirePanel();
+    }, true);
+})();
 
-// Variable to track if campaigns are running
-let campaignsRunning = false;
-let statusCheckInterval = null;
-
-// Function to start status checking
-const startStatusChecking = () => {
-    if (!statusCheckInterval) {
-        statusCheckInterval = setInterval(checkCampaignStatus, 30000);
-        campaignsRunning = true;
-    }
-};
-
-// Function to stop status checking
-const stopStatusChecking = () => {
-    if (statusCheckInterval) {
-        clearInterval(statusCheckInterval);
-        statusCheckInterval = null;
-        campaignsRunning = false;
-    }
-};
-
-// Initial status check
-checkCampaignStatus();
-
-// Cleanup function to clear interval when extension is unloaded
-window.addEventListener('beforeunload', function() {
-    stopStatusChecking();
-});
-
-// Add manual restart function for service worker
-const restartServiceWorker = () => {
-    console.log('🔄 Manually restarting service worker...');
-    chrome.runtime.reload();
-};
-
-// Add click handler for manual restart (optional)
-$('#campaign-menu-click').on('dblclick', function() {
-    restartServiceWorker();
-});
-
-// Listen for campaign status updates from background script
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request.action === 'updateCampaignStatus') {
-        const statusIndicator = $('#status-indicator');
-        
-        switch(request.status) {
-            case 'running':
-                statusIndicator.css('color', '#28a745'); // Green
-                statusIndicator.attr('title', `Campaign Status: ${request.message || 'Running'}`);
-                startStatusChecking(); // Start monitoring when campaigns are running
-                break;
-            case 'processing':
-                statusIndicator.css('color', '#ffc107'); // Yellow
-                statusIndicator.attr('title', `Campaign Status: ${request.message || 'Processing'}`);
-                startStatusChecking(); // Start monitoring when campaigns are processing
-                break;
-            case 'completed':
-                statusIndicator.css('color', '#17a2b8'); // Blue
-                statusIndicator.attr('title', `Campaign Status: ${request.message || 'Completed'}`);
-                stopStatusChecking(); // Stop monitoring when campaigns are completed
-                break;
-            case 'inactive':
-                // Check if service worker is ready
-                if (request.message && request.message.includes('Service worker ready')) {
-                    statusIndicator.css('color', '#6c757d'); // Dark gray - ready but no campaigns
-                    statusIndicator.attr('title', 'Campaign Status: Ready - No active campaigns');
-                    stopStatusChecking(); // Stop monitoring when no campaigns are running
-                } else {
-                    statusIndicator.css('color', '#ccc'); // Light gray - inactive
-                    statusIndicator.attr('title', 'Campaign Status: Inactive');
-                    stopStatusChecking(); // Stop monitoring when inactive
-                }
-                break;
-            case 'error':
-                statusIndicator.css('color', '#dc3545'); // Red
-                statusIndicator.attr('title', `Campaign Status: ${request.message || 'Error'}`);
-                stopStatusChecking(); // Stop monitoring on error
-                break;
-            default:
-                statusIndicator.css('color', '#ccc'); // Gray
-                statusIndicator.attr('title', 'Campaign Status: Inactive');
-                stopStatusChecking(); // Stop monitoring for unknown status
-        }
-    }
-});
 getUserProfile();
 
-// Centralized function to check authentication and show/hide authorization card
+// CRM Bearer token owns the account — same gate as v2-extension.
 const checkAuthAndShowCard = () => {
-    const accessCheckValue = $('#accessCheck').val();
-    if (accessCheckValue == 401) {
-        // Show authorization button prominently with animation
-        const $authCard = $('#authorize-button-container');
-        $authCard.show();
-        
-        // Add a pulse animation class to draw attention
-        $authCard.addClass('pulse-attention');
-        
-        // Disable menu items
-        $('#menus span').css('opacity', '0.5').css('pointer-events', 'none');
-        
-        // Ensure sidebar is visible and scroll to show authorization card
-        const $sidePanel = $('#mySidepanel');
-        if ($sidePanel.is(':hidden')) {
-            $sidePanel.show();
-        }
-        
-        // Scroll sidebar content to top to show authorization card
-        setTimeout(() => {
-            const sidePanelElement = $sidePanel[0];
-            if (sidePanelElement) {
-                sidePanelElement.scrollTop = 0;
-            }
-            // Also try scrolling the authorization card into view
-            const authCardElement = $authCard[0];
-            if (authCardElement) {
-                authCardElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }
-        }, 100);
-    } else {
-        // Hide authorization button and remove animation
-        const $authCard = $('#authorize-button-container');
-        $authCard.hide().removeClass('pulse-attention');
-        // Enable menu items
-        $('#menus span').css('opacity', '1').css('pointer-events', 'auto');
+    if (typeof window.LE2App?.refreshAuthGate === 'function') {
+        window.LE2App.refreshAuthGate().then((hasToken) => {
+            if (hasToken) return;
+            const $sidePanel = $('#mySidepanel');
+            if ($sidePanel.is(':hidden')) $sidePanel.show();
+            document.getElementById('ld-v2-account')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+        return;
     }
+    $('#authorize-button-container').hide();
 };
 
-// Make function globally available
 window.checkAuthAndShowCard = checkAuthAndShowCard;
 
-// Add global click handler for all menu items to check auth
-$(document).on('click', '#menus .menu-item', function() {
-    // Check auth when any menu item is clicked
-    if (typeof window.checkAuthAndShowCard === 'function') {
-        window.checkAuthAndShowCard();
+$(document).on('click', '#close-nav', function() {
+    if (typeof window.toggleLinkedEmpirePanel === 'function') {
+        window.toggleLinkedEmpirePanel(false);
+        return;
     }
+    $('#mySidepanel').removeClass('ld-open').hide();
 });
-
-$('#open-nav').click(function(){
-    let sidePanel = $('#mySidepanel')
-
-    if(sidePanel.is(':hidden')) {
-        sidePanel.show().fadeIn('slow')
-        // Check auth status when sidebar opens and show authorization card if needed
-        setTimeout(() => {
-            checkAuthAndShowCard();
-        }, 100);
-    }else {
-        sidePanel.hide().fadeOut('slow')
-    }
-})
-
-$('#close-nav').click(function() {
-    $('#mySidepanel').hide().fadeOut('slow')
-})
-
-const getAudienceList = async (fieldId) => {
-    // Show loading state
-    $(`#${fieldId}`).empty().append('<option value="">🔄 Loading audiences...</option>');
-
-    try {
-        const response = await fetchAudiencesFromAPI();
-        
-        let audienceArr = [];
-        
-        // Handle the response structure from successResponse method
-        if (response && response.success && response.data && response.data.audience) {
-            audienceArr = response.data.audience;
-        }
-        // Handle enhanced apiRequest response format
-        else if (response && response.data && response.data.audience) {
-            audienceArr = response.data.audience;
-        }
-        // Fallback: check for direct audience array (old format)
-        else if (Array.isArray(response)) {
-            if (response.length > 0 && Array.isArray(response[0].audience)) {
-                audienceArr = response[0].audience;
-            }
-        } else if (Array.isArray(response.audience)) {
-            audienceArr = response.audience;
-        }
-        
-        
-        // Clear loading and populate dropdown
-        $(`#${fieldId}`).empty();
-        
-        if (audienceArr.length > 0) {
-            // Add default option
-            $('<option/>', {
-                value: '',
-                html: 'Select an audience'
-            }).appendTo(`#${fieldId}`);
-            
-            // Add audience options
-            for (let i = 0; i < audienceArr.length; i++) {
-                $('<option/>', {
-                    value: audienceArr[i].audience_id,
-                    html: `${audienceArr[i].audience_name} (${audienceArr[i].total || 0} leads)`
-                }).appendTo(`#${fieldId}`);
-            }
-        } else {
-            $('<option/>', {
-                value: '',
-                html: 'No audiences found - create one first'
-            }).appendTo(`#${fieldId}`);
-        }
-        
-        return audienceArr;
-        
-    } catch (error) {
-        console.error('❌ Error fetching audiences:', error);
-        
-        // Clear loading and show error
-        $(`#${fieldId}`).empty();
-        $('<option/>', {
-            value: '',
-            html: '❌ Error loading audiences - check console'
-        }).appendTo(`#${fieldId}`);
-        
-        // Detailed error logging
-        if (error.status) {
-            console.error(`🔍 HTTP Error ${error.status}: ${error.statusText}`);
-            if (error.responseJSON) {
-                console.error('🔍 Error details:', error.responseJSON);
-            }
-        } else {
-            console.error('🔍 Network or timeout error:', error.message);
-        }
-        
-        // Provide helpful troubleshooting info
-        throw error;
-    }
-}
-
-const implementPermission = (actionId) => {
-    // Use centralized auth check function
-    checkAuthAndShowCard();
-    
-    // Also handle modal content if unauthorized
-    if ($('#accessCheck').val() == 401){
-        $('.modal-body').html(`
-            <div style="text-align: center; padding: 20px;">
-                <h5><strong>UNAUTHORIZED</strong></h5>
-                <p style="margin: 15px 0; color: #666;">Please connect your LinkedIn account to use this feature.</p>
-                <button id="authorize-from-modal" style="padding: 10px 20px; background: #0077b5; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; margin-top: 10px;">
-                    <i class="fab fa-linkedin" style="margin-right: 6px;"></i>Connect LinkedIn Account
-                </button>
-            </div>
-        `);
-        $(`.${actionId}`).hide();
-        
-        // Add click handler for modal button
-        $(document).off('click', '#authorize-from-modal').on('click', '#authorize-from-modal', function() {
-            const platformUrl = typeof PLATFORM_URL !== 'undefined' ? PLATFORM_URL : 'https://linkedempire.com';
-            window.open(`${platformUrl}/social-account`, '_blank');
-        });
-    }
-}

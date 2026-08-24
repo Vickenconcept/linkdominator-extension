@@ -35,7 +35,7 @@ a.c-header:hover{
 	border-radius: 50%;
 	text-align: center;
 	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15), 0 0 0 2px rgba(0, 119, 181, 0.2);
-	z-index: 10;
+	z-index: 2147483646;
 	cursor: pointer;
 	border: 2px solid rgba(0, 119, 181, 0.2);
 	display: flex;
@@ -533,7 +533,7 @@ span.float-btn:active {
 	font-weight: bolder;
 	font-family: Inter,system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica Neue,Arial,Noto Sans,sans-serif,Apple Color Emoji,Segoe UI Emoji,Segoe UI Symbol,Noto Color Emoji;
 }
-.nav-link {
+.ld-bs-modal .nav-link, #mySidepanel .nav-link {
   color: #0077b5;
   font-weight: 500;
   font-family: Inter,system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica Neue,Arial,Noto Sans,sans-serif,Apple Color Emoji,Segoe UI Emoji,Segoe UI Symbol,Noto Color Emoji;
@@ -541,22 +541,24 @@ span.float-btn:active {
   padding: 10px 16px;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
-.nav-link:hover {
+.ld-bs-modal .nav-link:hover, #mySidepanel .nav-link:hover {
   color: #005885;
   background-color: rgba(0, 119, 181, 0.08);
 }
-.nav-pills .nav-link.active, .nav-pills .show > .nav-link {
+.ld-bs-modal .nav-pills .nav-link.active, .ld-bs-modal .nav-pills .show > .nav-link,
+#mySidepanel .nav-pills .nav-link.active, #mySidepanel .nav-pills .show > .nav-link {
   background: linear-gradient(135deg, #0077b5 0%, #005885 100%);
   color: #fff;
   border-top-right-radius: 8px;
   border-top-left-radius: 8px;
   box-shadow: 0 2px 8px rgba(0, 119, 181, 0.3);
 }
-.nav-pills .nav-link.active:hover, .nav-pills .show > .nav-link {
+.ld-bs-modal .nav-pills .nav-link.active:hover, .ld-bs-modal .nav-pills .show > .nav-link,
+#mySidepanel .nav-pills .nav-link.active:hover, #mySidepanel .nav-pills .show > .nav-link {
   background: linear-gradient(135deg, #005885 0%, #004d6f 100%);
   color: #fff;
 }
-.btn-primary {
+.ld-bs-modal .btn-primary, #mySidepanel .btn-primary {
   background: linear-gradient(135deg, #0077b5 0%, #005885 100%);
   border: none;
   color: #fff;
@@ -566,25 +568,26 @@ span.float-btn:active {
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   box-shadow: 0 2px 8px rgba(0, 119, 181, 0.2);
 }
-.btn-primary:hover {
+.ld-bs-modal .btn-primary:hover, #mySidepanel .btn-primary:hover {
   background: linear-gradient(135deg, #005885 0%, #004d6f 100%);
   transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(0, 119, 181, 0.3);
   border: none;
 }
-.btn-primary:focus, .btn-primary:active {
+.ld-bs-modal .btn-primary:focus, .ld-bs-modal .btn-primary:active,
+#mySidepanel .btn-primary:focus, #mySidepanel .btn-primary:active {
   background: linear-gradient(135deg, #005885 0%, #004d6f 100%);
   box-shadow: 0 2px 8px rgba(0, 119, 181, 0.3);
   border: none;
 }
-.btn-outline-primary {
+.ld-bs-modal .btn-outline-primary, #mySidepanel .btn-outline-primary {
   border: 2px solid #0077b5;
   color: #0077b5;
   background-color: transparent;
   font-weight: 600;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
-.btn-outline-primary:hover {
+.ld-bs-modal .btn-outline-primary:hover, #mySidepanel .btn-outline-primary:hover {
   background: linear-gradient(135deg, #0077b5 0%, #005885 100%);
   border-color: #0077b5;
   color: #ffffff;
@@ -611,13 +614,13 @@ span.float-btn:active {
 .upload-icon {
   margin-right: 5px;
 }
-.input-group-text {
+.ld-bs-modal .input-group-text, #mySidepanel .input-group-text {
   background: linear-gradient(135deg, #0077b5 0%, #005885 100%);
   border: none;
   color: #ffffff;
   font-weight: 500;
 }
-.input-group-append {
+.ld-bs-modal .input-group-append, #mySidepanel .input-group-append {
   border-top-right-radius: 8px;
   border-bottom-right-radius: 8px;
 }
@@ -640,14 +643,14 @@ span.float-btn:active {
 .menu-item:hover .sm-icon {
   transform: scale(1.15) rotate(5deg);
 }
-.modal-header, .modal-header-bg{
+.ld-bs-modal[id] .modal-header, .ld-bs-modal[id] .modal-header-bg{
 	background: linear-gradient(135deg, #0077b5 0%, #005885 100%);
   border-top-right-radius: 12.5px;
   border-top-left-radius: 12.5px;
 	border-bottom: none;
 	padding: 20px 24px;
 }
-.modal-content {
+.ld-bs-modal[id] .modal-content {
   border-top-right-radius: 12.5px;
   border-top-left-radius: 12.5px;
   border-bottom-right-radius: 12.5px;
@@ -655,14 +658,14 @@ span.float-btn:active {
   border: none;
   box-shadow: 0 8px 32px rgba(0, 119, 181, 0.2);
 }
-.modal-title{
+.ld-bs-modal[id] .modal-title{
 	font-weight: 600;
 	color: #fff;
 	font-size: 20px;
 	font-family: Inter,system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica Neue,Arial,Noto Sans,sans-serif,Apple Color Emoji,Segoe UI Emoji,Segoe UI Symbol,Noto Color Emoji;
 }
 
-.modal .close {
+.ld-bs-modal[id] .ld-bs-close {
 	color: #fff;
 	opacity: 0.9;
 	font-size: 28px;
@@ -671,17 +674,17 @@ span.float-btn:active {
 	transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.modal .close:hover {
+.ld-bs-modal[id] .ld-bs-close:hover {
 	opacity: 1;
 	color: #fff;
 	transform: scale(1.1);
 }
 
-.modal-body {
+.ld-bs-modal[id] .modal-body {
 	padding: 24px;
 }
 
-.modal-footer {
+.ld-bs-modal[id] .modal-footer {
 	border-top: 1px solid rgba(0, 119, 181, 0.15);
 	padding: 16px 24px;
 	background-color: #fafafa;
@@ -1678,14 +1681,14 @@ span.float-btn:active {
 }
 
 /* Modern Table Styles */
-.table {
+.ld-bs-modal[id] .table, #mySidepanel .table {
 	width: 100%;
 	margin-bottom: 0;
 	border-collapse: separate;
 	border-spacing: 0;
 }
 
-.table thead th {
+.ld-bs-modal[id] .table thead th, #mySidepanel .table thead th {
 	background: linear-gradient(135deg, #0077b5 0%, #005885 100%);
 	color: #fff;
 	font-weight: 600;
@@ -1749,14 +1752,14 @@ span.float-btn:active {
 	font-style: italic;
 }
 
-.btn-outline-secondary {
+.ld-bs-modal[id] .btn-outline-secondary, #mySidepanel .btn-outline-secondary {
 	border-color: rgba(0, 119, 181, 0.3);
 	color: #0077b5;
 	background-color: transparent;
 	transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.btn-outline-secondary:hover {
+.ld-bs-modal[id] .btn-outline-secondary:hover, #mySidepanel .btn-outline-secondary:hover {
 	background: linear-gradient(135deg, #0077b5 0%, #005885 100%);
 	border-color: #0077b5;
 	color: #fff;
@@ -1796,7 +1799,7 @@ span.float-btn:active {
 }
 
 /* Modern Form Styles */
-.form-control.shadow-none {
+.ld-bs-modal[id] .form-control.shadow-none, #mySidepanel .form-control.shadow-none {
   border: 1.5px solid rgba(0, 119, 181, 0.2);
   border-radius: 8px;
   padding: 10px 14px;
@@ -1805,28 +1808,28 @@ span.float-btn:active {
   background-color: #fff;
 }
 
-.form-control.shadow-none:focus {
+.ld-bs-modal[id] .form-control.shadow-none:focus, #mySidepanel .form-control.shadow-none:focus {
   border-color: #0077b5;
   box-shadow: 0 0 0 3px rgba(0, 119, 181, 0.1);
   outline: none;
 }
 
-.form-control.shadow-none:hover {
+.ld-bs-modal[id] .form-control.shadow-none:hover, #mySidepanel .form-control.shadow-none:hover {
   border-color: rgba(0, 119, 181, 0.4);
 }
 
-.form-group {
+.ld-bs-modal[id] .form-group, #mySidepanel .form-group {
   margin-bottom: 20px;
 }
 
-.form-group label {
+.ld-bs-modal[id] .form-group label, #mySidepanel .form-group label {
   font-weight: 600;
   color: #333;
   margin-bottom: 8px;
 }
 
 /* Card Header Styles for Accordions */
-.card-header.c-header {
+.ld-bs-modal[id] .card-header.c-header, #mySidepanel .card-header.c-header {
   background: linear-gradient(135deg, rgba(0, 119, 181, 0.05) 0%, rgba(0, 88, 133, 0.05) 100%);
   border: 1px solid rgba(0, 119, 181, 0.15);
   border-radius: 8px;
@@ -1838,35 +1841,37 @@ span.float-btn:active {
   margin-bottom: 10px;
 }
 
-.card-header.c-header:hover {
+.ld-bs-modal[id] .card-header.c-header:hover, #mySidepanel .card-header.c-header:hover {
   background: linear-gradient(135deg, rgba(0, 119, 181, 0.1) 0%, rgba(0, 88, 133, 0.1) 100%);
   border-color: rgba(0, 119, 181, 0.3);
   color: #0077b5;
 }
 
-.card-header.c-header .dropdown-toggle::after {
+.ld-bs-modal[id] .card-header.c-header .dropdown-toggle::after, #mySidepanel .card-header.c-header .dropdown-toggle::after {
   color: #0077b5;
 }
 
 /* Custom Checkbox and Radio Styles */
-.custom-control-label {
+.ld-bs-modal[id] .custom-control-label, #mySidepanel .custom-control-label {
   font-weight: 500;
   color: #333;
   cursor: pointer;
   padding-left: 8px;
 }
 
-.custom-control-input:focus ~ .custom-control-label::before {
+.ld-bs-modal[id] .custom-control-input:focus ~ .custom-control-label::before,
+#mySidepanel .custom-control-input:focus ~ .custom-control-label::before {
   box-shadow: 0 0 0 3px rgba(0, 119, 181, 0.1);
   border-color: #0077b5;
 }
 
-.custom-control-input:checked ~ .custom-control-label::before {
+.ld-bs-modal[id] .custom-control-input:checked ~ .custom-control-label::before,
+#mySidepanel .custom-control-input:checked ~ .custom-control-label::before {
   background-color: #0077b5;
   border-color: #0077b5;
 }
 
-.custom-control-inline {
+.ld-bs-modal[id] .custom-control-inline, #mySidepanel .custom-control-inline {
   margin-right: 20px;
 }
 
@@ -1963,7 +1968,8 @@ select.shadow-none:hover {
 .close-style:hover{
 	color: #fff;
 }
-.accordion {
+/* Scoped: a global .panel { max-height:0 } was collapsing LinkedIn cards/ads. */
+.ld-accordion {
   background-color: #eee;
   color: #444;
   cursor: pointer;
@@ -1976,10 +1982,10 @@ select.shadow-none:hover {
   transition: 0.4s;
   font-weight: bold;
 }
-.active-accordion, .accordion:hover {
+.active-accordion, .ld-accordion:hover {
   background-color: #ccc;
 }
-.accordion:after {
+.ld-accordion:after {
   content: '\002B';
   color: #777;
   font-weight: bold;
@@ -1989,7 +1995,7 @@ select.shadow-none:hover {
 .active-accordion:after {
   content: "\2212";
 }
-.panel {
+.ld-panel {
   padding: 0 18px;
   background-color: white;
   max-height: 0;

@@ -1,33 +1,78 @@
 {
    "action": {
       "default_icon": {
-         "128": "/images/linkdominator-128.png",
-         "16": "/images/linkdominator-16.png",
-         "32": "/images/linkdominator-32.png",
-         "48": "/images/linkdominator-48.png"
+         "128": "/images/logo-1.png",
+         "16": "/images/logo-1.png",
+         "32": "/images/logo-1.png",
+         "48": "/images/logo-1.png"
       }
    },
    "background": {
-      "service_worker": "background.js"
+      "service_worker": "service-worker.js"
    },
    "content_scripts": [ {
-      "css": [ "css/library/bootstrap.css", "css/library/pagination.css", "css/app.css" ],
-      "js": [ "env.js", "js/library/jquery.js", "js/library/fontawesome5.js", "js/library/popper.js", "js/library/bootstrap.js", "js/library/pagination.js", "js/appConfig.js", "js/mainMenu.js", "js/helper.js", "js/universalAction.js", "js/debug.js", "js/content-scripts/linkedinFeedCommentGenerator.js", "js/forms/stopBotForm.js", "js/forms/addConnectionForm.js", "js/forms/followConnectionForm.js", "js/forms/likeOrConnectForm.js", "js/forms/removeConnectionForm.js", "js/forms/withdrawInviteForm.js", "js/forms/acceptInviteForm.js", "js/forms/messageAllConnectForm.js", "js/forms/messageTargetUsersForm.js", "js/forms/autorespondList.js", "js/forms/autorespondNormalForm.js", "js/forms/getConnectionInfoForm.js", "js/forms/messageFollowUpForm.js", "js/forms/viewConnectionsForm.js", "js/forms/endorseConnectionForm.js", "js/forms/birthdayWishesForm.js", "js/forms/anniversaryForm.js", "js/forms/newJobCongratsForm.js", "js/forms/audienceCreationForm.js", "js/forms/audienceMenu.js", "js/forms/audienceManageForm.js", "js/forms/audienceUserList.js", "js/forms/salesNavigatorForm.js", "js/forms/campaign.js", "js/filters/singleMasterFilter.js", "js/filters/setSelectedSingleMasterFilter.js", "js/filters/filterHelper.js", "js/filters/filter.js", "js/filters/viewConnectionsFilter.js", "js/filters/endorseConnectionFilter.js", "js/filters/audienceCreationFilter.js", "js/filters/getConnectionInfoFilter.js", "js/filters/messageTargetUsersFilter.js", "js/filters/messageAllConnectionFilter.js", "js/filters/addConnectionFilter.js", "js/filters/removeConnectionFilter.js", "js/actions/followConnectionAction.js", "js/actions/addConnectionAction.js", "js/actions/likeOrConnectAction.js", "js/actions/removeConnectionAction.js", "js/actions/withdrawInviteAction.js", "js/actions/acceptInviteAction.js", "js/actions/messageAllConnectAction.js", "js/actions/messageTargetUsersAction.js", "js/actions/autorespondApiAction.js", "js/actions/autorespondAction.js", "js/actions/getConnectionInfoAction.js", "js/actions/messageFollowUpAction.js", "js/actions/viewConnectionsAction.js", "js/actions/endorseConnectionAction.js", "js/actions/birthdayWishesAction.js", "js/actions/anniversaryAction.js", "js/actions/newJobCongratsAction.js", "js/actions/audienceCreationAction.js", "js/actions/salesNavigatorAction.js", "js/actions/campaignAction.js", "js/actions/linkedinInviteAutomation.js" ],
+      "css": [ "css/ld-scoped.css" ],
+      "js": [
+         "env.js",
+         "js/ldRoot.js",
+         "js/library/jquery.js",
+         "js/ldJqueryPatch.js",
+         "js/linkedinCompat.js",
+         "js/v2/outreach.js",
+         "js/appConfig.js",
+         "js/mainMenu.js",
+         "js/v2/ui/icons.js",
+         "js/v2/ui/core/le2-core.js",
+         "js/v2/ui/core/le2-panel-runner.js",
+         "js/v2/ui/features/action-registry.js",
+         "js/v2/ui/features/action-modal.js",
+         "js/v2/ui/features/panels/audience-hub.js",
+         "js/v2/ui/features/panels/audience-create-menu.js",
+         "js/v2/ui/features/panels/audience-build.js",
+         "js/v2/ui/features/panels/audience-import-url.js",
+         "js/v2/ui/features/panels/audience-manage.js",
+         "js/v2/ui/features/panels/campaign-hub.js",
+         "js/v2/ui/features/panels/withdraw-invites.js",
+         "js/v2/ui/features/panels/bulk-message.js",
+         "js/v2/ui/features/panels/bulk-profile.js",
+         "js/v2/ui/features/panels/add-connection.js",
+         "js/v2/ui/features/panels/open-connect.js",
+         "js/v2/ui/features/panels/accept-invites.js",
+         "js/v2/ui/features/panels/message-followup.js",
+         "js/v2/ui/tabs/actions.js",
+         "js/v2/le2-app.js",
+         "js/v2/ui/ld-brand.js",
+         "js/v2/accountUi.js",
+         "js/content-scripts/linkedinFeedCommentGenerator.js"
+      ],
       "matches": [ "https://www.linkedin.com/*" ],
       "run_at": "document_idle",
       "all_frames": false
    } ],
    "description": "LinkedEmpire - LinkedIn automation tool. Automate connections, messages, and campaigns to grow your network.",
-   "host_permissions": [ "*://*.linkedin.com/*", "https://www.linkedin.com/*", "https://app.linkdominator.com/*", "https://linkedempire.com/*" ],
+   "host_permissions": [
+      "*://*.linkedin.com/*",
+      "https://www.linkedin.com/*",
+      "https://app.linkdominator.com/*",
+      "https://linkedempire.com/*",
+      "https://app.linkedempire.com/*",
+      "https://*.linkedempire.com/*",
+      "http://127.0.0.1/*",
+      "http://localhost/*"
+   ],
    "icons": {
-      "128": "/images/linkdominator-128.png",
-      "16": "/images/linkdominator-16.png",
-      "32": "/images/linkdominator-32.png",
-      "48": "/images/linkdominator-48.png"
+      "128": "/images/logo-1.png",
+      "16": "/images/logo-1.png",
+      "32": "/images/logo-1.png",
+      "48": "/images/logo-1.png"
    },
    "manifest_version": 3,
    "name": "LinkedEmpire",
-       "permissions": [ "alarms", "storage", "cookies", "activeTab", "scripting" ],
+   "permissions": [ "alarms", "storage", "cookies", "activeTab", "scripting" ],
+   "web_accessible_resources": [ {
+      "resources": [ "images/*" ],
+      "matches": [ "https://www.linkedin.com/*" ]
+   } ],
    "update_url": "https://clients2.google.com/service/update2/crx",
-   "version": "1.0.0"
+   "version": "1.5.9"
 }

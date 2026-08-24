@@ -278,29 +278,28 @@ const getUserProfile = async () => {
         }
 
         if(!profilePix) {
-          profilePix = `<i class="fas fa-user-circle fa-lg img-thumbnail rounded-circle" style="color:#9999FF;margin-top:15px"></i>`
+          profilePix = `<span class="ld-mini-avatar ld-avatar-fallback">${String(userName || "U").charAt(0).toUpperCase()}</span>`
         }else {
-          profilePix = `<img src="${profilePix}" class="img-thumbnail rounded-circle" width="40" height="40" style="float:left;"></img>`
+          profilePix = `<img src="${profilePix}" class="ld-mini-avatar" width="32" height="32" alt="" />`
         }
-        
-        userData = `
-          <div style="display:inline-block;">
-            ${profilePix}&nbsp;&nbsp;
-            <h6 class="selected-drop-list" 
-              style="float:right;position:relative;color:#000000;padding: 12px;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica Neue,Arial,Noto Sans,sans-serif,Apple Color Emoji,Segoe UI Emoji,Segoe UI Symbol,Noto Color Emoji;">
-              <b>${userName}</b>
-            </h6>
-          </div>
-          <input type="hidden" value="${plainId}" id="me-plainId">
-          <input type="hidden" value="${publicIdentifier}" id="me-publicIdentifier">
-        `;
-        $('#profileSpot').append(userData);
-        linkedinId = $('#me-publicIdentifier').val();
-        // Make linkedinId globally available for all scripts
+
+        window.__ldDisplayName = userName;
+        window.__ldMeCardHtml = `${profilePix}<span class="ld-identity-name">${userName}</span>`;
+        const $ids = $('#ld-profile-ids');
+        if ($ids.length) {
+          $ids.html(`
+            <input type="hidden" value="${plainId || ''}" id="me-plainId">
+            <input type="hidden" value="${publicIdentifier || ''}" id="me-publicIdentifier">
+          `);
+        }
+        linkedinId = publicIdentifier || '';
         window.linkedinId = linkedinId;
         profileUrn = rootPath.entityUrn.replace('urn:li:fs_miniProfile:','');
-        
-        
+
+        if (typeof window.syncLdProfileUi === 'function') {
+          window.syncLdProfileUi();
+        }
+
         connectionStat();
         userPermissions();
     
@@ -469,125 +468,10 @@ const sendMiniStats = async (totalConnection, numTotalSentInvitations, profileVi
 }
 
 const userPermissions = async () => {
-  try {
-    // Ensure linkedinId is available before making API call
-    let currentLinkedInId = getLinkedInIdForApi();
-    
-    if (!currentLinkedInId) {
-      console.warn('⚠️ LinkedIn ID not available yet. Waiting for authentication...');
-      // Wait a bit and try again
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      currentLinkedInId = getLinkedInIdForApi();
-      
-      if (!currentLinkedInId) {
-        console.error('❌ LinkedIn ID still not available after waiting. User may need to refresh the page.');
-        console.error('💡 Please ensure you are logged into LinkedIn and refresh the page.');
-        $('body').append(`<input type="hidden" id="accessCheck" value="401">`);
-        return;
-      }
-    }
-    
-    
-    const response = await fetch(`${filterApi}/accessCheck`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        'lk-id': currentLinkedInId
-      }
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    
-    if (data.status == 401) {
-      console.error('❌ Access denied (401). Attempting to automatically sync LinkedIn ID...');
-      
-      // Try to automatically sync LinkedIn ID with backend
-      const syncSuccess = await syncLinkedInIdWithBackend(currentLinkedInId);
-      
-      if (syncSuccess) {
-        // Wait a moment for database update to propagate
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        
-        // Re-check authorization after sync
-        console.log('🔄 Re-checking authorization after sync...');
-        const retryResponse = await fetch(`${filterApi}/accessCheck`, {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-            'lk-id': currentLinkedInId
-          }
-        });
-        
-        if (retryResponse.ok) {
-          const retryData = await retryResponse.json();
-          if (retryData.status !== 401) {
-            console.log('✅✅✅ Authorization successful after automatic sync!');
-            // Remove the 401 flag
-            $('#accessCheck').remove();
-            // Hide authorization button if it was shown
-            if ($('#authorize-button-container').length) {
-              $('#authorize-button-container').hide();
-              $('#menus span').css('opacity', '1').css('pointer-events', 'auto');
-            }
-            // Continue with normal initialization
-            onMounted();
-            getAutoRespondMessages();
-            getAIContents();
-            getSNLeadList();
-            getCampaigns();
-            return; // Success, exit early
-          }
-        }
-      }
-      
-      // If still 401 after sync attempt, show authorization button
-      console.error('❌ Still unauthorized after sync attempt. User may need to connect account in dashboard.');
-      $('body').append(`<input type="hidden" id="accessCheck" value="${data.status}">`);
-      
-      // Show authorization button in sidebar using centralized function
-      setTimeout(() => {
-        if (typeof window.checkAuthAndShowCard === 'function') {
-          window.checkAuthAndShowCard();
-        } else {
-          // Fallback if function not available yet
-          if ($('#authorize-button-container').length) {
-            $('#authorize-button-container').show();
-            // Disable menu items
-            $('#menus span').css('opacity', '0.5').css('pointer-events', 'none');
-          }
-        }
-      }, 500);
-    } else {
-      // Hide authorization button if authorized using centralized function
-      if (typeof window.checkAuthAndShowCard === 'function') {
-        window.checkAuthAndShowCard();
-      } else {
-        // Fallback if function not available yet
-        if ($('#authorize-button-container').length) {
-          $('#authorize-button-container').hide();
-          // Enable menu items
-          $('#menus span').css('opacity', '1').css('pointer-events', 'auto');
-        }
-      }
-      onMounted();
-      getAutoRespondMessages();
-      getAIContents();
-      getSNLeadList();
-      getCampaigns();
-    }
-  } catch (error) {
-    console.error('❌ Error in userPermissions:', error);
-    // Set accessCheck to 401 if it's an unauthorized error
-    if (error.message.includes('401') || error.message.includes('Unauthorized')) {
-      $('body').append(`<input type="hidden" id="accessCheck" value="401">`);
-    }
-    // Don't throw the error to prevent unhandled promise rejection
-  }
-}
+  // Account ownership is the CRM Bearer token (v2 Unipile), not LinkedIn lk-id / accessCheck.
+  $('#authorize-button-container').hide();
+  if (typeof onMounted === 'function') onMounted();
+};
 
 const onMounted = () => {
   if (localStorage.getItem("lkm-mtu") === null) {
@@ -658,6 +542,14 @@ const NotificationSystem = {
     },
 
     show: function(type, message, duration = 5000) {
+        var msg = String(message || '');
+        if (/connect your linkedin/i.test(msg) ||
+            /linkedin authentication required/i.test(msg) ||
+            /please connect your linkedin account/i.test(msg) ||
+            /authentication required - please connect/i.test(msg)) {
+            return;
+        }
+
         // Remove existing notifications
         this.clear();
         
@@ -837,73 +729,11 @@ function ajaxPromise(options) {
     });
 }
 
-// Global error handler for unhandled promise rejections
+// Do not toast on window error / unhandledrejection.
+// CRM Bearer token is the auth source of truth. Old lk-id 401s and
+// LinkedIn/Grammarly page noise must not pop "Connect your LinkedIn account".
 window.addEventListener('unhandledrejection', function(event) {
-    console.error('Unhandled promise rejection:', event.reason);
-    
-    // Prevent the default browser behavior
     event.preventDefault();
-    
-    let errorMessage = 'An unexpected error occurred. Please try again.';
-    
-    // Check if it's a jQuery AJAX error
-    if (event.reason && event.reason.readyState !== undefined) {
-        console.log('🔍 jQuery AJAX error detected:', {
-            readyState: event.reason.readyState,
-            status: event.reason.status,
-            statusText: event.reason.statusText,
-            responseText: event.reason.responseText
-        });
-        
-        // This is a jQuery AJAX error
-        if (event.reason.readyState === 0) {
-            errorMessage = 'Network error - Check your internet connection.';
-        } else if (event.reason.status === 0) {
-            errorMessage = 'Request failed - Server may be unavailable.';
-        } else if (event.reason.status === 429) {
-            errorMessage = 'Rate limit exceeded - Please wait a moment.';
-        } else if (event.reason.status >= 500) {
-            errorMessage = 'Server error - Please try again later.';
-        } else if (event.reason.status === 401) {
-            errorMessage = 'Authentication required - Please Connect your LinkedIn Account ';
-        } else if (event.reason.status === 403) {
-            errorMessage = 'Access denied - You may not have permission.';
-        } else if (event.reason.status === 404) {
-            errorMessage = 'Resource not found - The requested endpoint may not exist.';
-        }
-    } else if (event.reason && event.reason.message) {
-        // This is a regular error
-        if (event.reason.message.includes('timeout')) {
-            errorMessage = 'Request timed out - Please try again.';
-        } else if (event.reason.message.includes('Failed to fetch')) {
-            errorMessage = 'Network error - Check your connection.';
-        } else if (event.reason.message.includes('AbortError')) {
-            errorMessage = 'Request was cancelled - Please try again.';
-        } else if (event.reason.message.includes('CSRF')) {
-            errorMessage = 'Authentication error - Please refresh the page.';
-        }
-    }
-    
-    // Only show notification for non-410 errors
-    if (event.reason && event.reason.status === 410) {
-        console.log('LinkedIn API endpoint no longer available (410 Gone) - this is normal, not showing error notification');
-    } else {
-        // Show notification for other errors
-        if (typeof NotificationSystem !== 'undefined') {
-            NotificationSystem.show('error', errorMessage);
-        } else {
-            console.error('Error:', errorMessage);
-        }
-    }
-    
-    // Log the full error for debugging
-    console.error('Full error details:', event.reason);
-});
-
-// Global error handler for JavaScript errors
-window.addEventListener('error', function(event) {
-    console.error('JavaScript error:', event.error);
-    NotificationSystem.show('error', 'A system error occurred. Please refresh the page.');
 });
 
 // Enhanced API error handling
@@ -915,8 +745,8 @@ const handleApiError = function(error, context = '') {
     if (error.message) {
         if (error.message.includes('Failed to fetch')) {
             userMessage = 'Network connection error. Please check your internet connection.';
-        } else if (error.message.includes('401')) {
-            userMessage = 'Authentication failed. Please log in again.';
+        } else if (error.message.includes('401') || /unauthorized|linkedin id/i.test(error.message)) {
+            return '';
         } else if (error.message.includes('403')) {
             userMessage = 'Access denied. You may not have permission for this action.';
         } else if (error.message.includes('404')) {
@@ -940,12 +770,7 @@ const handleApiSuccess = function(message, context = '') {
     NotificationSystem.show('success', message || 'Operation completed successfully.');
 };
 
-// Authentication status checker
 const checkAuthStatus = function() {
-    if (!linkedinId) {
-        NotificationSystem.show('warning', 'LinkedIn authentication required. Please refresh the page.');
-        return false;
-    }
-    return true;
+    return !!(window.LE2App && window.LE2App.hasToken);
 };
 

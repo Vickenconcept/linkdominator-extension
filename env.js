@@ -1,6 +1,7 @@
 // const PLATFORM_URL='https://sealable-maci-nonmeteorologic.ngrok-free.dev'
 // const LINKEDIN_URL='https://www.linkedin.com'
 // const VOYAGER_API=LINKEDIN_URL+'/voyager/api'
-const PLATFORM_URL='https://linkedempire.com'
+// const PLATFORM_URL='https://app.linkedempire.com'
+const PLATFORM_URL='http://127.0.0.1:8000'
 const LINKEDIN_URL='https://www.linkedin.com'
 const VOYAGER_API=LINKEDIN_URL+'/voyager/api'

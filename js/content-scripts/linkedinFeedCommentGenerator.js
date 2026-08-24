@@ -96,7 +96,7 @@
         .ld-comment-gen-btn {
             position: absolute;
             top: 12px;
-            right: 12px;
+            right: 48px;
             width: 36px;
             height: 36px;
             background: linear-gradient(135deg, #0077b5 0%, #005885 100%);
@@ -707,9 +707,41 @@
     }
 
     /**
+     * Skip LinkedIn ads / promoted cards.
+     * Injecting UI onto ads sits on top of the overflow ("...") control and
+     * LinkedIn then opens the uncloseable "Don't want to see this" dialog.
+     */
+    function isSponsoredOrAd(el) {
+        if (!el || !el.querySelector) return false;
+        if (el.closest && el.closest('.ad-banner-container, .ad-banner, [data-test-id="ad-banner"]')) {
+            return true;
+        }
+        const root = (el.closest && el.closest('.feed-shared-update-v2, .occludable-update, [role="listitem"], .update-components-promo')) || el;
+        const className = String(root.className || '');
+        if (/\bsponsored\b|\bpromoted\b/i.test(className)) return true;
+        if (root.querySelector && root.querySelector(
+            '.update-components-promo, [class*="update-components-promo"], [data-ad-id], .ad-banner-container, .feed-shared-update-v2--is-sponsored, .feed-shared-update-v2--sponsored'
+        )) return true;
+        const header = root.querySelector && root.querySelector(
+            '.update-components-actor, .feed-shared-actor, .update-components-header, .update-components-actor__meta'
+        );
+        if (header) {
+            const labels = header.querySelectorAll('span, a');
+            for (let i = 0; i < labels.length && i < 12; i++) {
+                const t = (labels[i].textContent || '').trim().toLowerCase();
+                if (t === 'promoted' || t === 'sponsored') return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * Add comment generation button to post
      */
     function addCommentButtonToPost(postElement) {
+        if (isSponsoredOrAd(postElement)) {
+            return false;
+        }
         // Verify this is actually a post element
         const isListItem = postElement.getAttribute('role') === 'listitem';
         const isMainFeed = isMainFeedPage(); // Check page type directly
@@ -943,6 +975,7 @@
         if (containerStyle.position === 'static') {
             container.style.position = 'relative';
         }
+        container.style.overflow = 'visible';
         
         // Create button
         const btn = document.createElement('button');
